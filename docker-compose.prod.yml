@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------------------
+# Production compose — full stack (server + MySQL + Redis) for VPS deploys.
+#   docker-compose -f docker-compose.prod.yml up -d
+# Provide secrets via an .env file alongside this compose.
+# ---------------------------------------------------------------------------
+version: '3.8'
+services:
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=mysql://root:${MYSQL_ROOT_PASSWORD:-password}@db:3306/horizon_trade
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH}
+      - COINBASE_KEY_NAME=${COINBASE_KEY_NAME}
+      - COINBASE_PRIVATE_KEY=${COINBASE_PRIVATE_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DRY_RUN=${DRY_RUN:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-password}
+      MYSQL_DATABASE: horizon_trade
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+volumes:
+  mysql_data:
+  redis_data:

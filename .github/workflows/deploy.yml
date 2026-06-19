@@ -1,0 +1,27 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+# Deploys the standalone server. Swap the deploy step for Fly.io / Render / VPS
+# as needed — the build artifact is the Docker image at apps/server/Dockerfile.
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Only run when the Railway token is configured (keeps forks from failing).
+    if: ${{ github.repository_owner != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Docker build
+        run: docker build -f apps/server/Dockerfile -t horizon-trade-server .
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        if: ${{ env.RAILWAY_TOKEN != '' }}
+        run: railway up --service server --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
