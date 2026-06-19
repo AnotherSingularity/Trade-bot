@@ -156,7 +156,9 @@ CI (`.github/workflows/test.yml`) runs typecheck + tests on every PR;
 
 ---
 
-## API surface (tRPC routers)
+## API surface
+
+### tRPC routers (primary — consumed by the mobile app)
 
 | Router     | Key procedures                                                    |
 | ---------- | ----------------------------------------------------------------- |
@@ -165,6 +167,23 @@ CI (`.github/workflows/test.yml`) runs typecheck + tests on every PR;
 | `tokens`   | `list`, `setActive`, `volumeFilter`                               |
 | `history`  | `list` (infinite scroll + filters), `summary`                    |
 | `settings` | `info`, `testConnection`                                          |
+
+### REST compatibility layer (for curl / external integrations)
+
+A thin REST layer mirrors the core procedures (it reuses the same service logic,
+so the two surfaces never drift):
+
+```bash
+# Health
+curl http://localhost:3000/api/health
+
+# Login → JWT
+curl -X POST http://localhost:3000/api/auth/login \
+  -H 'Content-Type: application/json' -d '{"password":"your-password"}'
+
+# Bot status (Bearer auth)
+curl http://localhost:3000/api/trading/status -H "Authorization: Bearer <JWT>"
+```
 
 ---
 

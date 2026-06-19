@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { STRATEGY_VERSION } from '@horizon/shared';
@@ -8,12 +8,15 @@ import { createContext } from './lib/trpc';
 import { createScanWorker } from './jobs/scanJob';
 import { scheduleRecurringScan } from './jobs/queue';
 import { getBotConfig } from './db/queries';
+import { authenticate, getBotStatusDTO } from './lib/services';
+import { requireAuth } from './middleware/auth';
 import { closeDb } from './db';
 
 /**
  * Express server entry point.
  *
- * Mounts the tRPC API under /trpc, exposes a health check, starts the BullMQ
+ * Mounts the type-safe tRPC API under /trpc, a REST compatibility layer under
+ * /api (health, auth, bot status — for curl/integrations), starts the BullMQ
  * scan worker, and re-arms the recurring scan if the bot was running before a
  * restart (durability requirement).
  */
@@ -23,10 +26,42 @@ async function main() {
   app.use(cors());
   app.use(express.json({ limit: '1mb' }));
 
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', version: STRATEGY_VERSION, dryRun: ENV.dryRun });
+  // --- Health (both bare and /api-prefixed) ---
+  const healthHandler = (_req: Request, res: Response) => {
+    res.json({
+      status: 'ok',
+      version: STRATEGY_VERSION,
+      dryRun: ENV.dryRun,
+      timestamp: new Date().toISOString(),
+    });
+  };
+  app.get('/health', healthHandler);
+  app.get('/api/health', healthHandler);
+
+  // --- REST compatibility layer (mirrors core tRPC procedures) ---
+  app.post('/api/auth/login', async (req: Request, res: Response) => {
+    const password = req.body?.password as string | undefined;
+    if (!password) {
+      res.status(400).json({ error: 'password is required' });
+      return;
+    }
+    try {
+      const token = await authenticate(password);
+      if (!token) {
+        res.status(401).json({ error: 'Invalid password' });
+        return;
+      }
+      res.json({ token, expiresIn: 0 });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Login failed' });
+    }
   });
 
+  app.get('/api/trading/status', requireAuth, async (_req: Request, res: Response) => {
+    res.json(await getBotStatusDTO());
+  });
+
+  // --- tRPC API (primary surface, consumed by the mobile app) ---
   app.use(
     '/trpc',
     createExpressMiddleware({
@@ -37,6 +72,9 @@ async function main() {
 
   // Start the scan worker (processes the BullMQ queue).
   const worker = createScanWorker();
+  worker.on('ready', () => {
+    console.log('[server] BullMQ scan worker ready (connected to Redis)');
+  });
 
   // If the bot was running before a restart, re-register the recurring scan.
   try {

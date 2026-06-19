@@ -1,13 +1,11 @@
 import { z } from 'zod';
 import {
-  STRATEGY,
   type BotStatus,
   type PortfolioSummary,
   type Position,
   type ActivityLogEntry,
 } from '@horizon/shared';
 import {
-  countOpenPositions,
   getBotConfig,
   getOpenPositions,
   getRecentActivity,
@@ -17,29 +15,14 @@ import {
   updateBotConfig,
 } from '../db/queries';
 import { getCashBalance, getProduct } from '../trading/coinbase';
-import { getMarketWindow } from '../trading/marketWindow';
 import { closePositionAtPrice } from '../trading/executor';
 import { scheduleRecurringScan, triggerImmediateScan } from '../jobs/queue';
+import { getBotStatusDTO } from '../lib/services';
 import { ENV } from '../env';
 import { protectedProcedure, router } from '../lib/trpc';
 
-/** Builds the live BotStatus DTO from config + open-position counts. */
-async function buildBotStatus(): Promise<BotStatus> {
-  const cfg = await getBotConfig();
-  const openPositions = await countOpenPositions();
-  const cbActive = Boolean(cfg.circuitBreakerUntil && cfg.circuitBreakerUntil > new Date());
-  return {
-    isRunning: cfg.isRunning,
-    isPaused: cfg.isPaused,
-    consecutiveLosses: cfg.consecutiveLosses,
-    circuitBreakerUntil: cfg.circuitBreakerUntil ? cfg.circuitBreakerUntil.toISOString() : null,
-    circuitBreakerActive: cbActive,
-    openPositions,
-    maxPositions: STRATEGY.MAX_OPEN_POSITIONS,
-    marketWindow: getMarketWindow(),
-    updatedAt: cfg.updatedAt.toISOString(),
-  };
-}
+/** Builds the live BotStatus DTO (shared with the REST layer). */
+const buildBotStatus = (): Promise<BotStatus> => getBotStatusDTO();
 
 /** Enriches open positions with live price + unrealized P&L. */
 async function buildOpenPositions(): Promise<Position[]> {
