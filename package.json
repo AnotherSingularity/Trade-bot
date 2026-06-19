@@ -1,0 +1,25 @@
+{
+  "name": "horizon-trade",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Horizon Trade — autonomous crypto trading bot (mobile + standalone backend)",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "db:push": "turbo run db:push --filter=server"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "packageManager": "npm@10.8.2",
+  "engines": {
+    "node": ">=20"
+  }
+}

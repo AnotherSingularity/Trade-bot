@@ -1,0 +1,38 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "NODE_ENV",
+    "PORT",
+    "JWT_SECRET",
+    "ADMIN_PASSWORD_HASH",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "COINBASE_KEY_NAME",
+    "COINBASE_PRIVATE_KEY",
+    "ANTHROPIC_API_KEY",
+    "EXPO_PUBLIC_API_URL"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".expo/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    },
+    "db:push": {
+      "cache": false
+    }
+  }
+}

@@ -1,0 +1,29 @@
+# ---------------------------------------------------------------------------
+# Root compose for local development — starts MySQL + Redis only.
+# Run the server/mobile via `npm run dev` against these services.
+#   docker-compose up -d
+# ---------------------------------------------------------------------------
+version: '3.8'
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: horizon_trade
+    ports:
+      - '3306:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+
+volumes:
+  mysql_data:
