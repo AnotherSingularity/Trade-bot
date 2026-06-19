@@ -28,4 +28,6 @@ COPY --from=builder /repo/apps/server/package.json ./package.json
 COPY --from=builder /repo/apps/server/drizzle ./drizzle
 
 EXPOSE 3000
-CMD ["node", "dist/index.js"]
+# Apply pending DB migrations, then start the server. Safe to re-run: the
+# migration runner is idempotent (tracks applied migrations).
+CMD ["sh", "-c", "node dist/migrate.js && node dist/index.js"]
