@@ -146,7 +146,10 @@ built from the repo root). Pick one:
 **Fly.io** — `fly launch`, `fly secrets set …`, `fly deploy`.
 **Any VPS** — `docker-compose -f docker-compose.prod.yml up -d`.
 
-Mobile builds use EAS: `eas build --platform android|ios`.
+Mobile builds use EAS (profiles defined in `apps/mobile/eas.json`):
+- `eas build --profile development --platform ios` — dev client / simulator
+- `eas build --profile preview --platform android` — internal-distribution APK (direct install)
+- `eas build --profile production --platform android|ios` — store builds
 
 CI (`.github/workflows/test.yml`) runs typecheck + tests on every PR;
 `deploy.yml` builds the image and deploys on merge to `main`.
