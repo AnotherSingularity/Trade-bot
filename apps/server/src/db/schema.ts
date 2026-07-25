@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   mysqlTable,
   int,
@@ -10,6 +11,7 @@ import {
   uniqueIndex,
   index,
   json,
+  foreignKey,
 } from 'drizzle-orm/mysql-core';
 
 /**
@@ -295,13 +297,20 @@ export const positions = mysqlTable(
 
     openedAt: timestamp('openedAt').defaultNow().notNull(),
     closedAt: timestamp('closedAt'),
+
+    // Phase 1.1.a §G: generated column used by the UNIQUE index below to
+    // enforce "at most one open position per token" at the database. Non-null
+    // only when status='open'; NULL values are permitted to repeat, so
+    // arbitrarily many closed rows per token coexist.
+    openTokenKey: varchar('openTokenKey', { length: 20 }).generatedAlwaysAs(
+      sql`(case when \`status\` = 'open' then \`token\` else NULL end)`,
+      { mode: 'virtual' },
+    ),
   },
   (table) => ({
     tokenIdx: index('positions_token_idx').on(table.token),
     statusIdx: index('positions_status_idx').on(table.status),
-    // NOTE: MySQL unique on (token, status) would prevent two closed rows for
-    // the same token. We enforce "one open per token" in the application layer
-    // (via the leader lease + a SELECT ... FOR UPDATE check inside the tx).
+    openTokenUq: uniqueIndex('positions_open_token_uq').on(table.openTokenKey),
   }),
 );
 
@@ -560,6 +569,22 @@ export const executionCostForecasts = mysqlTable(
     candidateIdx: index('execution_cost_forecasts_candidateId_idx').on(t.candidateId),
     feeTierIdx: index('execution_cost_forecasts_feeTierSnapshotId_idx').on(t.feeTierSnapshotId),
     createdIdx: index('execution_cost_forecasts_createdAt_idx').on(t.createdAt),
+    // Named FKs to match the original migration-0002 constraint names so
+    // drizzle-kit's snapshot equals the actual DB state.
+    candidateFk: foreignKey({
+      name: 'execution_cost_forecasts_candidateId_fk',
+      columns: [t.candidateId],
+      foreignColumns: [signalCandidates.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    feeTierFk: foreignKey({
+      name: 'execution_cost_forecasts_feeTierSnapshotId_fk',
+      columns: [t.feeTierSnapshotId],
+      foreignColumns: [feeTierSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
   }),
 );
 
@@ -604,6 +629,21 @@ export const quantitativeDecisions = mysqlTable(
   (t) => ({
     candidateIdx: index('quantitative_decisions_candidateId_idx').on(t.candidateId),
     decisionIdx: index('quantitative_decisions_decision_idx').on(t.decision, t.createdAt),
+    // Named FKs to match the original migration-0002 constraint names.
+    candidateFk: foreignKey({
+      name: 'quantitative_decisions_candidateId_fk',
+      columns: [t.candidateId],
+      foreignColumns: [signalCandidates.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    costForecastFk: foreignKey({
+      name: 'quantitative_decisions_costForecastId_fk',
+      columns: [t.costForecastId],
+      foreignColumns: [executionCostForecasts.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
   }),
 );
 

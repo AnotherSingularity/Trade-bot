@@ -1,0 +1,559 @@
+{
+  "contentHash": "3d0d3459e614ab765cf6a5c9ee19e2f9688bb809e5352808935dfcd3be6bb394",
+  "drizzleKitVersion": "0.31.10",
+  "fingerprintVersion": "1",
+  "tables": [
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('scan','signal','trade','system','error')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "type",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(20)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "token",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(50)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "action",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "detail",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "tokensScanned",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "passedVolumeFilter",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "passedSignalThreshold",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 9
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "activity_log"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "isRunning",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "isPaused",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "consecutiveLosses",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "circuitBreakerUntil",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "on update current_timestamp()",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "updatedAt",
+          "ordinal": 6
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "bot_config"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(20)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "token",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('reversion','breakout','macro')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "mode",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "entryPrice",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "quantity",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(5,2)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "allocationPct",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "takeProfitPrice",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "stopLossPrice",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(5,2)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "takeProfitPct",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(5,2)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "stopLossPct",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "claudeReason",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(128)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "coinbaseOrderId",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": "'open'",
+          "columnType": "enum('open','closed')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "status",
+          "ordinal": 13
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "openedAt",
+          "ordinal": 14
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "closedAt",
+          "ordinal": 15
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "positions"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(20)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "token",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "totalTrades",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "wins",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "losses",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "0.00",
+          "columnType": "decimal(5,2)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "winRate",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "1",
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "isActive",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "on update current_timestamp()",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "updatedAt",
+          "ordinal": 8
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        },
+        {
+          "columns": [
+            "token"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "name": "token_stats_token_unique"
+        }
+      ],
+      "name": "token_stats"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(20)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "token",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('reversion','breakout','macro')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "mode",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('buy','sell')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "side",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "entryPrice",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "exitPrice",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "quantity",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "pnlDollars",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(8,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "pnlPct",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "'open'",
+          "columnType": "enum('win','loss','open')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "outcome",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "claudeReason",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(128)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "coinbaseOrderId",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "executedAt",
+          "ordinal": 13
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "trades"
+    }
+  ]
+}

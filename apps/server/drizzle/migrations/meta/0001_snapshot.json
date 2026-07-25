@@ -1,0 +1,1157 @@
+{
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  },
+  "dialect": "mysql",
+  "id": "3469101d-e84a-48a0-7adb-6c2804e27df2",
+  "internal": {
+    "indexes": {},
+    "tables": {}
+  },
+  "prevId": "27e2827c-762d-fb1c-8912-5b808743dca6",
+  "tables": {
+    "activity_log": {
+      "checkConstraint": {},
+      "columns": {
+        "action": {
+          "autoincrement": false,
+          "name": "action",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "varchar(60)"
+        },
+        "createdAt": {
+          "autoincrement": false,
+          "default": "(now())",
+          "name": "createdAt",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "timestamp"
+        },
+        "detail": {
+          "autoincrement": false,
+          "name": "detail",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "text"
+        },
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "passedSignalThreshold": {
+          "autoincrement": false,
+          "name": "passedSignalThreshold",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "passedVolumeFilter": {
+          "autoincrement": false,
+          "name": "passedVolumeFilter",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "severity": {
+          "autoincrement": false,
+          "default": "'info'",
+          "name": "severity",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('info','warn','high','critical')"
+        },
+        "token": {
+          "autoincrement": false,
+          "name": "token",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "varchar(20)"
+        },
+        "tokensScanned": {
+          "autoincrement": false,
+          "name": "tokensScanned",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "type": {
+          "autoincrement": false,
+          "name": "type",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('scan','signal','trade','system','error','reconciliation','security')"
+        }
+      },
+      "compositePrimaryKeys": {
+        "activity_log_id": {
+          "columns": [
+            "id"
+          ],
+          "name": "activity_log_id"
+        }
+      },
+      "foreignKeys": {},
+      "indexes": {},
+      "name": "activity_log",
+      "uniqueConstraints": {}
+    },
+    "bot_config": {
+      "checkConstraint": {},
+      "columns": {
+        "circuitBreakerUntil": {
+          "autoincrement": false,
+          "name": "circuitBreakerUntil",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "timestamp"
+        },
+        "consecutiveLosses": {
+          "autoincrement": false,
+          "default": 0,
+          "name": "consecutiveLosses",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "isPaused": {
+          "autoincrement": false,
+          "default": false,
+          "name": "isPaused",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "boolean"
+        },
+        "isRunning": {
+          "autoincrement": false,
+          "default": false,
+          "name": "isRunning",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "boolean"
+        },
+        "reconciledAt": {
+          "autoincrement": false,
+          "name": "reconciledAt",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "timestamp"
+        },
+        "reconciliationDetail": {
+          "autoincrement": false,
+          "name": "reconciliationDetail",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "text"
+        },
+        "reconciliationStatus": {
+          "autoincrement": false,
+          "default": "'pending'",
+          "name": "reconciliationStatus",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('pending','in_progress','ok','failed')"
+        },
+        "updatedAt": {
+          "autoincrement": false,
+          "default": "(now())",
+          "name": "updatedAt",
+          "notNull": true,
+          "onUpdate": true,
+          "primaryKey": false,
+          "type": "timestamp"
+        }
+      },
+      "compositePrimaryKeys": {
+        "bot_config_id": {
+          "columns": [
+            "id"
+          ],
+          "name": "bot_config_id"
+        }
+      },
+      "foreignKeys": {},
+      "indexes": {},
+      "name": "bot_config",
+      "uniqueConstraints": {}
+    },
+    "cash_ledger": {
+      "checkConstraint": {},
+      "columns": {
+        "createdAt": {
+          "autoincrement": false,
+          "default": "(now())",
+          "name": "createdAt",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "timestamp"
+        },
+        "deltaUsd": {
+          "autoincrement": false,
+          "name": "deltaUsd",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "detail": {
+          "autoincrement": false,
+          "name": "detail",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "text"
+        },
+        "dryRun": {
+          "autoincrement": false,
+          "name": "dryRun",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "boolean"
+        },
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "orderIntentId": {
+          "autoincrement": false,
+          "name": "orderIntentId",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "positionId": {
+          "autoincrement": false,
+          "name": "positionId",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "reason": {
+          "autoincrement": false,
+          "name": "reason",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('initial_fund','buy_cost','buy_fee','buy_slippage','sell_proceeds','sell_fee','sell_slippage','manual_adjustment')"
+        }
+      },
+      "compositePrimaryKeys": {
+        "cash_ledger_id": {
+          "columns": [
+            "id"
+          ],
+          "name": "cash_ledger_id"
+        }
+      },
+      "foreignKeys": {},
+      "indexes": {
+        "cash_ledger_created_at_idx": {
+          "columns": [
+            "createdAt"
+          ],
+          "isUnique": false,
+          "name": "cash_ledger_created_at_idx"
+        },
+        "cash_ledger_dryrun_idx": {
+          "columns": [
+            "dryRun"
+          ],
+          "isUnique": false,
+          "name": "cash_ledger_dryrun_idx"
+        }
+      },
+      "name": "cash_ledger",
+      "uniqueConstraints": {}
+    },
+    "fills": {
+      "checkConstraint": {},
+      "columns": {
+        "createdAt": {
+          "autoincrement": false,
+          "default": "(now())",
+          "name": "createdAt",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "timestamp"
+        },
+        "exchangeFillId": {
+          "autoincrement": false,
+          "name": "exchangeFillId",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "varchar(128)"
+        },
+        "exchangeOrderId": {
+          "autoincrement": false,
+          "name": "exchangeOrderId",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "varchar(128)"
+        },
+        "fee": {
+          "autoincrement": false,
+          "name": "fee",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "feeCurrency": {
+          "autoincrement": false,
+          "name": "feeCurrency",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "varchar(10)"
+        },
+        "fillPrice": {
+          "autoincrement": false,
+          "name": "fillPrice",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "filledSize": {
+          "autoincrement": false,
+          "name": "filledSize",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "orderIntentId": {
+          "autoincrement": false,
+          "name": "orderIntentId",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "rawResponse": {
+          "autoincrement": false,
+          "name": "rawResponse",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "text"
+        },
+        "side": {
+          "autoincrement": false,
+          "name": "side",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('BUY','SELL')"
+        },
+        "token": {
+          "autoincrement": false,
+          "name": "token",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "varchar(20)"
+        },
+        "tradeTime": {
+          "autoincrement": false,
+          "name": "tradeTime",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "timestamp"
+        }
+      },
+      "compositePrimaryKeys": {
+        "fills_id": {
+          "columns": [
+            "id"
+          ],
+          "name": "fills_id"
+        }
+      },
+      "foreignKeys": {},
+      "indexes": {
+        "fills_exchange_uq": {
+          "columns": [
+            "exchangeFillId"
+          ],
+          "isUnique": true,
+          "name": "fills_exchange_uq"
+        },
+        "fills_order_idx": {
+          "columns": [
+            "orderIntentId"
+          ],
+          "isUnique": false,
+          "name": "fills_order_idx"
+        }
+      },
+      "name": "fills",
+      "uniqueConstraints": {}
+    },
+    "order_intents": {
+      "checkConstraint": {},
+      "columns": {
+        "baseSize": {
+          "autoincrement": false,
+          "name": "baseSize",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "clientOrderId": {
+          "autoincrement": false,
+          "name": "clientOrderId",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "varchar(64)"
+        },
+        "createdAt": {
+          "autoincrement": false,
+          "default": "(now())",
+          "name": "createdAt",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "timestamp"
+        },
+        "dryRun": {
+          "autoincrement": false,
+          "name": "dryRun",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "boolean"
+        },
+        "errorCode": {
+          "autoincrement": false,
+          "name": "errorCode",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "varchar(128)"
+        },
+        "errorMessage": {
+          "autoincrement": false,
+          "name": "errorMessage",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "text"
+        },
+        "exchangeOrderId": {
+          "autoincrement": false,
+          "name": "exchangeOrderId",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "varchar(128)"
+        },
+        "failureClass": {
+          "autoincrement": false,
+          "name": "failureClass",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "enum('definitely_rejected','definitely_not_submitted','submitted','unknown','retryable_transport','non_retryable_validation')"
+        },
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "mode": {
+          "autoincrement": false,
+          "name": "mode",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('reversion','breakout','macro')"
+        },
+        "orderType": {
+          "autoincrement": false,
+          "name": "orderType",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('market_ioc','limit','stop_limit','bracket_tp','bracket_sl')"
+        },
+        "positionId": {
+          "autoincrement": false,
+          "name": "positionId",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "productId": {
+          "autoincrement": false,
+          "name": "productId",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "varchar(30)"
+        },
+        "purpose": {
+          "autoincrement": false,
+          "name": "purpose",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('entry','take_profit','stop_loss','manual_exit','emergency_exit')"
+        },
+        "quoteSize": {
+          "autoincrement": false,
+          "name": "quoteSize",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "rawResponse": {
+          "autoincrement": false,
+          "name": "rawResponse",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "text"
+        },
+        "side": {
+          "autoincrement": false,
+          "name": "side",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('BUY','SELL')"
+        },
+        "state": {
+          "autoincrement": false,
+          "default": "'created'",
+          "name": "state",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('created','previewed','submitted','acknowledged','partially_filled','filled','rejected','canceled','failed','unknown')"
+        },
+        "token": {
+          "autoincrement": false,
+          "name": "token",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "varchar(20)"
+        },
+        "updatedAt": {
+          "autoincrement": false,
+          "default": "(now())",
+          "name": "updatedAt",
+          "notNull": true,
+          "onUpdate": true,
+          "primaryKey": false,
+          "type": "timestamp"
+        }
+      },
+      "compositePrimaryKeys": {
+        "order_intents_id": {
+          "columns": [
+            "id"
+          ],
+          "name": "order_intents_id"
+        }
+      },
+      "foreignKeys": {},
+      "indexes": {
+        "order_intents_client_uq": {
+          "columns": [
+            "clientOrderId"
+          ],
+          "isUnique": true,
+          "name": "order_intents_client_uq"
+        },
+        "order_intents_exchange_uq": {
+          "columns": [
+            "exchangeOrderId"
+          ],
+          "isUnique": true,
+          "name": "order_intents_exchange_uq"
+        },
+        "order_intents_position_idx": {
+          "columns": [
+            "positionId"
+          ],
+          "isUnique": false,
+          "name": "order_intents_position_idx"
+        },
+        "order_intents_state_idx": {
+          "columns": [
+            "state"
+          ],
+          "isUnique": false,
+          "name": "order_intents_state_idx"
+        }
+      },
+      "name": "order_intents",
+      "uniqueConstraints": {}
+    },
+    "positions": {
+      "checkConstraint": {},
+      "columns": {
+        "allocationPct": {
+          "autoincrement": false,
+          "name": "allocationPct",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(5,2)"
+        },
+        "avgEntryPrice": {
+          "autoincrement": false,
+          "name": "avgEntryPrice",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "claudeConfidence": {
+          "autoincrement": false,
+          "name": "claudeConfidence",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "decimal(5,4)"
+        },
+        "claudeModel": {
+          "autoincrement": false,
+          "name": "claudeModel",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "varchar(64)"
+        },
+        "claudeReason": {
+          "autoincrement": false,
+          "name": "claudeReason",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "text"
+        },
+        "closedAt": {
+          "autoincrement": false,
+          "name": "closedAt",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "timestamp"
+        },
+        "entryFees": {
+          "autoincrement": false,
+          "name": "entryFees",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "entryOrderIntentId": {
+          "autoincrement": false,
+          "name": "entryOrderIntentId",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "entryQuoteSpent": {
+          "autoincrement": false,
+          "name": "entryQuoteSpent",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "filledQuantity": {
+          "autoincrement": false,
+          "name": "filledQuantity",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "lifecycleState": {
+          "autoincrement": false,
+          "default": "'opening'",
+          "name": "lifecycleState",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('opening','open','closing','closed','reconciling')"
+        },
+        "mode": {
+          "autoincrement": false,
+          "name": "mode",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('reversion','breakout','macro')"
+        },
+        "openedAt": {
+          "autoincrement": false,
+          "default": "(now())",
+          "name": "openedAt",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "timestamp"
+        },
+        "protectionMode": {
+          "autoincrement": false,
+          "default": "'polling_fallback'",
+          "name": "protectionMode",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('exchange_bracket','polling_fallback','unprotected')"
+        },
+        "protectiveSlIntentId": {
+          "autoincrement": false,
+          "name": "protectiveSlIntentId",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "protectiveTpIntentId": {
+          "autoincrement": false,
+          "name": "protectiveTpIntentId",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "status": {
+          "autoincrement": false,
+          "default": "'open'",
+          "name": "status",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('open','closed')"
+        },
+        "stopLossPct": {
+          "autoincrement": false,
+          "name": "stopLossPct",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(5,2)"
+        },
+        "stopLossPrice": {
+          "autoincrement": false,
+          "name": "stopLossPrice",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "strategyVersion": {
+          "autoincrement": false,
+          "name": "strategyVersion",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "varchar(20)"
+        },
+        "takeProfitPct": {
+          "autoincrement": false,
+          "name": "takeProfitPct",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(5,2)"
+        },
+        "takeProfitPrice": {
+          "autoincrement": false,
+          "name": "takeProfitPrice",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "token": {
+          "autoincrement": false,
+          "name": "token",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "varchar(20)"
+        },
+        "version": {
+          "autoincrement": false,
+          "default": 0,
+          "name": "version",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        }
+      },
+      "compositePrimaryKeys": {
+        "positions_id": {
+          "columns": [
+            "id"
+          ],
+          "name": "positions_id"
+        }
+      },
+      "foreignKeys": {},
+      "indexes": {
+        "positions_status_idx": {
+          "columns": [
+            "status"
+          ],
+          "isUnique": false,
+          "name": "positions_status_idx"
+        },
+        "positions_token_idx": {
+          "columns": [
+            "token"
+          ],
+          "isUnique": false,
+          "name": "positions_token_idx"
+        }
+      },
+      "name": "positions",
+      "uniqueConstraints": {}
+    },
+    "round_trips": {
+      "checkConstraint": {},
+      "columns": {
+        "closedAt": {
+          "autoincrement": false,
+          "name": "closedAt",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "timestamp"
+        },
+        "createdAt": {
+          "autoincrement": false,
+          "default": "(now())",
+          "name": "createdAt",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "timestamp"
+        },
+        "entryFees": {
+          "autoincrement": false,
+          "name": "entryFees",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "entryValueGross": {
+          "autoincrement": false,
+          "name": "entryValueGross",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "exitFees": {
+          "autoincrement": false,
+          "name": "exitFees",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "exitReason": {
+          "autoincrement": false,
+          "name": "exitReason",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('take_profit','stop_loss','early_exit','manual','emergency','reconciled')"
+        },
+        "exitValueGross": {
+          "autoincrement": false,
+          "name": "exitValueGross",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "mode": {
+          "autoincrement": false,
+          "name": "mode",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('reversion','breakout','macro')"
+        },
+        "openedAt": {
+          "autoincrement": false,
+          "name": "openedAt",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "timestamp"
+        },
+        "outcome": {
+          "autoincrement": false,
+          "name": "outcome",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('win','loss','flat')"
+        },
+        "positionId": {
+          "autoincrement": false,
+          "name": "positionId",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "realizedNetPnl": {
+          "autoincrement": false,
+          "name": "realizedNetPnl",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "realizedNetPnlPct": {
+          "autoincrement": false,
+          "name": "realizedNetPnlPct",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(10,4)"
+        },
+        "token": {
+          "autoincrement": false,
+          "name": "token",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "varchar(20)"
+        }
+      },
+      "compositePrimaryKeys": {
+        "round_trips_id": {
+          "columns": [
+            "id"
+          ],
+          "name": "round_trips_id"
+        }
+      },
+      "foreignKeys": {},
+      "indexes": {
+        "round_trips_closed_at_idx": {
+          "columns": [
+            "closedAt"
+          ],
+          "isUnique": false,
+          "name": "round_trips_closed_at_idx"
+        },
+        "round_trips_outcome_idx": {
+          "columns": [
+            "outcome"
+          ],
+          "isUnique": false,
+          "name": "round_trips_outcome_idx"
+        },
+        "round_trips_position_uq": {
+          "columns": [
+            "positionId"
+          ],
+          "isUnique": true,
+          "name": "round_trips_position_uq"
+        },
+        "round_trips_token_idx": {
+          "columns": [
+            "token"
+          ],
+          "isUnique": false,
+          "name": "round_trips_token_idx"
+        }
+      },
+      "name": "round_trips",
+      "uniqueConstraints": {}
+    },
+    "token_stats": {
+      "checkConstraint": {},
+      "columns": {
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "isActive": {
+          "autoincrement": false,
+          "default": true,
+          "name": "isActive",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "boolean"
+        },
+        "losses": {
+          "autoincrement": false,
+          "default": 0,
+          "name": "losses",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "token": {
+          "autoincrement": false,
+          "name": "token",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "varchar(20)"
+        },
+        "totalTrades": {
+          "autoincrement": false,
+          "default": 0,
+          "name": "totalTrades",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "updatedAt": {
+          "autoincrement": false,
+          "default": "(now())",
+          "name": "updatedAt",
+          "notNull": true,
+          "onUpdate": true,
+          "primaryKey": false,
+          "type": "timestamp"
+        },
+        "winRate": {
+          "autoincrement": false,
+          "default": "'0'",
+          "name": "winRate",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(5,2)"
+        },
+        "wins": {
+          "autoincrement": false,
+          "default": 0,
+          "name": "wins",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        }
+      },
+      "compositePrimaryKeys": {
+        "token_stats_id": {
+          "columns": [
+            "id"
+          ],
+          "name": "token_stats_id"
+        }
+      },
+      "foreignKeys": {},
+      "indexes": {},
+      "name": "token_stats",
+      "uniqueConstraints": {
+        "token_stats_token_unique": {
+          "columns": [
+            "token"
+          ],
+          "name": "token_stats_token_unique"
+        }
+      }
+    },
+    "trades": {
+      "checkConstraint": {},
+      "columns": {
+        "claudeReason": {
+          "autoincrement": false,
+          "name": "claudeReason",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "text"
+        },
+        "coinbaseOrderId": {
+          "autoincrement": false,
+          "name": "coinbaseOrderId",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "varchar(128)"
+        },
+        "entryPrice": {
+          "autoincrement": false,
+          "name": "entryPrice",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "executedAt": {
+          "autoincrement": false,
+          "default": "(now())",
+          "name": "executedAt",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "timestamp"
+        },
+        "exitPrice": {
+          "autoincrement": false,
+          "name": "exitPrice",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "id": {
+          "autoincrement": true,
+          "name": "id",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "int"
+        },
+        "mode": {
+          "autoincrement": false,
+          "name": "mode",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('reversion','breakout','macro')"
+        },
+        "outcome": {
+          "autoincrement": false,
+          "default": "'open'",
+          "name": "outcome",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('win','loss','open')"
+        },
+        "pnlDollars": {
+          "autoincrement": false,
+          "name": "pnlDollars",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "decimal(10,4)"
+        },
+        "pnlPct": {
+          "autoincrement": false,
+          "name": "pnlPct",
+          "notNull": false,
+          "primaryKey": false,
+          "type": "decimal(8,4)"
+        },
+        "quantity": {
+          "autoincrement": false,
+          "name": "quantity",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "decimal(20,8)"
+        },
+        "side": {
+          "autoincrement": false,
+          "name": "side",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "enum('buy','sell')"
+        },
+        "token": {
+          "autoincrement": false,
+          "name": "token",
+          "notNull": true,
+          "primaryKey": false,
+          "type": "varchar(20)"
+        }
+      },
+      "compositePrimaryKeys": {
+        "trades_id": {
+          "columns": [
+            "id"
+          ],
+          "name": "trades_id"
+        }
+      },
+      "foreignKeys": {},
+      "indexes": {},
+      "name": "trades",
+      "uniqueConstraints": {}
+    }
+  },
+  "version": "5",
+  "views": {}
+}
