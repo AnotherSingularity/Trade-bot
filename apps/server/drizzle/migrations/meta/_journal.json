@@ -64,6 +64,13 @@
       "when": 1786000000000,
       "tag": "0008_phase1_gate3b_cash_flow_cost_model",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1786100000000,
+      "tag": "0009_phase1_gate3c_protection_matrix",
+      "breakpoints": true
     }
   ]
 }

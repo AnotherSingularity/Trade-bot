@@ -7,6 +7,11 @@ import {
   lineageEvents,
   marketObservations,
   outcomeLabels,
+  protectionCapabilities,
+  protectionEvents,
+  protectionInstances,
+  protectionPolicyVersions,
+  protectionValidationRuns,
   scanRuns,
   setupEvaluations,
   strategyRoutingDecisions,
@@ -15,6 +20,11 @@ import {
   type LineageEventInsert,
   type MarketObservationRow,
   type OutcomeLabelRow,
+  type ProtectionCapabilityRow,
+  type ProtectionEventRow,
+  type ProtectionInstanceRow,
+  type ProtectionPolicyVersionRow,
+  type ProtectionValidationRunRow,
   type ScanRunRow,
   type SetupEvaluationRow,
   type StrategyRoutingDecisionRow,
@@ -581,6 +591,7 @@ export async function getDecisionChainAggregate(chainId: number) {
     .from(outcomeLabels)
     .where(eq(outcomeLabels.decisionChainId, chainId))
     .orderBy(outcomeLabels.labelVersion);
+  const protection = await loadProtectionChain(chainId);
   return {
     chain,
     scan: scan ?? null,
@@ -590,6 +601,76 @@ export async function getDecisionChainAggregate(chainId: number) {
     routing: routing ?? null,
     events,
     outcomes,
+    protection,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1.1 Gate 3C — protection aggregate for the audit route.
+// ---------------------------------------------------------------------------
+export interface ProtectionChainAggregate {
+  instance: ProtectionInstanceRow | null;
+  policy: ProtectionPolicyVersionRow | null;
+  capability: ProtectionCapabilityRow | null;
+  validationRuns: ProtectionValidationRunRow[];
+  events: ProtectionEventRow[];
+  legStates: {
+    takeProfit: ProtectionInstanceRow['takeProfitLegState'];
+    stopLoss: ProtectionInstanceRow['stopLossLegState'];
+  } | null;
+  degradationReason: string | null;
+}
+
+async function loadProtectionChain(chainId: number): Promise<ProtectionChainAggregate> {
+  const [instance] = await db
+    .select()
+    .from(protectionInstances)
+    .where(eq(protectionInstances.decisionChainId, chainId))
+    .limit(1);
+  if (!instance) {
+    return {
+      instance: null,
+      policy: null,
+      capability: null,
+      validationRuns: [],
+      events: [],
+      legStates: null,
+      degradationReason: null,
+    };
+  }
+  const [policy] = await db
+    .select()
+    .from(protectionPolicyVersions)
+    .where(eq(protectionPolicyVersions.id, instance.policyVersionId))
+    .limit(1);
+  const [capability] = await db
+    .select()
+    .from(protectionCapabilities)
+    .where(eq(protectionCapabilities.id, instance.capabilityId))
+    .limit(1);
+  const validationRuns = capability
+    ? await db
+        .select()
+        .from(protectionValidationRuns)
+        .where(eq(protectionValidationRuns.capabilityId, capability.id))
+        .orderBy(protectionValidationRuns.startedAt)
+    : [];
+  const events = await db
+    .select()
+    .from(protectionEvents)
+    .where(eq(protectionEvents.protectionInstanceId, instance.id))
+    .orderBy(protectionEvents.eventTime);
+  return {
+    instance,
+    policy: policy ?? null,
+    capability: capability ?? null,
+    validationRuns,
+    events,
+    legStates: {
+      takeProfit: instance.takeProfitLegState,
+      stopLoss: instance.stopLossLegState,
+    },
+    degradationReason: instance.state === 'degraded' ? instance.failureReason : null,
   };
 }
 

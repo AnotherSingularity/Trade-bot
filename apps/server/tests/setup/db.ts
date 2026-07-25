@@ -29,6 +29,12 @@ export async function resetDatabase(): Promise<void> {
       'fee_tier_snapshots',
       // Phase 1.1 Gate 3B addition.
       'forecast_vs_realized_attributions',
+      // Phase 1.1 Gate 3C additions — child tables first (FK order).
+      'protection_events',
+      'protection_instances',
+      'protection_validation_runs',
+      'protection_capabilities',
+      'protection_policy_versions',
       // Phase 1.1.b additions.
       'execution_fences',
       'reconciliation_runs',

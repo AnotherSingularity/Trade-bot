@@ -1248,6 +1248,266 @@ export const forecastVsRealizedAttributions = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Phase 1.1 Gate 3C — protection capability + validation + instance + events
+// ---------------------------------------------------------------------------
+export const protectionPolicyVersions = mysqlTable(
+  'protection_policy_versions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    version: varchar('version', { length: 32 }).notNull(),
+    status: mysqlEnum('status', ['draft', 'active', 'superseded', 'retired']).notNull().default('draft'),
+    description: text('description'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    activatedAt: timestamp('activatedAt'),
+    supersedesPolicyId: int('supersedesPolicyId'),
+  },
+  (t) => ({
+    versionUq: uniqueIndex('protection_policy_version_uq').on(t.version),
+    statusIdx: index('protection_policy_status_idx').on(t.status),
+  }),
+);
+
+export const protectionCapabilities = mysqlTable(
+  'protection_capabilities',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyVersionId: int('policyVersionId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    side: mysqlEnum('side', ['BUY', 'SELL']).notNull(),
+    entryOrderType: varchar('entryOrderType', { length: 32 }).notNull(),
+    timeInForce: varchar('timeInForce', { length: 16 }).notNull(),
+    protectionType: mysqlEnum('protectionType', [
+      'attached_trigger_bracket_gtc',
+      'independent_stop_limit',
+      'independent_take_profit',
+      'independent_bracket',
+      'application_polling',
+      'none',
+    ]).notNull(),
+    capabilityState: mysqlEnum('capabilityState', [
+      'unknown',
+      'documented_unverified',
+      'preview_supported',
+      'preview_rejected',
+      'shadow_validated',
+      'sandbox_validated',
+      'live_canary_validated',
+      'unsupported',
+      'temporarily_degraded',
+    ])
+      .notNull()
+      .default('unknown'),
+    source: varchar('source', { length: 64 }).notNull(),
+    validatedAt: timestamp('validatedAt'),
+    expiresAt: timestamp('expiresAt'),
+    evidenceHash: varchar('evidenceHash', { length: 64 }),
+    limitations: text('limitations'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    identityUq: uniqueIndex('protection_capability_identity_uq').on(
+      t.policyVersionId,
+      t.productId,
+      t.side,
+      t.entryOrderType,
+      t.timeInForce,
+      t.protectionType,
+    ),
+    stateIdx: index('protection_capability_state_idx').on(t.capabilityState),
+    productIdx: index('protection_capability_product_idx').on(t.productId),
+    policyFk: foreignKey({
+      name: 'protection_capability_policy_fk',
+      columns: [t.policyVersionId],
+      foreignColumns: [protectionPolicyVersions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const protectionValidationRuns = mysqlTable(
+  'protection_validation_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyVersionId: int('policyVersionId').notNull(),
+    capabilityId: int('capabilityId'),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    configurationHash: varchar('configurationHash', { length: 64 }).notNull(),
+    validationType: mysqlEnum('validationType', [
+      'documentation_review',
+      'preview_fixture',
+      'shadow_fixture',
+      'sandbox',
+      'live_canary',
+    ]).notNull(),
+    startedAt: timestamp('startedAt').notNull(),
+    completedAt: timestamp('completedAt'),
+    result: mysqlEnum('result', ['pending', 'passed', 'failed', 'inconclusive', 'aborted'])
+      .notNull()
+      .default('pending'),
+    previewRequest: text('previewRequest'),
+    previewResponseSanitized: text('previewResponseSanitized'),
+    failureCode: varchar('failureCode', { length: 64 }),
+    failureReason: text('failureReason'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    policyIdx: index('protection_validation_policy_idx').on(t.policyVersionId),
+    capabilityIdx: index('protection_validation_capability_idx').on(t.capabilityId),
+    hashIdx: index('protection_validation_hash_idx').on(t.configurationHash),
+    policyFk: foreignKey({
+      name: 'protection_validation_policy_fk',
+      columns: [t.policyVersionId],
+      foreignColumns: [protectionPolicyVersions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    capabilityFk: foreignKey({
+      name: 'protection_validation_capability_fk',
+      columns: [t.capabilityId],
+      foreignColumns: [protectionCapabilities.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const protectionInstances = mysqlTable(
+  'protection_instances',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    positionId: int('positionId').notNull(),
+    decisionChainId: int('decisionChainId').notNull(),
+    entryOrderIntentId: int('entryOrderIntentId').notNull(),
+    policyVersionId: int('policyVersionId').notNull(),
+    capabilityId: int('capabilityId').notNull(),
+    protectionType: mysqlEnum('protectionType', [
+      'attached_trigger_bracket_gtc',
+      'independent_stop_limit',
+      'independent_take_profit',
+      'independent_bracket',
+      'application_polling',
+      'none',
+    ]).notNull(),
+    requiredBaseQuantity: decimal('requiredBaseQuantity', { precision: 20, scale: 8 }).notNull(),
+    confirmedBaseQuantity: decimal('confirmedBaseQuantity', { precision: 20, scale: 8 })
+      .notNull()
+      .default('0'),
+    targetPrice: decimal('targetPrice', { precision: 20, scale: 8 }).notNull(),
+    stopTriggerPrice: decimal('stopTriggerPrice', { precision: 20, scale: 8 }).notNull(),
+    stopLimitPrice: decimal('stopLimitPrice', { precision: 20, scale: 8 }),
+    takeProfitLegState: mysqlEnum('takeProfitLegState', [
+      'pending',
+      'active',
+      'partially_filled',
+      'filled',
+      'disabled',
+      'canceled',
+      'rejected',
+      'unknown',
+    ])
+      .notNull()
+      .default('pending'),
+    stopLossLegState: mysqlEnum('stopLossLegState', [
+      'pending',
+      'active',
+      'partially_filled',
+      'filled',
+      'disabled',
+      'canceled',
+      'rejected',
+      'unknown',
+    ])
+      .notNull()
+      .default('pending'),
+    state: mysqlEnum('state', [
+      'required',
+      'pending',
+      'confirmed',
+      'partially_confirmed',
+      'missing',
+      'rejected',
+      'canceled',
+      'triggered',
+      'completed',
+      'inconsistent',
+      'degraded',
+    ])
+      .notNull()
+      .default('required'),
+    lastVerifiedAt: timestamp('lastVerifiedAt'),
+    failureReason: varchar('failureReason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow().onUpdateNow(),
+  },
+  (t) => ({
+    positionUq: uniqueIndex('protection_instance_position_uq').on(t.positionId),
+    stateIdx: index('protection_instance_state_idx').on(t.state),
+    chainIdx: index('protection_instance_chain_idx').on(t.decisionChainId),
+    policyIdx: index('protection_instance_policy_idx').on(t.policyVersionId),
+    policyFk: foreignKey({
+      name: 'protection_instance_policy_fk',
+      columns: [t.policyVersionId],
+      foreignColumns: [protectionPolicyVersions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    capabilityFk: foreignKey({
+      name: 'protection_instance_capability_fk',
+      columns: [t.capabilityId],
+      foreignColumns: [protectionCapabilities.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    chainFk: foreignKey({
+      name: 'protection_instance_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const protectionEvents = mysqlTable(
+  'protection_events',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    protectionInstanceId: int('protectionInstanceId').notNull(),
+    decisionChainId: int('decisionChainId').notNull(),
+    eventType: varchar('eventType', { length: 64 }).notNull(),
+    previousState: varchar('previousState', { length: 48 }),
+    newState: varchar('newState', { length: 48 }).notNull(),
+    leg: mysqlEnum('leg', ['take_profit_leg', 'stop_loss_leg', 'instance'])
+      .notNull()
+      .default('instance'),
+    reason: varchar('reason', { length: 255 }),
+    metadata: text('metadata'),
+    eventTime: timestamp('eventTime').notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    instanceIdx: index('protection_events_instance_idx').on(t.protectionInstanceId, t.eventTime),
+    chainIdx: index('protection_events_chain_idx').on(t.decisionChainId),
+    typeIdx: index('protection_events_type_idx').on(t.eventType),
+    instanceFk: foreignKey({
+      name: 'protection_events_instance_fk',
+      columns: [t.protectionInstanceId],
+      foreignColumns: [protectionInstances.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    chainFk: foreignKey({
+      name: 'protection_events_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -1276,6 +1536,16 @@ export type LineageEventRow = typeof lineageEvents.$inferSelect;
 export type LineageEventInsert = typeof lineageEvents.$inferInsert;
 export type ForecastVsRealizedAttributionRow = typeof forecastVsRealizedAttributions.$inferSelect;
 export type ForecastVsRealizedAttributionInsert = typeof forecastVsRealizedAttributions.$inferInsert;
+export type ProtectionPolicyVersionRow = typeof protectionPolicyVersions.$inferSelect;
+export type ProtectionPolicyVersionInsert = typeof protectionPolicyVersions.$inferInsert;
+export type ProtectionCapabilityRow = typeof protectionCapabilities.$inferSelect;
+export type ProtectionCapabilityInsert = typeof protectionCapabilities.$inferInsert;
+export type ProtectionValidationRunRow = typeof protectionValidationRuns.$inferSelect;
+export type ProtectionValidationRunInsert = typeof protectionValidationRuns.$inferInsert;
+export type ProtectionInstanceRow = typeof protectionInstances.$inferSelect;
+export type ProtectionInstanceInsert = typeof protectionInstances.$inferInsert;
+export type ProtectionEventRow = typeof protectionEvents.$inferSelect;
+export type ProtectionEventInsert = typeof protectionEvents.$inferInsert;
 export type FillRow = typeof fills.$inferSelect;
 export type FillInsert = typeof fills.$inferInsert;
 export type PositionRow = typeof positions.$inferSelect;

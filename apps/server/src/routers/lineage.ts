@@ -129,6 +129,7 @@ export const lineageRouter = router({
         roundTrip: rtRows[0] ?? null,
         outcomeLabels: base.outcomes,
         lineageEvents: base.events,
+        protection: base.protection,
       };
     }),
 });
