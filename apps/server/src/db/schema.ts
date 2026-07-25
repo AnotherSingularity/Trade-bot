@@ -650,6 +650,61 @@ export const executionCostForecasts = mysqlTable(
     // Phase 1.1 Gate 2 lineage refs (nullable for legacy rows).
     decisionChainId: int('decisionChainId'),
     routingDecisionId: int('routingDecisionId'),
+    // Phase 1.1 Gate 3B — exact cash-flow columns (§I).
+    expectedFilledBase: decimal('expectedFilledBase', { precision: 20, scale: 8 }),
+    previewEntryFillPrice: decimal('previewEntryFillPrice', { precision: 20, scale: 8 }),
+    conservativeTargetExitPrice: decimal('conservativeTargetExitPrice', { precision: 20, scale: 8 }),
+    conservativeStopExitPrice: decimal('conservativeStopExitPrice', { precision: 20, scale: 8 }),
+    conservativeTimeoutExitPrice: decimal('conservativeTimeoutExitPrice', { precision: 20, scale: 8 }),
+    entryOutflow: decimal('entryOutflow', { precision: 20, scale: 8 }),
+    targetInflow: decimal('targetInflow', { precision: 20, scale: 8 }),
+    stopInflow: decimal('stopInflow', { precision: 20, scale: 8 }),
+    timeoutInflow: decimal('timeoutInflow', { precision: 20, scale: 8 }),
+    netTargetPnl: decimal('netTargetPnl', { precision: 20, scale: 8 }),
+    netStopPnl: decimal('netStopPnl', { precision: 20, scale: 8 }),
+    netTimeoutPnl: decimal('netTimeoutPnl', { precision: 20, scale: 8 }),
+    // Phase 1.1 Gate 3B — separated cost components (§J).
+    entryCommission: decimal('entryCommission', { precision: 20, scale: 8 }),
+    targetExitCommission: decimal('targetExitCommission', { precision: 20, scale: 8 }),
+    stopExitCommission: decimal('stopExitCommission', { precision: 20, scale: 8 }),
+    timeoutExitCommission: decimal('timeoutExitCommission', { precision: 20, scale: 8 }),
+    quotedSpread: decimal('quotedSpread', { precision: 20, scale: 8 }),
+    effectiveSpread: decimal('effectiveSpread', { precision: 20, scale: 8 }),
+    entryImpact: decimal('entryImpact', { precision: 20, scale: 8 }),
+    targetExitImpact: decimal('targetExitImpact', { precision: 20, scale: 8 }),
+    stopExitImpact: decimal('stopExitImpact', { precision: 20, scale: 8 }),
+    latencyBufferAbs: decimal('latencyBufferAbs', { precision: 20, scale: 8 }),
+    stopGapBufferAbs: decimal('stopGapBufferAbs', { precision: 20, scale: 8 }),
+    partialFillBufferAbs: decimal('partialFillBufferAbs', { precision: 20, scale: 8 }),
+    unfilledOpportunityEstimate: decimal('unfilledOpportunityEstimate', { precision: 20, scale: 8 }),
+    residualDustEstimate: decimal('residualDustEstimate', { precision: 20, scale: 8 }),
+    totalForecastCost: decimal('totalForecastCost', { precision: 20, scale: 8 }),
+    // Phase 1.1 Gate 3B §K — which price basis TP/SL were derived from.
+    targetStopBasis: mysqlEnum('targetStopBasis', ['preview_entry', 'reconciled_entry']),
+    // Phase 1.1 Gate 3B §L — honest buffer metadata.
+    bufferSource: varchar('bufferSource', { length: 64 }),
+    bufferVersion: varchar('bufferVersion', { length: 32 }),
+    bufferSampleCount: int('bufferSampleCount'),
+    isEmpiricalBuffer: boolean('isEmpiricalBuffer').notNull().default(false),
+    // Phase 1.1 Gate 3B §N — outcome probability estimates (not_calibrated).
+    pTarget: decimal('pTarget', { precision: 6, scale: 4 }),
+    pStop: decimal('pStop', { precision: 6, scale: 4 }),
+    pTimeout: decimal('pTimeout', { precision: 6, scale: 4 }),
+    probabilityUncertaintyLower: decimal('probabilityUncertaintyLower', { precision: 6, scale: 4 }),
+    probabilityUncertaintyUpper: decimal('probabilityUncertaintyUpper', { precision: 6, scale: 4 }),
+    probabilityModelVersion: varchar('probabilityModelVersion', { length: 32 }),
+    probabilitySampleCount: int('probabilitySampleCount'),
+    probabilityCalibrationStatus: mysqlEnum('probabilityCalibrationStatus', [
+      'not_calibrated',
+      'calibrating',
+      'calibrated_low_conf',
+      'calibrated',
+    ])
+      .notNull()
+      .default('not_calibrated'),
+    // Phase 1.1 Gate 3B §K — post-fill deviation from preview.
+    postFillDeviationBps: decimal('postFillDeviationBps', { precision: 10, scale: 4 }),
+    revalidationRequired: boolean('revalidationRequired').notNull().default(false),
   },
   (t) => ({
     candidateIdx: index('execution_cost_forecasts_candidateId_idx').on(t.candidateId),
@@ -1150,6 +1205,49 @@ export const lineageEvents = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Phase 1.1 Gate 3B — forecast-vs-realized attribution (§O)
+// ---------------------------------------------------------------------------
+export const forecastVsRealizedAttributions = mysqlTable(
+  'forecast_vs_realized_attributions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    roundTripId: int('roundTripId').notNull(),
+    decisionChainId: int('decisionChainId').notNull(),
+    costForecastId: int('costForecastId').notNull(),
+    forecastEntryCost: decimal('forecastEntryCost', { precision: 20, scale: 8 }).notNull(),
+    realizedEntryCost: decimal('realizedEntryCost', { precision: 20, scale: 8 }).notNull(),
+    forecastExitCost: decimal('forecastExitCost', { precision: 20, scale: 8 }).notNull(),
+    realizedExitCost: decimal('realizedExitCost', { precision: 20, scale: 8 }).notNull(),
+    forecastTotalCost: decimal('forecastTotalCost', { precision: 20, scale: 8 }).notNull(),
+    realizedTotalCost: decimal('realizedTotalCost', { precision: 20, scale: 8 }).notNull(),
+    forecastSlippage: decimal('forecastSlippage', { precision: 20, scale: 8 }),
+    realizedSlippage: decimal('realizedSlippage', { precision: 20, scale: 8 }),
+    forecastCommission: decimal('forecastCommission', { precision: 20, scale: 8 }),
+    realizedCommission: decimal('realizedCommission', { precision: 20, scale: 8 }),
+    forecastNetTargetPnl: decimal('forecastNetTargetPnl', { precision: 20, scale: 8 }),
+    forecastNetStopPnl: decimal('forecastNetStopPnl', { precision: 20, scale: 8 }),
+    forecastNetTimeoutPnl: decimal('forecastNetTimeoutPnl', { precision: 20, scale: 8 }),
+    realizedNetPnl: decimal('realizedNetPnl', { precision: 20, scale: 8 }).notNull(),
+    absoluteForecastError: decimal('absoluteForecastError', { precision: 20, scale: 8 }).notNull(),
+    forecastErrorBps: decimal('forecastErrorBps', { precision: 10, scale: 4 }),
+    outcomeTaken: mysqlEnum('outcomeTaken', ['target', 'stop', 'timeout', 'ambiguous', 'other']).notNull(),
+    attributionVersion: varchar('attributionVersion', { length: 32 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    roundTripUq: uniqueIndex('forecast_vs_realized_roundtrip_uq').on(t.roundTripId),
+    chainIdx: index('forecast_vs_realized_chain_idx').on(t.decisionChainId),
+    chainFk: foreignKey({
+      name: 'forecast_vs_realized_decisionChainId_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -1176,6 +1274,8 @@ export type OutcomeLabelRow = typeof outcomeLabels.$inferSelect;
 export type OutcomeLabelInsert = typeof outcomeLabels.$inferInsert;
 export type LineageEventRow = typeof lineageEvents.$inferSelect;
 export type LineageEventInsert = typeof lineageEvents.$inferInsert;
+export type ForecastVsRealizedAttributionRow = typeof forecastVsRealizedAttributions.$inferSelect;
+export type ForecastVsRealizedAttributionInsert = typeof forecastVsRealizedAttributions.$inferInsert;
 export type FillRow = typeof fills.$inferSelect;
 export type FillInsert = typeof fills.$inferInsert;
 export type PositionRow = typeof positions.$inferSelect;

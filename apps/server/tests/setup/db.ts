@@ -27,6 +27,8 @@ export async function resetDatabase(): Promise<void> {
       'execution_cost_forecasts',
       'signal_candidates',
       'fee_tier_snapshots',
+      // Phase 1.1 Gate 3B addition.
+      'forecast_vs_realized_attributions',
       // Phase 1.1.b additions.
       'execution_fences',
       'reconciliation_runs',
