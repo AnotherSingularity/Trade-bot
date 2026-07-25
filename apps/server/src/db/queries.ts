@@ -11,20 +11,29 @@ import {
   activityLog,
   botConfig,
   cashLedger,
+  executionCostForecasts,
   fills,
   orderIntents,
   positions,
+  quantitativeDecisions,
   roundTrips,
+  signalCandidates,
   tokenStats,
   type ActivityLogRow,
   type BotConfigRow,
   type CashLedgerInsert,
+  type ExecutionCostForecastInsert,
+  type ExecutionCostForecastRow,
   type FillRow,
   type OrderIntentRow,
   type PositionInsert,
   type PositionRow,
+  type QuantitativeDecisionInsert,
+  type QuantitativeDecisionRow,
   type RoundTripInsert,
   type RoundTripRow,
+  type SignalCandidateInsert,
+  type SignalCandidateRow,
   type TokenStatRow,
   type TradeRow,
 } from './schema';
@@ -502,6 +511,55 @@ export function shrunkWinRate(
   priorBeta = 5,
 ): number {
   return ((wins + priorAlpha) / (wins + losses + priorAlpha + priorBeta)) * 100;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 — Slice 1: immutable decision snapshot queries
+// ---------------------------------------------------------------------------
+
+export async function insertSignalCandidate(
+  input: SignalCandidateInsert,
+): Promise<SignalCandidateRow> {
+  const res = await db.insert(signalCandidates).values(input);
+  const id = (res as unknown as { insertId: number }[])[0]?.insertId ?? 0;
+  const rows = await db.select().from(signalCandidates).where(eq(signalCandidates.id, id)).limit(1);
+  return rows[0];
+}
+
+export async function insertExecutionCostForecast(
+  input: ExecutionCostForecastInsert,
+): Promise<ExecutionCostForecastRow> {
+  const res = await db.insert(executionCostForecasts).values(input);
+  const id = (res as unknown as { insertId: number }[])[0]?.insertId ?? 0;
+  const rows = await db
+    .select()
+    .from(executionCostForecasts)
+    .where(eq(executionCostForecasts.id, id))
+    .limit(1);
+  return rows[0];
+}
+
+export async function insertQuantitativeDecision(
+  input: QuantitativeDecisionInsert,
+): Promise<QuantitativeDecisionRow> {
+  const res = await db.insert(quantitativeDecisions).values(input);
+  const id = (res as unknown as { insertId: number }[])[0]?.insertId ?? 0;
+  const rows = await db
+    .select()
+    .from(quantitativeDecisions)
+    .where(eq(quantitativeDecisions.id, id))
+    .limit(1);
+  return rows[0];
+}
+
+/** Counts decisions for a given scan seed (used by tests + diagnostics). */
+export async function countDecisionsForSeed(scanSeed: string): Promise<number> {
+  const rows = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(quantitativeDecisions)
+    .innerJoin(signalCandidates, eq(quantitativeDecisions.candidateId, signalCandidates.id))
+    .where(eq(signalCandidates.scanSeed, scanSeed));
+  return Number(rows[0]?.n ?? 0);
 }
 
 export { and, eq, isNull, or };

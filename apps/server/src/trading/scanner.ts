@@ -1,21 +1,30 @@
-import { STRATEGY, STRATEGY_VERSION, TOKEN_UNIVERSE } from '@horizon/shared';
+import { CLAUDE_MODEL, Money, STRATEGY, STRATEGY_VERSION, TOKEN_UNIVERSE } from '@horizon/shared';
 import {
   countOpenPositions,
   getAllTokenStats,
   getBotConfig,
   getOpenPositions,
+  insertExecutionCostForecast,
+  insertQuantitativeDecision,
+  insertSignalCandidate,
   logActivity,
   shrunkWinRate,
   updateBotConfig,
 } from '../db/queries';
-import { CLAUDE_MODEL } from '@horizon/shared';
 import { CoinbaseError, getCandles, getProduct } from './coinbase';
 import { evaluateSignal } from './claude';
 import { detectBestMode, type MarketSnapshot } from './modes';
-import { closePosition, openPosition, shouldExit } from './executor';
+import { closePosition, getPortfolioCash, openPosition, shouldExit } from './executor';
 import { getMarketWindow, isTradeableNow } from './marketWindow';
 import { withLease, SCAN_LEASE_KEY } from '../jobs/lease';
+import { getCurrentFeeTierOrFailClosed } from './feeTier';
+import { previewCandidate } from './preview';
+import { buildCostForecast, COST_MODEL_VERSION } from './costModel';
+import { applyEvGate, EV_GATE_VERSION } from './evGate';
 import { ENV } from '../env';
+
+/** Bumps when the feature set persisted with each candidate row changes. */
+const FEATURE_VERSION = 'p1s1-1';
 
 /**
  * Scan cycle — rebuilt to enforce Phase 0 semantics:
@@ -228,8 +237,30 @@ async function selectAndOpenEntries(): Promise<void> {
   // Rank by shrunk win rate, then evaluate modes.
   candidates.sort((a, b) => b.priorityScore - a.priorityScore);
 
+  // Fetch the fee tier ONCE per cycle — fail-closed if unavailable. Every
+  // cost forecast in this cycle links to the resulting snapshot id.
+  let feeTier: Awaited<ReturnType<typeof getCurrentFeeTierOrFailClosed>>;
+  try {
+    feeTier = await getCurrentFeeTierOrFailClosed();
+  } catch (err) {
+    await logActivity({
+      type: 'system',
+      severity: 'critical',
+      action: 'SCAN_ABORTED_FEE_TIER',
+      detail: `Fee tier unavailable — aborting entry scan. ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    });
+    return;
+  }
+
+  const bankroll = await getPortfolioCash();
+  const marketWindow = getMarketWindow();
+
   let opened = 0;
   let passedSignal = 0;
+  let evGateRejects = 0;
+
   for (const c of candidates) {
     if (opened >= availableSlots) break;
 
@@ -249,6 +280,151 @@ async function selectAndOpenEntries(): Promise<void> {
     const { evaluation, signals } = detected;
     const modeCfg = STRATEGY.MODES[evaluation.mode];
 
+    // --------- Record the candidate (immutable) ---------
+    const candidateRow = await insertSignalCandidate({
+      scanSeed,
+      token: c.token,
+      mode: evaluation.mode,
+      scanPrice: String(c.price),
+      volume24h: String(c.volume24h),
+      changePct24h: String(c.changePct24h),
+      rsi: signals.rsi !== null ? String(signals.rsi) : null,
+      macdHistogram:
+        signals.macdHistogram !== null ? String(signals.macdHistogram) : null,
+      emaTrend: signals.emaTrend,
+      bollingerPosition: signals.bollingerPosition,
+      passedSignals: signals.passedSignals,
+      totalSignals: signals.totalSignals,
+      tokenWinRate: c.winRate !== null ? String(c.winRate) : null,
+      tokenTradeCount: null,
+      strategyVersion: STRATEGY_VERSION,
+      featureVersion: FEATURE_VERSION,
+      regimeLabel: 'unclassified', // regime engine arrives in slice 2
+      regimeConfidence: null,
+      marketWindow,
+    });
+
+    // --------- Size (win-rate adjustment) ---------
+    let allocationPct = modeCfg.allocationPct;
+    if (c.winRate !== null && c.winRate < STRATEGY.WIN_RATE_REDUCE) {
+      allocationPct = STRATEGY.WIN_RATE_REDUCED_PCT;
+    }
+    const quoteSize = (bankroll * allocationPct) / 100;
+
+    // --------- Preview (Phase 1 §B) ---------
+    const arrivalMid = Money.fromNumber(c.price);
+    const previewResult = await previewCandidate({
+      intent: { side: 'BUY', token: c.token, clientOrderId: '__preview__', quoteSize: String(quoteSize) },
+      arrivalMid,
+      takerRate: feeTier.takerFeeRate,
+    });
+
+    if (previewResult.status === 'rejected') {
+      await insertQuantitativeDecision({
+        candidateId: candidateRow.id,
+        costForecastId: null,
+        decision:
+          previewResult.reason === 'preview_warning'
+            ? 'reject_preview_warning'
+            : previewResult.reason === 'preview_failure'
+              ? 'reject_preview_error'
+              : previewResult.reason === 'missing_commission' ||
+                  previewResult.reason === 'missing_avg_fill'
+                ? 'reject_data_stale'
+                : 'reject_preview_error',
+        rejectionReason: previewResult.detail.slice(0, 250),
+        rejectionDetail: { reason: previewResult.reason, warnings: previewResult.warnings },
+        netTpPnl: null,
+        netSlPnl: null,
+        netRewardRisk: null,
+        expectedValue: null,
+        breakEvenWinProb: null,
+        strategyVersion: STRATEGY_VERSION,
+        costModelVersion: COST_MODEL_VERSION,
+        evGateVersion: EV_GATE_VERSION,
+      });
+      continue;
+    }
+
+    // --------- Cost forecast (Phase 1 §D, MV) ---------
+    const forecast = buildCostForecast({
+      token: c.token,
+      mode: evaluation.mode,
+      arrivalMid,
+      takeProfitPct: modeCfg.takeProfitPct,
+      stopLossPct: modeCfg.stopLossPct,
+      feeTier,
+      preview: previewResult,
+    });
+
+    const forecastRow = await insertExecutionCostForecast({
+      candidateId: candidateRow.id,
+      feeTierSnapshotId: feeTier.snapshotId,
+      previewOrderTotal: previewResult.orderTotal?.toDecimalString() ?? null,
+      previewCommissionTotal: previewResult.commissionTotal.toDecimalString(),
+      previewBestBid: previewResult.bestBid?.toDecimalString() ?? null,
+      previewBestAsk: previewResult.bestAsk?.toDecimalString() ?? null,
+      previewEstimatedAvgFillPrice: previewResult.estimatedAvgFillPrice.toDecimalString(),
+      previewBaseSize: previewResult.baseSize?.toDecimalString() ?? null,
+      previewQuoteSize: previewResult.quoteSize?.toDecimalString() ?? null,
+      arrivalMid: forecast.arrivalMid.toDecimalString(),
+      spreadBps: forecast.spreadBps.toDecimalString(4),
+      entryFee: forecast.entryFee.toDecimalString(),
+      exitFeeEstimate: forecast.exitFeeEstimate.toDecimalString(),
+      entryImpactBps: forecast.entryImpactBps.toDecimalString(4),
+      exitImpactBpsEstimate: forecast.exitImpactBpsEstimate.toDecimalString(4),
+      latencySlippageBpsEstimate: forecast.latencySlippageBpsEstimate.toDecimalString(4),
+      roundTripCost: forecast.roundTripCost.toDecimalString(),
+      costToTargetPct: forecast.costToTargetPct.toDecimalString(4),
+      takeProfitPrice: forecast.takeProfitPrice.toDecimalString(),
+      stopLossPrice: forecast.stopLossPrice.toDecimalString(),
+      netTpPnl: forecast.netTpPnl.toDecimalString(),
+      netSlPnl: forecast.netSlPnl.toDecimalString(),
+      netRewardRisk: forecast.netRewardRisk ? forecast.netRewardRisk.toDecimalString(4) : null,
+      breakEvenWinProb: forecast.breakEvenWinProb
+        ? forecast.breakEvenWinProb.toDecimalString(4)
+        : null,
+      costModelVersion: forecast.costModelVersion,
+      exitCostQuantile: String(forecast.exitCostQuantile),
+      previewWarnings: previewResult.warnings.length > 0 ? previewResult.warnings : null,
+      previewRawResponse: previewResult.raw as unknown as Record<string, unknown>,
+    });
+
+    // --------- EV / cost / R/R gate (Phase 1 §E) ---------
+    const gate = applyEvGate(forecast);
+    await insertQuantitativeDecision({
+      candidateId: candidateRow.id,
+      costForecastId: forecastRow.id,
+      decision: gate.decision,
+      rejectionReason: gate.decision === 'accept' ? null : gate.reason.slice(0, 250),
+      rejectionDetail: gate.detail,
+      netTpPnl: forecast.netTpPnl.toDecimalString(),
+      netSlPnl: forecast.netSlPnl.toDecimalString(),
+      netRewardRisk: forecast.netRewardRisk ? forecast.netRewardRisk.toDecimalString(4) : null,
+      expectedValue: gate.expectedValue.toDecimalString(),
+      breakEvenWinProb: forecast.breakEvenWinProb
+        ? forecast.breakEvenWinProb.toDecimalString(4)
+        : null,
+      strategyVersion: STRATEGY_VERSION,
+      costModelVersion: forecast.costModelVersion,
+      evGateVersion: gate.version,
+    });
+
+    if (gate.decision !== 'accept') {
+      evGateRejects++;
+      await logActivity({
+        type: 'signal',
+        token: c.token,
+        action: 'EV_GATE_REJECT',
+        severity: 'info',
+        detail: `${evaluation.mode} ${gate.decision}: ${gate.reason} — netTP=${forecast.netTpPnl.toDecimalString(
+          2,
+        )}, R/R=${forecast.netRewardRisk ? forecast.netRewardRisk.toDecimalString(2) : 'n/a'}`,
+      });
+      continue;
+    }
+
+    // --------- Claude (only after ALL quantitative gates pass) ---------
     const claude = ENV.anthropicConfigured
       ? await evaluateSignal(evaluation.mode, signals)
       : { confidence: 0, shouldEnter: false, reason: 'Anthropic not configured' };
@@ -265,11 +441,6 @@ async function selectAndOpenEntries(): Promise<void> {
       continue;
     }
     passedSignal++;
-
-    let allocationPct = modeCfg.allocationPct;
-    if (c.winRate !== null && c.winRate < STRATEGY.WIN_RATE_REDUCE) {
-      allocationPct = STRATEGY.WIN_RATE_REDUCED_PCT;
-    }
 
     await logActivity({
       type: 'signal',
@@ -294,7 +465,7 @@ async function selectAndOpenEntries(): Promise<void> {
   await logActivity({
     type: 'scan',
     action: 'SCAN_COMPLETE',
-    detail: `Scanned ${scanned}, ${passedVolume} passed volume, ${passedSignal} confirmed, ${opened} opened (strategy v${STRATEGY_VERSION})`,
+    detail: `Scanned ${scanned}, ${passedVolume} passed volume, ${evGateRejects} rejected by EV gate, ${passedSignal} Claude-confirmed, ${opened} opened (strategy v${STRATEGY_VERSION}, feeTier ${feeTier.pricingTier}${feeTier.synthetic ? '/synthetic' : ''})`,
     tokensScanned: scanned,
     passedVolumeFilter: passedVolume,
     passedSignalThreshold: passedSignal,

@@ -9,6 +9,7 @@ import {
   mysqlEnum,
   uniqueIndex,
   index,
+  json,
 } from 'drizzle-orm/mysql-core';
 
 /**
@@ -379,6 +380,164 @@ export const tokenStats = mysqlTable('token_stats', {
 });
 
 // ---------------------------------------------------------------------------
+// Phase 1 — Slice 1: immutable decision snapshots
+// ---------------------------------------------------------------------------
+
+/** One row per /transaction_summary fetch. Fee tier drives every cost forecast. */
+export const feeTierSnapshots = mysqlTable(
+  'fee_tier_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    pricingTier: varchar('pricingTier', { length: 32 }).notNull(),
+    makerFeeRate: decimal('makerFeeRate', { precision: 10, scale: 8 }).notNull(),
+    takerFeeRate: decimal('takerFeeRate', { precision: 10, scale: 8 }).notNull(),
+    usdVolume30d: decimal('usdVolume30d', { precision: 20, scale: 8 }),
+    usdFees30d: decimal('usdFees30d', { precision: 20, scale: 8 }),
+    usdFromVolume: decimal('usdFromVolume', { precision: 20, scale: 8 }),
+    usdToVolume: decimal('usdToVolume', { precision: 20, scale: 8 }),
+    productType: varchar('productType', { length: 16 }).notNull().default('SPOT'),
+    fetchedAt: timestamp('fetchedAt').notNull().defaultNow(),
+    rawResponse: json('rawResponse'),
+  },
+  (t) => ({
+    fetchedAtIdx: index('fee_tier_snapshots_fetchedAt_idx').on(t.fetchedAt),
+  }),
+);
+
+/** One row per scanner candidate — the raw features, immutable. */
+export const signalCandidates = mysqlTable(
+  'signal_candidates',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    scanSeed: varchar('scanSeed', { length: 64 }).notNull(),
+    token: varchar('token', { length: 20 }).notNull(),
+    mode: mysqlEnum('mode', ['reversion', 'breakout', 'macro']).notNull(),
+    scanPrice: decimal('scanPrice', { precision: 20, scale: 8 }).notNull(),
+    volume24h: decimal('volume24h', { precision: 20, scale: 8 }).notNull(),
+    changePct24h: decimal('changePct24h', { precision: 10, scale: 4 }),
+    rsi: decimal('rsi', { precision: 10, scale: 4 }),
+    macdHistogram: decimal('macdHistogram', { precision: 20, scale: 8 }),
+    emaTrend: varchar('emaTrend', { length: 16 }),
+    bollingerPosition: varchar('bollingerPosition', { length: 16 }),
+    passedSignals: int('passedSignals').notNull(),
+    totalSignals: int('totalSignals').notNull(),
+    tokenWinRate: decimal('tokenWinRate', { precision: 6, scale: 4 }),
+    tokenTradeCount: int('tokenTradeCount'),
+    strategyVersion: varchar('strategyVersion', { length: 32 }).notNull(),
+    featureVersion: varchar('featureVersion', { length: 32 }).notNull(),
+    regimeLabel: varchar('regimeLabel', { length: 32 }).notNull().default('unclassified'),
+    regimeConfidence: decimal('regimeConfidence', { precision: 5, scale: 4 }),
+    marketWindow: mysqlEnum('marketWindow', ['PRIME', 'ACTIVE', 'CLOSED']).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    scanSeedIdx: index('signal_candidates_scanSeed_idx').on(t.scanSeed),
+    tokenIdx: index('signal_candidates_token_idx').on(t.token, t.createdAt),
+  }),
+);
+
+/** One row per cost-model output. Realized-* fields set later by slice-3 reconciliation. */
+export const executionCostForecasts = mysqlTable(
+  'execution_cost_forecasts',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    candidateId: int('candidateId').notNull(),
+    feeTierSnapshotId: int('feeTierSnapshotId').notNull(),
+    previewOrderTotal: decimal('previewOrderTotal', { precision: 20, scale: 8 }),
+    previewCommissionTotal: decimal('previewCommissionTotal', { precision: 20, scale: 8 }),
+    previewBestBid: decimal('previewBestBid', { precision: 20, scale: 8 }),
+    previewBestAsk: decimal('previewBestAsk', { precision: 20, scale: 8 }),
+    previewEstimatedAvgFillPrice: decimal('previewEstimatedAvgFillPrice', {
+      precision: 20,
+      scale: 8,
+    }),
+    previewBaseSize: decimal('previewBaseSize', { precision: 20, scale: 8 }),
+    previewQuoteSize: decimal('previewQuoteSize', { precision: 20, scale: 8 }),
+    arrivalMid: decimal('arrivalMid', { precision: 20, scale: 8 }).notNull(),
+    spreadBps: decimal('spreadBps', { precision: 10, scale: 4 }).notNull(),
+    entryFee: decimal('entryFee', { precision: 20, scale: 8 }).notNull(),
+    exitFeeEstimate: decimal('exitFeeEstimate', { precision: 20, scale: 8 }).notNull(),
+    entryImpactBps: decimal('entryImpactBps', { precision: 10, scale: 4 }).notNull(),
+    exitImpactBpsEstimate: decimal('exitImpactBpsEstimate', {
+      precision: 10,
+      scale: 4,
+    }).notNull(),
+    latencySlippageBpsEstimate: decimal('latencySlippageBpsEstimate', {
+      precision: 10,
+      scale: 4,
+    }).notNull(),
+    roundTripCost: decimal('roundTripCost', { precision: 20, scale: 8 }).notNull(),
+    costToTargetPct: decimal('costToTargetPct', { precision: 10, scale: 4 }).notNull(),
+    takeProfitPrice: decimal('takeProfitPrice', { precision: 20, scale: 8 }).notNull(),
+    stopLossPrice: decimal('stopLossPrice', { precision: 20, scale: 8 }).notNull(),
+    netTpPnl: decimal('netTpPnl', { precision: 20, scale: 8 }).notNull(),
+    netSlPnl: decimal('netSlPnl', { precision: 20, scale: 8 }).notNull(),
+    netRewardRisk: decimal('netRewardRisk', { precision: 10, scale: 4 }),
+    breakEvenWinProb: decimal('breakEvenWinProb', { precision: 6, scale: 4 }),
+    costModelVersion: varchar('costModelVersion', { length: 32 }).notNull(),
+    exitCostQuantile: decimal('exitCostQuantile', { precision: 6, scale: 4 }).notNull(),
+    previewWarnings: json('previewWarnings'),
+    previewRawResponse: json('previewRawResponse'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    realizedEntryFee: decimal('realizedEntryFee', { precision: 20, scale: 8 }),
+    realizedExitFee: decimal('realizedExitFee', { precision: 20, scale: 8 }),
+    realizedEntryImpactBps: decimal('realizedEntryImpactBps', { precision: 10, scale: 4 }),
+    realizedExitImpactBps: decimal('realizedExitImpactBps', { precision: 10, scale: 4 }),
+    realizedRoundTripCost: decimal('realizedRoundTripCost', { precision: 20, scale: 8 }),
+    realizedAt: timestamp('realizedAt'),
+  },
+  (t) => ({
+    candidateIdx: index('execution_cost_forecasts_candidateId_idx').on(t.candidateId),
+    feeTierIdx: index('execution_cost_forecasts_feeTierSnapshotId_idx').on(t.feeTierSnapshotId),
+    createdIdx: index('execution_cost_forecasts_createdAt_idx').on(t.createdAt),
+  }),
+);
+
+/** The final accept/reject decision per candidate, with machine-readable reason. */
+export const quantitativeDecisions = mysqlTable(
+  'quantitative_decisions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    candidateId: int('candidateId').notNull(),
+    costForecastId: int('costForecastId'),
+    decision: mysqlEnum('decision', [
+      'accept',
+      'reject_ev_gate',
+      'reject_cost_gate',
+      'reject_reward_risk_gate',
+      'reject_data_stale',
+      'reject_preview_warning',
+      'reject_preview_error',
+      'reject_fee_tier_stale',
+      'reject_liquidity_gate',
+      'reject_regime_gate',
+      'reject_signal_gate',
+      'reject_max_positions',
+      'reject_already_open',
+      'reject_circuit_breaker',
+      'reject_paused',
+      'reject_market_window',
+      'reject_dedup',
+    ]).notNull(),
+    rejectionReason: varchar('rejectionReason', { length: 255 }),
+    rejectionDetail: json('rejectionDetail'),
+    netTpPnl: decimal('netTpPnl', { precision: 20, scale: 8 }),
+    netSlPnl: decimal('netSlPnl', { precision: 20, scale: 8 }),
+    netRewardRisk: decimal('netRewardRisk', { precision: 10, scale: 4 }),
+    expectedValue: decimal('expectedValue', { precision: 20, scale: 8 }),
+    breakEvenWinProb: decimal('breakEvenWinProb', { precision: 6, scale: 4 }),
+    strategyVersion: varchar('strategyVersion', { length: 32 }).notNull(),
+    costModelVersion: varchar('costModelVersion', { length: 32 }).notNull(),
+    evGateVersion: varchar('evGateVersion', { length: 32 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    candidateIdx: index('quantitative_decisions_candidateId_idx').on(t.candidateId),
+    decisionIdx: index('quantitative_decisions_decision_idx').on(t.decision, t.createdAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -392,6 +551,14 @@ export type RoundTripRow = typeof roundTrips.$inferSelect;
 export type RoundTripInsert = typeof roundTrips.$inferInsert;
 export type CashLedgerRow = typeof cashLedger.$inferSelect;
 export type CashLedgerInsert = typeof cashLedger.$inferInsert;
+export type FeeTierSnapshotRow = typeof feeTierSnapshots.$inferSelect;
+export type FeeTierSnapshotInsert = typeof feeTierSnapshots.$inferInsert;
+export type SignalCandidateRow = typeof signalCandidates.$inferSelect;
+export type SignalCandidateInsert = typeof signalCandidates.$inferInsert;
+export type ExecutionCostForecastRow = typeof executionCostForecasts.$inferSelect;
+export type ExecutionCostForecastInsert = typeof executionCostForecasts.$inferInsert;
+export type QuantitativeDecisionRow = typeof quantitativeDecisions.$inferSelect;
+export type QuantitativeDecisionInsert = typeof quantitativeDecisions.$inferInsert;
 export type TradeRow = typeof trades.$inferSelect;
 export type ActivityLogRow = typeof activityLog.$inferSelect;
 export type TokenStatRow = typeof tokenStats.$inferSelect;

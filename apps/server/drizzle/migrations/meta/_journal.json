@@ -15,6 +15,13 @@
       "when": 1781910000000,
       "tag": "0001_phase0_execution_safety",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1785408000000,
+      "tag": "0002_phase1_slice1_immutable_decisions",
+      "breakpoints": true
     }
   ]
 }

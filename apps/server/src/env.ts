@@ -54,6 +54,15 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+
+  // Phase 1 §Q double-lock killswitch. Enforced INSIDE the Coinbase client
+  // (`createOrder` throws before any HTTP submit) so a bug elsewhere cannot
+  // reach the exchange. Defaults `false`. Live boot (DRY_RUN=false) requires
+  // this to be explicitly `true` as a separate acknowledgement.
+  ORDER_SUBMISSION_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 });
 
 const KNOWN_WEAK_SECRETS = new Set([
@@ -93,6 +102,12 @@ function loadEnv() {
           'positions are protected by application polling only)',
       );
     }
+    if (!e.ORDER_SUBMISSION_ENABLED) {
+      errs.push(
+        'DRY_RUN=false requires ORDER_SUBMISSION_ENABLED=true (Phase 1 §Q double-lock: ' +
+          'the Coinbase client refuses to POST /orders otherwise)',
+      );
+    }
     if (errs.length > 0) {
       throw new Error(`Live-mode boot rejected:\n  - ${errs.join('\n  - ')}`);
     }
@@ -128,6 +143,7 @@ function loadEnv() {
     dryRun: e.DRY_RUN,
     testForceLivePath,
     liveSafetyAckPollingFallback: e.LIVE_SAFETY_ACK_POLLING_FALLBACK,
+    orderSubmissionEnabled: e.ORDER_SUBMISSION_ENABLED,
     corsOrigins,
     loginRateLimitPerMinute: e.LOGIN_RATE_LIMIT_PER_MINUTE,
     coinbaseConfigured,

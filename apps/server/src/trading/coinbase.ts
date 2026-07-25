@@ -261,6 +261,14 @@ export interface CoinbasePreviewResponse {
   base_size?: string;
   best_bid?: string;
   best_ask?: string;
+  slippage?: string;
+  average_filled_price?: string;
+  preview_id?: string;
+  order_configuration?: unknown;
+  preview_failure_reason?: string;
+  new_order_failure_reason?: string;
+  is_max?: boolean;
+  quote_increment_reduction?: string;
 }
 
 export type CoinbaseOrderStatus =
@@ -431,8 +439,21 @@ export interface CreateOrderResult {
  * outcome reuses the same identity and Coinbase deduplicates.
  *
  * Reads the order id from the CORRECT nested location (`success_response.order_id`).
+ *
+ * PHASE 1 §Q KILLSWITCH — enforced HERE (not in the scanner or executor) so
+ * that any code path that reaches this function is stopped before HTTP. This
+ * is a second lock behind DRY_RUN; both must consent to reach the exchange.
  */
 export async function createOrder(intent: MarketOrderIntent): Promise<CreateOrderResult> {
+  if (!ENV.orderSubmissionEnabled) {
+    throw new CoinbaseError({
+      class: 'non_retryable_validation',
+      code: 'order_submission_disabled',
+      message:
+        'ORDER_SUBMISSION_ENABLED=false — createOrder refused to POST /orders. ' +
+        'This is the Phase 1 §Q double-lock; enable it explicitly to trade live.',
+    });
+  }
   const raw = await request<CoinbaseCreateOrderResponse>(
     'POST',
     '/api/v3/brokerage/orders',
@@ -518,6 +539,52 @@ export async function cancelOrder(exchangeOrderId: string): Promise<boolean> {
     { timeoutMs: 6_000 },
   );
   return (data.results ?? []).some((r) => r.order_id === exchangeOrderId && r.success);
+}
+
+// ---------------------------------------------------------------------------
+// Transaction summary (Phase 1 §A — authenticated fee tier)
+// ---------------------------------------------------------------------------
+
+/**
+ * Subset of the `/transaction_summary` response we actually use. Coinbase
+ * returns significantly more (per-portfolio breakdown, margin rates,
+ * advanced-trade specific fields); the parser reads only what the cost model
+ * needs and stores the raw response on the snapshot for future reference.
+ */
+export interface CoinbaseFeeTier {
+  pricing_tier?: string;
+  usd_from?: string;
+  usd_to?: string;
+  taker_fee_rate?: string;
+  maker_fee_rate?: string;
+  aop_from?: string;
+  aop_to?: string;
+}
+
+export interface CoinbaseTransactionSummary {
+  total_volume?: number | string;
+  total_fees?: number | string;
+  fee_tier?: CoinbaseFeeTier;
+  margin_rate?: { value?: string };
+  goods_and_services_tax?: unknown;
+  advanced_trade_only_volume?: number | string;
+  advanced_trade_only_fees?: number | string;
+}
+
+/**
+ * Fetches the caller's current fee tier for `product_type` (SPOT). MUST be
+ * called against an authenticated account — Coinbase's public help page is not
+ * an authoritative source for personalized rates.
+ */
+export async function getTransactionSummary(
+  productType: 'SPOT' | 'FUTURE' = 'SPOT',
+): Promise<CoinbaseTransactionSummary> {
+  return request<CoinbaseTransactionSummary>(
+    'GET',
+    `/api/v3/brokerage/transaction_summary?product_type=${productType}`,
+    undefined,
+    { timeoutMs: 8_000 },
+  );
 }
 
 // ---------------------------------------------------------------------------
