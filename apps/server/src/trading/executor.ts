@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Money, ONE_MONEY, STRATEGY, STRATEGY_VERSION, type TradingMode } from '@horizon/shared';
 import { ENV } from '../env';
+import { allocateExitAttempt } from './exitAttemptAllocator';
 import {
-  countExitAttemptsForPosition,
   ensureInitialFund,
   findOrderIntentByClientOrderId,
   getBotConfig,
@@ -252,6 +252,13 @@ export interface EntryDecision {
    * Undefined only in tests / non-fenced entry paths.
    */
   fenceGeneration?: number;
+  /**
+   * Phase 1.1.b §A: the lease's resource key (e.g. SCAN_LEASE_KEY). Combined
+   * with `fenceGeneration` these two fields tie the intent to a specific
+   * execution_fences row — verifyFencingTx does `SELECT ... FOR UPDATE` on
+   * that row to authoritatively reject stale workers.
+   */
+  fenceResourceKey?: string;
 }
 
 export interface OpenResult {
@@ -329,6 +336,7 @@ export async function openPosition(decision: EntryDecision): Promise<OpenResult>
     purpose: 'entry',
     state: 'created',
     fenceGeneration: decision.fenceGeneration ?? null,
+    fenceResourceKey: decision.fenceResourceKey ?? null,
     dryRun: ENV.dryRun,
   });
 
@@ -621,35 +629,45 @@ export async function closePosition(
           ? 'emergency_exit'
           : 'manual_exit';
 
-  // Attempt generation = 1 + count of prior exit intents for this position+purpose.
-  // A timeout retry uses the SAME generation (persistIntent looks up the
-  // existing intent by clientOrderId and returns it). A fresh exit attempt
-  // after prior terminal resolution increments the generation.
-  const priorAttempts = await countExitAttemptsForPosition(position.id, purpose);
-  const attemptGeneration = priorAttempts + 1;
-  const clientOrderId = deriveClientOrderId({
-    purpose,
-    token: position.token,
-    mode: position.mode,
-    positionId: position.id,
-    attemptGeneration,
-  });
-  const intent = await persistIntent({
-    clientOrderId,
-    productId: product.product_id,
-    token: position.token,
-    side: 'SELL',
-    orderType: 'market_ioc',
-    baseSize: baseSizeStr,
-    mode: position.mode,
-    purpose,
-    positionId: position.id,
-    state: 'created',
-    dryRun: ENV.dryRun,
-    // §B FIX: attemptGeneration is part of the race-safe UNIQUE constraint.
-    // A concurrent worker computing the same generation is caught by the DB.
-    attemptGeneration,
-  });
+  // Phase 1.1.b §F: transactional exit-attempt allocation.
+  //
+  // The old `countExitAttemptsForPosition + 1` was racy — two workers
+  // reading the same count would derive the same clientOrderId. The
+  // allocator locks the position row (SELECT ... FOR UPDATE), inspects
+  // the newest exit intent for (positionId, purpose), and either REUSES
+  // the existing non-terminal intent or ALLOCATES the next generation.
+  const allocation = await allocateExitAttempt(position.id, purpose);
+  let intent: OrderIntentRow;
+  if (allocation.action === 'reuse' && allocation.reusedIntent) {
+    // Same clientOrderId as before — the caller (or a peer) is retrying an
+    // in-flight attempt; NEVER submit a fresh Coinbase order under a new
+    // clientOrderId. Fall through to the fills-fetch/apply path below.
+    intent = allocation.reusedIntent;
+  } else {
+    const attemptGeneration = allocation.attemptGeneration;
+    const clientOrderId = deriveClientOrderId({
+      purpose,
+      token: position.token,
+      mode: position.mode,
+      positionId: position.id,
+      attemptGeneration,
+    });
+    intent = await persistIntent({
+      clientOrderId,
+      productId: product.product_id,
+      token: position.token,
+      side: 'SELL',
+      orderType: 'market_ioc',
+      baseSize: baseSizeStr,
+      mode: position.mode,
+      purpose,
+      positionId: position.id,
+      state: 'created',
+      dryRun: ENV.dryRun,
+      attemptGeneration,
+    });
+  }
+  const clientOrderId = intent.clientOrderId;
 
   let exchangeOrderId: string;
   const exitFills: CoinbaseFill[] = [];

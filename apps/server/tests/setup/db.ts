@@ -22,6 +22,10 @@ export async function resetDatabase(): Promise<void> {
       'token_stats',
       'trades',
       'bot_config',
+      // Phase 1.1.b additions.
+      'execution_fences',
+      'reconciliation_runs',
+      'reconciliation_actions',
     ]) {
       await conn.query(`TRUNCATE TABLE \`${t}\``);
     }

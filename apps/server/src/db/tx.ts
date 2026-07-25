@@ -211,18 +211,59 @@ export class FencingViolation extends Error {
 }
 
 /**
- * Inside the atomic transaction, verify that no NEWER `fenceGeneration`
- * exists for the same token+purpose. If a peer with a higher generation has
- * already inserted an intent for this scan, our intent is stale — abort.
+ * Inside the atomic transaction, verify that the intent's `fenceGeneration`
+ * is still current for its `fenceResourceKey`. Uses the AUTHORITATIVE
+ * `execution_fences` table (Phase 1.1.b §A) with `SELECT ... FOR UPDATE`
+ * so a concurrent acquireLease that happens after our lock returns must
+ * wait for our commit; and a concurrent acquireLease that got there first
+ * has already bumped currentGeneration past ours.
  *
- * `fenceGeneration=null` on the intent means "no fencing configured" (test
- * paths, non-fenced entries) — treated as always valid.
+ * `fenceGeneration=null` OR `fenceResourceKey=null` means "no fencing
+ * configured" (test paths, non-fenced entries) — treated as always valid.
+ *
+ * Backwards-compat: if the intent has a fenceGeneration but no resource key
+ * (a pre-1.1.b row) we fall back to the old per-(token,purpose) max check
+ * on order_intents. New writes always populate both.
  */
 export async function verifyFencingTx(
   tx: typeof db,
-  intent: Pick<OrderIntentRow, 'id' | 'token' | 'purpose' | 'fenceGeneration'>,
+  intent: Pick<
+    OrderIntentRow,
+    'id' | 'token' | 'purpose' | 'fenceGeneration' | 'fenceResourceKey'
+  >,
 ): Promise<void> {
   if (intent.fenceGeneration == null) return;
+
+  if (intent.fenceResourceKey) {
+    // Authoritative path — the execution_fences table. FOR UPDATE holds a
+    // row lock through the commit, blocking concurrent bumps until we finish.
+    const raw = (await tx.execute(sql`
+      SELECT currentGeneration FROM execution_fences
+      WHERE resourceKey = ${intent.fenceResourceKey}
+      FOR UPDATE
+    `)) as unknown as [{ currentGeneration: number | string | bigint }[], unknown];
+    const rowsA = Array.isArray(raw[0])
+      ? raw[0]
+      : (raw as unknown as { currentGeneration: number | string | bigint }[]);
+    const row = rowsA[0];
+    if (!row) {
+      // No fence row exists yet for this resource — that means no acquire
+      // ever recorded a generation. Treat as violation because we should
+      // have INSERTed one at acquire time.
+      throw new FencingViolation(
+        intent.fenceGeneration,
+        0,
+        `${intent.fenceResourceKey} (no fence row)`,
+      );
+    }
+    const currentGen = Number(row.currentGeneration);
+    if (currentGen > intent.fenceGeneration) {
+      throw new FencingViolation(intent.fenceGeneration, currentGen, intent.fenceResourceKey);
+    }
+    return;
+  }
+
+  // Legacy pre-1.1.b fallback: per-(token,purpose) max on order_intents.
   const maxRows = await tx
     .select({ maxGen: sql<number | null>`max(${orderIntents.fenceGeneration})` })
     .from(orderIntents)

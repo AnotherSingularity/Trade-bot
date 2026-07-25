@@ -36,6 +36,13 @@
       "when": 1785600000000,
       "tag": "0004_phase1_1a_fix_fencing_and_race_safe_exits",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1785700000000,
+      "tag": "0005_phase1_1b_authoritative_fence_and_preview_binding",
+      "breakpoints": true
     }
   ]
 }

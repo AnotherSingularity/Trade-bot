@@ -139,6 +139,36 @@ export const orderIntents = mysqlTable(
     // clientOrderId).
     attemptGeneration: int('attemptGeneration'),
 
+    // Phase 1.1.b §A: which execution_fences row authorizes this intent.
+    // verifyFencingTx uses (fenceResourceKey, fenceGeneration) to lookup the
+    // authoritative currentGeneration inside the atomic tx.
+    fenceResourceKey: varchar('fenceResourceKey', { length: 64 }),
+
+    // Phase 1.1.b §G: preview binding.
+    previewId: varchar('previewId', { length: 64 }),
+    decisionId: int('decisionId'),
+    costForecastId: int('costForecastId'),
+    feeTierSnapshotId: int('feeTierSnapshotId'),
+    configHash: varchar('configHash', { length: 64 }),
+    previewedAt: timestamp('previewedAt'),
+    previewExpiresAt: timestamp('previewExpiresAt'),
+    normalizedConfig: text('normalizedConfig'),
+
+    // Phase 1.1.b §E: partial-fill state model. Populated by the fill-state
+    // classifier after each fills fetch. `residualBaseSize` = remaining base
+    // qty on the exchange (not yet filled).
+    residualBaseSize: decimal('residualBaseSize', { precision: 20, scale: 8 }),
+    fillState: mysqlEnum('fillState', [
+      'unfilled_open',
+      'unfilled_terminal',
+      'partially_filled_open',
+      'partially_filled_terminal',
+      'completely_filled',
+      'filled_with_dust_residual',
+      'inconsistent',
+      'unknown',
+    ]),
+
     createdAt: timestamp('createdAt').defaultNow().notNull(),
     updatedAt: timestamp('updatedAt').defaultNow().onUpdateNow().notNull(),
   },
@@ -150,6 +180,8 @@ export const orderIntents = mysqlTable(
     positionIdIdx: index('order_intents_position_idx').on(table.positionId),
     stateIdx: index('order_intents_state_idx').on(table.state),
     fenceIdx: index('order_intents_fence_idx').on(table.fenceGeneration),
+    fenceResourceIdx: index('order_intents_fence_resource_idx').on(table.fenceResourceKey),
+    configHashIdx: index('order_intents_config_hash_idx').on(table.configHash),
     // (positionId, purpose, attemptGeneration) UNIQUE — race-safe exit
     // allocation. NULL positionId (entries) doesn't collide, so this only
     // constrains exit intents in practice.
@@ -254,6 +286,12 @@ export const positions = mysqlTable(
 
     // Optimistic-locking version.
     version: int('version').default(0).notNull(),
+
+    // Phase 1.1.b §E: after a partial exit that reduces exposure but doesn't
+    // close, `residualBaseSize` is the remaining base quantity. Null when the
+    // position has never been partially exited (equal to filledQuantity by
+    // implication).
+    residualBaseSize: decimal('residualBaseSize', { precision: 20, scale: 8 }),
 
     openedAt: timestamp('openedAt').defaultNow().notNull(),
     closedAt: timestamp('closedAt'),
@@ -570,11 +608,87 @@ export const quantitativeDecisions = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Execution fences (§A) — the authoritative fencing generation table.
+//
+// One row per lease resource key. Every acquireLease bumps
+// `currentGeneration` atomically; every economic mutation transaction takes
+// `SELECT ... FOR UPDATE` on the matching row and rejects any writer whose
+// generation is older than currentGeneration.
+// ---------------------------------------------------------------------------
+export const executionFences = mysqlTable('execution_fences', {
+  resourceKey: varchar('resourceKey', { length: 64 }).notNull().primaryKey(),
+  currentGeneration: int('currentGeneration').notNull(),
+  ownerId: varchar('ownerId', { length: 64 }),
+  acquiredAt: timestamp('acquiredAt').notNull().defaultNow(),
+  renewedAt: timestamp('renewedAt').notNull().defaultNow(),
+  state: mysqlEnum('state', ['active', 'released', 'expired']).notNull().default('active'),
+});
+
+// ---------------------------------------------------------------------------
+// Reconciliation observability (§I) — one row per run, one row per action.
+// ---------------------------------------------------------------------------
+export const reconciliationRuns = mysqlTable(
+  'reconciliation_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    runId: varchar('runId', { length: 64 }).notNull(),
+    triggerReason: varchar('triggerReason', { length: 64 }).notNull(),
+    startedAt: timestamp('startedAt').notNull().defaultNow(),
+    completedAt: timestamp('completedAt'),
+    ownerId: varchar('ownerId', { length: 64 }),
+    fenceGeneration: int('fenceGeneration'),
+    intentsExamined: int('intentsExamined').notNull().default(0),
+    intentsResolved: int('intentsResolved').notNull().default(0),
+    intentsStillUnknown: int('intentsStillUnknown').notNull().default(0),
+    fillsDiscovered: int('fillsDiscovered').notNull().default(0),
+    economicRecordsApplied: int('economicRecordsApplied').notNull().default(0),
+    discrepancyCount: int('discrepancyCount').notNull().default(0),
+    finalStatus: mysqlEnum('finalStatus', ['running', 'ok', 'degraded', 'failed'])
+      .notNull()
+      .default('running'),
+    failureReasonCode: varchar('failureReasonCode', { length: 64 }),
+    detail: text('detail'),
+  },
+  (table) => ({
+    runIdUnique: uniqueIndex('reconciliation_runs_runid_uq').on(table.runId),
+    startedIdx: index('reconciliation_runs_started_idx').on(table.startedAt),
+  }),
+);
+
+export const reconciliationActions = mysqlTable(
+  'reconciliation_actions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    runId: varchar('runId', { length: 64 }).notNull(),
+    intentId: int('intentId'),
+    clientOrderId: varchar('clientOrderId', { length: 64 }),
+    action: varchar('action', { length: 64 }).notNull(),
+    previousState: varchar('previousState', { length: 32 }),
+    newState: varchar('newState', { length: 32 }),
+    fillsBefore: int('fillsBefore'),
+    fillsAfter: int('fillsAfter'),
+    paginationResult: varchar('paginationResult', { length: 64 }),
+    failureReasonCode: varchar('failureReasonCode', { length: 64 }),
+    detail: text('detail'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (table) => ({
+    runIdx: index('reconciliation_actions_run_idx').on(table.runId),
+    intentIdx: index('reconciliation_actions_intent_idx').on(table.intentId),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
 export type OrderIntentRow = typeof orderIntents.$inferSelect;
 export type OrderIntentInsert = typeof orderIntents.$inferInsert;
+export type ExecutionFenceRow = typeof executionFences.$inferSelect;
+export type ReconciliationRunRow = typeof reconciliationRuns.$inferSelect;
+export type ReconciliationRunInsert = typeof reconciliationRuns.$inferInsert;
+export type ReconciliationActionRow = typeof reconciliationActions.$inferSelect;
+export type ReconciliationActionInsert = typeof reconciliationActions.$inferInsert;
 export type FillRow = typeof fills.$inferSelect;
 export type FillInsert = typeof fills.$inferInsert;
 export type PositionRow = typeof positions.$inferSelect;

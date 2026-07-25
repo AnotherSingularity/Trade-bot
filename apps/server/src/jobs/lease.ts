@@ -1,10 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import IORedis from 'ioredis';
 import { ENV } from '../env';
+import { bumpExecutionFence, releaseExecutionFence } from '../db/executionFence';
 
 /**
- * Redis-backed leader lease with periodic renewal + fencing token
- * (Phase 1.1.a §H).
+ * Redis-backed leader lease with periodic renewal + AUTHORITATIVE DB fencing.
  *
  * Prevents overlapping scan cycles across replicas — a single-writer invariant
  * for the entry pipeline.
@@ -14,13 +14,16 @@ import { ENV } from '../env';
  * a peer stole it), the lease is marked invalid; callers may check via
  * `lease.isValid()` before committing an economic mutation.
  *
- * Fencing: each acquire also bumps a per-key monotonic counter
- * (`<key>:generation`) via INCR. The generation number is attached to the
- * lease object as `fenceGeneration`. Slice 1.1.b will thread this generation
- * through the DB writes so a stale worker whose renewal failed cannot commit
- * an update that a fresher holder has already made.
+ * Fencing (Phase 1.1.b §A): each successful acquire also atomically bumps
+ * `execution_fences.currentGeneration` for the same resource key via
+ * `bumpExecutionFence`. The generation returned by the DB — NOT by Redis —
+ * is authoritative and is what verifyFencingTx compares against inside the
+ * atomic economic transaction. Redis's local INCR is retained as a
+ * best-effort observation channel (getFenceGeneration), not for authorization.
  *
- * Release: CAS via Lua — DEL only if the token still matches.
+ * Release: CAS via Lua — DEL only if the token still matches, plus mark the
+ * DB fence row 'released' (informational only; the generation is NEVER
+ * decremented).
  */
 
 let sharedRedis: IORedis | null = null;
@@ -61,20 +64,33 @@ export interface Lease {
   release: () => Promise<boolean>;
 }
 
-async function bumpGeneration(key: string): Promise<number> {
-  const n = await getRedis().incr(`${key}:generation`);
-  return Number(n);
+async function bumpRedisGenerationObservation(key: string): Promise<void> {
+  // Best-effort observation channel — NOT authoritative. If this fails we
+  // still proceed; the DB fence is the source of truth.
+  try {
+    await getRedis().incr(`${key}:generation`);
+  } catch {
+    /* swallow */
+  }
 }
 
 /**
  * Attempts to acquire the lease. Returns null if another holder has it.
  * TTL guards against a crashed holder never releasing.
+ *
+ * The returned `fenceGeneration` comes from the AUTHORITATIVE DB fence
+ * (`execution_fences.currentGeneration`), not from Redis. This is the
+ * value callers must persist on order_intents.
  */
 export async function acquireLease(key: string, ttlMs: number): Promise<Lease | null> {
   const token = randomBytes(16).toString('hex');
   const res = await getRedis().set(key, token, 'PX', ttlMs, 'NX');
   if (res !== 'OK') return null;
-  const fenceGeneration = await bumpGeneration(key);
+
+  // Authoritative fence bump — DB source of truth.
+  const acquired = await bumpExecutionFence(key, token);
+  const fenceGeneration = acquired.newGeneration;
+  await bumpRedisGenerationObservation(key); // best-effort observation
 
   let valid = true;
 
@@ -92,6 +108,8 @@ export async function acquireLease(key: string, ttlMs: number): Promise<Lease | 
     async release() {
       valid = false;
       const result = (await getRedis().eval(RELEASE_SCRIPT, 1, key, token)) as number;
+      // Informational: mark DB fence row released. Never decrement the generation.
+      await releaseExecutionFence(key, token).catch(() => undefined);
       return result === 1;
     },
   };
@@ -147,10 +165,14 @@ export async function withLease<T>(
   }
 }
 
-/** Fetches the current fence generation for `key` without acquiring the lease. */
+/**
+ * Fetches the current fence generation for `key` without acquiring the lease.
+ * Reads the AUTHORITATIVE DB fence table (Phase 1.1.b §A). Returns 0 if no
+ * row exists yet (no acquire has ever recorded a generation).
+ */
 export async function getFenceGeneration(key: string): Promise<number> {
-  const raw = await getRedis().get(`${key}:generation`);
-  return raw ? Number(raw) : 0;
+  const { readExecutionFenceGeneration } = await import('../db/executionFence');
+  return readExecutionFenceGeneration(key);
 }
 
 export const SCAN_LEASE_KEY = 'horizon:lease:scan';

@@ -488,6 +488,7 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
       // atomic transaction can reject a stale worker even if lease.isValid()
       // was true at precheck.
       fenceGeneration: lease?.fenceGeneration,
+      fenceResourceKey: lease?.key,
     });
     if (result.kind === 'opened') opened++;
   }
