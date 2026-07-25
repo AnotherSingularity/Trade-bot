@@ -1,0 +1,4599 @@
+{
+  "contentHash": "3e216adc8a279472880d026824f0b6d964fab27c067abdfab4c35184cce97c2a",
+  "drizzleKitVersion": "0.31.10",
+  "fingerprintVersion": "1",
+  "tables": [
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('scan','signal','trade','system','error','reconciliation','security')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "type",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(20)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "token",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(60)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "action",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "detail",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "tokensScanned",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "passedVolumeFilter",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "passedSignalThreshold",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "'info'",
+          "columnType": "enum('info','warn','high','critical')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "severity",
+          "ordinal": 10
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "activity_log"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "isRunning",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "isPaused",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "consecutiveLosses",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "circuitBreakerUntil",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "on update current_timestamp()",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "updatedAt",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "'pending'",
+          "columnType": "enum('pending','in_progress','ok','failed','degraded')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "reconciliationStatus",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "reconciliationDetail",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "reconciledAt",
+          "ordinal": 9
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "bot_config"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "deltaUsd",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('initial_fund','buy_cost','buy_fee','buy_slippage','sell_proceeds','sell_fee','sell_slippage','manual_adjustment')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "reason",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "orderIntentId",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "positionId",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": null,
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "dryRun",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "detail",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(128)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "idempotencyKey",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "fillId",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "decisionChainId",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "adjustmentType",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(255)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "adjustmentReason",
+          "ordinal": 13
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "actor",
+          "ordinal": 14
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "reconciliationRunId",
+          "ordinal": 15
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "enum('fill_driven','explicit_adjustment','initial_funding')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "causeCategory",
+          "ordinal": 16
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "causeCategory"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "cash_ledger_cause_idx"
+        },
+        {
+          "columns": [
+            "createdAt"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "cash_ledger_created_at_idx"
+        },
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "cash_ledger_decision_chain_idx"
+        },
+        {
+          "columns": [
+            "dryRun"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "cash_ledger_dryrun_idx"
+        },
+        {
+          "columns": [
+            "fillId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "cash_ledger_fillId_idx"
+        },
+        {
+          "columns": [
+            "idempotencyKey"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "name": "cash_ledger_idempotency_uq"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "cash_ledger"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "scanRunId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(30)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "productId",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "strategyVersion",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "'observed'",
+          "columnType": "enum('observed','ineligible','no_setup','candidate','economically_rejected','quantitatively_rejected','approved','order_pending','partially_filled','position_open','position_closed','outcome_labeled','failed')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "currentStatus",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "observedAt",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "dataAvailableAt",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "decisionStartedAt",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "decisionCompletedAt",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "'partial'",
+          "columnType": "enum('complete','partial','broken','legacy_unresolved')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "lineageCompleteness",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "'current'",
+          "columnType": "enum('current','legacy_backfilled','legacy_unresolved')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "legacyStatus",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "on update current_timestamp()",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "updatedAt",
+          "ordinal": 13
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "scanRunId"
+          ],
+          "name": "decision_chains_scanRunId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "scan_runs"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "productId",
+            "observedAt"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "decision_chains_product_idx"
+        },
+        {
+          "columns": [
+            "scanRunId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "decision_chains_scan_idx"
+        },
+        {
+          "columns": [
+            "currentStatus"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "decision_chains_status_idx"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "decision_chains"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "decisionChainId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "marketObservationId",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "eligible",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('eligible','reconciliation_degraded','unsupported_product','invalid_product_state','insufficient_volume','insufficient_history','stale_market_data','market_data_failure','existing_position','position_limit','market_window_exclusion','paused','circuit_breaker')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "reasonCode",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(255)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "reasonDetail",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "policyVersion",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "decidedAt",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 9
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "name": "eligibility_decisions_decisionChainId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "decision_chains"
+        },
+        {
+          "columns": [
+            "marketObservationId"
+          ],
+          "name": "eligibility_decisions_marketObservationId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "market_observations"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "eligibility_decisions_chain_idx"
+        },
+        {
+          "columns": [
+            "marketObservationId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "eligibility_decisions_marketObservationId_fk"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "eligibility_decisions"
+    },
+    {
+      "checkConstraints": [
+        {
+          "clause": "json_valid(`previewRawResponse`)",
+          "level": "Column",
+          "name": "previewRawResponse"
+        },
+        {
+          "clause": "json_valid(`previewWarnings`)",
+          "level": "Column",
+          "name": "previewWarnings"
+        }
+      ],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "candidateId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "feeTierSnapshotId",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "previewOrderTotal",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "previewCommissionTotal",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "previewBestBid",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "previewBestAsk",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "previewEstimatedAvgFillPrice",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "previewBaseSize",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "previewQuoteSize",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "arrivalMid",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "spreadBps",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "entryFee",
+          "ordinal": 13
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "exitFeeEstimate",
+          "ordinal": 14
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "entryImpactBps",
+          "ordinal": 15
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "exitImpactBpsEstimate",
+          "ordinal": 16
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "latencySlippageBpsEstimate",
+          "ordinal": 17
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "roundTripCost",
+          "ordinal": 18
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "costToTargetPct",
+          "ordinal": 19
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "takeProfitPrice",
+          "ordinal": 20
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "stopLossPrice",
+          "ordinal": 21
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "netTpPnl",
+          "ordinal": 22
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "netSlPnl",
+          "ordinal": 23
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "netRewardRisk",
+          "ordinal": 24
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(6,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "breakEvenWinProb",
+          "ordinal": 25
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "costModelVersion",
+          "ordinal": 26
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(6,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "exitCostQuantile",
+          "ordinal": 27
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "longtext",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "previewWarnings",
+          "ordinal": 28
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "longtext",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "previewRawResponse",
+          "ordinal": 29
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 30
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "realizedEntryFee",
+          "ordinal": 31
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "realizedExitFee",
+          "ordinal": 32
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "realizedEntryImpactBps",
+          "ordinal": 33
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "realizedExitImpactBps",
+          "ordinal": 34
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "realizedRoundTripCost",
+          "ordinal": 35
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "realizedAt",
+          "ordinal": 36
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "decisionChainId",
+          "ordinal": 37
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "routingDecisionId",
+          "ordinal": 38
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "candidateId"
+          ],
+          "name": "execution_cost_forecasts_candidateId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "signal_candidates"
+        },
+        {
+          "columns": [
+            "feeTierSnapshotId"
+          ],
+          "name": "execution_cost_forecasts_feeTierSnapshotId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "fee_tier_snapshots"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "candidateId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "execution_cost_forecasts_candidateId_idx"
+        },
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "execution_cost_forecasts_chain_idx"
+        },
+        {
+          "columns": [
+            "createdAt"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "execution_cost_forecasts_createdAt_idx"
+        },
+        {
+          "columns": [
+            "feeTierSnapshotId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "execution_cost_forecasts_feeTierSnapshotId_idx"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "execution_cost_forecasts"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "resourceKey",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "currentGeneration",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "ownerId",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "acquiredAt",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "renewedAt",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "'active'",
+          "columnType": "enum('active','released','expired')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "state",
+          "ordinal": 6
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "resourceKey"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "execution_fences"
+    },
+    {
+      "checkConstraints": [
+        {
+          "clause": "json_valid(`rawResponse`)",
+          "level": "Column",
+          "name": "rawResponse"
+        }
+      ],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "pricingTier",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(10,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "makerFeeRate",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(10,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "takerFeeRate",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "usdVolume30d",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "usdFees30d",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "usdFromVolume",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "usdToVolume",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "'SPOT'",
+          "columnType": "varchar(16)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "productType",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "fetchedAt",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "longtext",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "rawResponse",
+          "ordinal": 11
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "fetchedAt"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "fee_tier_snapshots_fetchedAt_idx"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "fee_tier_snapshots"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(128)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "exchangeFillId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "orderIntentId",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(128)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "exchangeOrderId",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(20)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "token",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('BUY','SELL')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "side",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "filledSize",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "fillPrice",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "fee",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(10)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "feeCurrency",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "tradeTime",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "rawResponse",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 13
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "exchangeFillId"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "name": "fills_exchange_uq"
+        },
+        {
+          "columns": [
+            "orderIntentId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "fills_order_idx"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "fills"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "decisionChainId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "eventType",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "sourceEntityType",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "sourceRecordId",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "eventTime",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "dataAvailableAt",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "actor",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "componentVersion",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "metadata",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 11
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "name": "lineage_events_decisionChainId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "decision_chains"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "decisionChainId",
+            "eventTime"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "lineage_events_chain_idx"
+        },
+        {
+          "columns": [
+            "eventType"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "lineage_events_type_idx"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "lineage_events"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "decisionChainId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(30)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "productId",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "observedAt",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "dataAvailableAt",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "marketDataVersion",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "inputDataHash",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "price",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "volume24h",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "spread",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('valid','stale','incomplete','invalid','unavailable')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "dataQualityStatus",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(255)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "failureReason",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": null,
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "immutablePayload",
+          "ordinal": 13
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 14
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "name": "market_observations_decisionChainId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "decision_chains"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "market_observations_chain_idx"
+        },
+        {
+          "columns": [
+            "inputDataHash"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "market_observations_hash_idx"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "market_observations"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "clientOrderId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(30)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "productId",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(20)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "token",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('BUY','SELL')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "side",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('market_ioc','limit','stop_limit','bracket_tp','bracket_sl')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "orderType",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "quoteSize",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "baseSize",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('reversion','breakout','macro')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "mode",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('entry','take_profit','stop_loss','manual_exit','emergency_exit')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "purpose",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "positionId",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": "'created'",
+          "columnType": "enum('created','previewed','submitted','acknowledged','partially_filled','filled','rejected','canceled','failed','unknown')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "state",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(128)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "exchangeOrderId",
+          "ordinal": 13
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "enum('definitely_rejected','definitely_not_submitted','submitted','unknown','retryable_transport','non_retryable_validation')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "failureClass",
+          "ordinal": 14
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(128)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "errorCode",
+          "ordinal": 15
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "errorMessage",
+          "ordinal": 16
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "rawResponse",
+          "ordinal": 17
+        },
+        {
+          "columnDefault": null,
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "dryRun",
+          "ordinal": 18
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 19
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "on update current_timestamp()",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "updatedAt",
+          "ordinal": 20
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "fenceGeneration",
+          "ordinal": 21
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "attemptGeneration",
+          "ordinal": 22
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "fenceResourceKey",
+          "ordinal": 23
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "previewId",
+          "ordinal": 24
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "decisionId",
+          "ordinal": 25
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "costForecastId",
+          "ordinal": 26
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "feeTierSnapshotId",
+          "ordinal": 27
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "configHash",
+          "ordinal": 28
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "previewedAt",
+          "ordinal": 29
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "previewExpiresAt",
+          "ordinal": 30
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "normalizedConfig",
+          "ordinal": 31
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "residualBaseSize",
+          "ordinal": 32
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "enum('unfilled_open','unfilled_terminal','partially_filled_open','partially_filled_terminal','completely_filled','filled_with_dust_residual','inconsistent','unknown')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "fillState",
+          "ordinal": 33
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "decisionChainId",
+          "ordinal": 34
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "entryDecisionChainId",
+          "ordinal": 35
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "strategyVersionAt",
+          "ordinal": 36
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "costModelVersionAt",
+          "ordinal": 37
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "protectionGeneration",
+          "ordinal": 38
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "clientOrderId"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "name": "order_intents_client_uq"
+        },
+        {
+          "columns": [
+            "configHash"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "order_intents_config_hash_idx"
+        },
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "order_intents_decision_chain_idx"
+        },
+        {
+          "columns": [
+            "entryDecisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "order_intents_entry_chain_idx"
+        },
+        {
+          "columns": [
+            "exchangeOrderId"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "name": "order_intents_exchange_uq"
+        },
+        {
+          "columns": [
+            "positionId",
+            "purpose",
+            "attemptGeneration"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "name": "order_intents_exit_attempt_uq"
+        },
+        {
+          "columns": [
+            "fenceGeneration"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "order_intents_fence_idx"
+        },
+        {
+          "columns": [
+            "fenceResourceKey"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "order_intents_fence_resource_idx"
+        },
+        {
+          "columns": [
+            "positionId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "order_intents_position_idx"
+        },
+        {
+          "columns": [
+            "state"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "order_intents_state_idx"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "order_intents"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "decisionChainId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "roundTripId",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "labelVersion",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "labelType",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "tpReachedFirst",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "slReachedFirst",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "timeout",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "ambiguous",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "maximumFavorableExcursion",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "maximumAdverseExcursion",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "timeToTp",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "timeToSl",
+          "ordinal": 13
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "grossPnl",
+          "ordinal": 14
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "netPnl",
+          "ordinal": 15
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "totalFees",
+          "ordinal": 16
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "forecastCost",
+          "ordinal": 17
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "realizedCost",
+          "ordinal": 18
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "labelWindowStart",
+          "ordinal": 19
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "labelWindowEnd",
+          "ordinal": 20
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "dataAvailableAt",
+          "ordinal": 21
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "supersedesOutcomeLabelId",
+          "ordinal": 22
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(255)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "correctionReason",
+          "ordinal": 23
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 24
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "name": "outcome_labels_decisionChainId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "decision_chains"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "outcome_labels_chain_idx"
+        },
+        {
+          "columns": [
+            "decisionChainId",
+            "labelVersion"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "name": "outcome_labels_chain_version_uq"
+        },
+        {
+          "columns": [
+            "roundTripId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "outcome_labels_roundtrip_idx"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "outcome_labels"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(20)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "token",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('reversion','breakout','macro')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "mode",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "avgEntryPrice",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "filledQuantity",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "entryFees",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "entryQuoteSpent",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(5,2)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "allocationPct",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "takeProfitPrice",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "stopLossPrice",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(5,2)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "takeProfitPct",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(5,2)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "stopLossPct",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "entryOrderIntentId",
+          "ordinal": 13
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "protectiveTpIntentId",
+          "ordinal": 14
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "protectiveSlIntentId",
+          "ordinal": 15
+        },
+        {
+          "columnDefault": "'polling_fallback'",
+          "columnType": "enum('exchange_bracket','polling_fallback','unprotected')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "protectionMode",
+          "ordinal": 16
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "claudeReason",
+          "ordinal": 17
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "claudeModel",
+          "ordinal": 18
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(5,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "claudeConfidence",
+          "ordinal": 19
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(20)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "strategyVersion",
+          "ordinal": 20
+        },
+        {
+          "columnDefault": "'opening'",
+          "columnType": "enum('opening','open','closing','closed','reconciling')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "lifecycleState",
+          "ordinal": 21
+        },
+        {
+          "columnDefault": "'open'",
+          "columnType": "enum('open','closed')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "status",
+          "ordinal": 22
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "version",
+          "ordinal": 23
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "openedAt",
+          "ordinal": 24
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "closedAt",
+          "ordinal": 25
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(20)",
+          "extra": "VIRTUAL GENERATED",
+          "generationExpression": "case when `status` = 'open' then `token` else NULL end",
+          "isNullable": true,
+          "name": "openTokenKey",
+          "ordinal": 26
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "residualBaseSize",
+          "ordinal": 27
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "entryDecisionChainId",
+          "ordinal": 28
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "entryDecisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "positions_entry_chain_idx"
+        },
+        {
+          "columns": [
+            "openTokenKey"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "name": "positions_open_token_uq"
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "positions_status_idx"
+        },
+        {
+          "columns": [
+            "token"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "positions_token_idx"
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "positions"
+    },
+    {
+      "checkConstraints": [
+        {
+          "clause": "json_valid(`rejectionDetail`)",
+          "level": "Column",
+          "name": "rejectionDetail"
+        }
+      ],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "candidateId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "costForecastId",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('accept','reject_ev_gate','reject_cost_gate','reject_reward_risk_gate','reject_data_stale','reject_preview_warning','reject_preview_error','reject_fee_tier_stale','reject_liquidity_gate','reject_regime_gate','reject_signal_gate','reject_max_positions','reject_already_open','reject_circuit_breaker','reject_paused','reject_market_window','reject_dedup')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "decision",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(255)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "rejectionReason",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "longtext",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "rejectionDetail",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "netTpPnl",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "netSlPnl",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "netRewardRisk",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "expectedValue",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(6,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "breakEvenWinProb",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "strategyVersion",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "costModelVersion",
+          "ordinal": 13
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "evGateVersion",
+          "ordinal": 14
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 15
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "decisionChainId",
+          "ordinal": 16
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "candidateId"
+          ],
+          "name": "quantitative_decisions_candidateId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "signal_candidates"
+        },
+        {
+          "columns": [
+            "costForecastId"
+          ],
+          "name": "quantitative_decisions_costForecastId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "execution_cost_forecasts"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        },
+        {
+          "columns": [
+            "candidateId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "quantitative_decisions_candidateId_idx"
+        },
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "quantitative_decisions_chain_idx"
+        },
+        {
+          "columns": [
+            "costForecastId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "quantitative_decisions_costForecastId_fk"
+        },
+        {
+          "columns": [
+            "decision",
+            "createdAt"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "quantitative_decisions_decision_idx"
+        }
+      ],
+      "name": "quantitative_decisions"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "runId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "intentId",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "clientOrderId",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "action",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "previousState",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "newState",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "fillsBefore",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "fillsAfter",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "paginationResult",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "failureReasonCode",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "detail",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 13
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "decisionChainId",
+          "ordinal": 14
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "economicStateApplied",
+          "ordinal": 15
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "fillsDiscovered",
+          "ordinal": 16
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        },
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "reconciliation_actions_chain_idx"
+        },
+        {
+          "columns": [
+            "intentId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "reconciliation_actions_intent_idx"
+        },
+        {
+          "columns": [
+            "runId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "reconciliation_actions_run_idx"
+        }
+      ],
+      "name": "reconciliation_actions"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "runId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "triggerReason",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "startedAt",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "completedAt",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "ownerId",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "fenceGeneration",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "intentsExamined",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "intentsResolved",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "intentsStillUnknown",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "fillsDiscovered",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "economicRecordsApplied",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "discrepancyCount",
+          "ordinal": 13
+        },
+        {
+          "columnDefault": "'running'",
+          "columnType": "enum('running','ok','degraded','failed')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "finalStatus",
+          "ordinal": 14
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "failureReasonCode",
+          "ordinal": 15
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "detail",
+          "ordinal": 16
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        },
+        {
+          "columns": [
+            "runId"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "name": "reconciliation_runs_runid_uq"
+        },
+        {
+          "columns": [
+            "startedAt"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "reconciliation_runs_started_idx"
+        }
+      ],
+      "name": "reconciliation_runs"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "positionId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(20)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "token",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('reversion','breakout','macro')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "mode",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "entryValueGross",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "exitValueGross",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "entryFees",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "exitFees",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "realizedNetPnl",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "realizedNetPnlPct",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('win','loss','flat')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "outcome",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('take_profit','stop_loss','early_exit','manual','emergency','reconciled')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "exitReason",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "openedAt",
+          "ordinal": 13
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "closedAt",
+          "ordinal": 14
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 15
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "entryDecisionChainId",
+          "ordinal": 16
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "finalExitDecisionChainId",
+          "ordinal": 17
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "entryOrderIntentId",
+          "ordinal": 18
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "finalExitOrderIntentId",
+          "ordinal": 19
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        },
+        {
+          "columns": [
+            "closedAt"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "round_trips_closed_at_idx"
+        },
+        {
+          "columns": [
+            "entryDecisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "round_trips_entry_chain_idx"
+        },
+        {
+          "columns": [
+            "finalExitDecisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "round_trips_final_exit_chain_idx"
+        },
+        {
+          "columns": [
+            "outcome"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "round_trips_outcome_idx"
+        },
+        {
+          "columns": [
+            "positionId"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "name": "round_trips_position_uq"
+        },
+        {
+          "columns": [
+            "token"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "round_trips_token_idx"
+        }
+      ],
+      "name": "round_trips"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "triggerType",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "startedAt",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "completedAt",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "'started'",
+          "columnType": "enum('started','completed','partially_completed','blocked','failed')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "status",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "botState",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "reconciliationStatus",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "marketWindowState",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "scannerVersion",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(255)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "failureReason",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 11
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        },
+        {
+          "columns": [
+            "startedAt"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "scan_runs_started_idx"
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "scan_runs_status_idx"
+        }
+      ],
+      "name": "scan_runs"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "decisionChainId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "marketObservationId",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "modeEvaluated",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "setupDetected",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(10,6)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "setupScore",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "strategyVersion",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "indicatorVersion",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "inputHash",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": null,
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "reasonCodes",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "evaluatedAt",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 12
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "name": "setup_evaluations_decisionChainId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "decision_chains"
+        },
+        {
+          "columns": [
+            "marketObservationId"
+          ],
+          "name": "setup_evaluations_marketObservationId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "market_observations"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        },
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "setup_evaluations_chain_idx"
+        },
+        {
+          "columns": [
+            "marketObservationId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "setup_evaluations_marketObservationId_fk"
+        }
+      ],
+      "name": "setup_evaluations"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(64)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "scanSeed",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(20)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "token",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('reversion','breakout','macro')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "mode",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "scanPrice",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "volume24h",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "changePct24h",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "rsi",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "macdHistogram",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(16)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "emaTrend",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(16)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "bollingerPosition",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "passedSignals",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "totalSignals",
+          "ordinal": 13
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(6,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "tokenWinRate",
+          "ordinal": 14
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "tokenTradeCount",
+          "ordinal": 15
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "strategyVersion",
+          "ordinal": 16
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "featureVersion",
+          "ordinal": 17
+        },
+        {
+          "columnDefault": "'unclassified'",
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "regimeLabel",
+          "ordinal": 18
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(5,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "regimeConfidence",
+          "ordinal": 19
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('PRIME','ACTIVE','CLOSED')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "marketWindow",
+          "ordinal": 20
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 21
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "decisionChainId",
+          "ordinal": 22
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "marketObservationId",
+          "ordinal": 23
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "setupEvaluationId",
+          "ordinal": 24
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "routingDecisionId",
+          "ordinal": 25
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        },
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "signal_candidates_chain_idx"
+        },
+        {
+          "columns": [
+            "scanSeed"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "signal_candidates_scanSeed_idx"
+        },
+        {
+          "columns": [
+            "token",
+            "createdAt"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "signal_candidates_token_idx"
+        }
+      ],
+      "name": "signal_candidates"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "decisionChainId",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "setupEvaluationId",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "selectedMode",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('reversion','breakout','macro_floor','no_trade','conflict','unclassified')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "routingOutcome",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": null,
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "reasonCodes",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(32)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "strategyVersion",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": null,
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "decidedAt",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "createdAt",
+          "ordinal": 9
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "name": "strategy_routing_decisions_decisionChainId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "decision_chains"
+        },
+        {
+          "columns": [
+            "setupEvaluationId"
+          ],
+          "name": "strategy_routing_decisions_setupEvaluationId_fk",
+          "onDelete": "RESTRICT",
+          "onUpdate": "RESTRICT",
+          "referencedColumns": [
+            "id"
+          ],
+          "referencedTable": "setup_evaluations"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        },
+        {
+          "columns": [
+            "decisionChainId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "strategy_routing_decisions_chain_idx"
+        },
+        {
+          "columns": [
+            "setupEvaluationId"
+          ],
+          "isPrimary": false,
+          "isUnique": false,
+          "name": "strategy_routing_decisions_setupEvaluationId_fk"
+        }
+      ],
+      "name": "strategy_routing_decisions"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(20)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "token",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "totalTrades",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "wins",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "0",
+          "columnType": "int(11)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "losses",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "0.00",
+          "columnType": "decimal(5,2)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "winRate",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": "1",
+          "columnType": "tinyint(1)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "isActive",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "on update current_timestamp()",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "updatedAt",
+          "ordinal": 8
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        },
+        {
+          "columns": [
+            "token"
+          ],
+          "isPrimary": false,
+          "isUnique": true,
+          "name": "token_stats_token_unique"
+        }
+      ],
+      "name": "token_stats"
+    },
+    {
+      "checkConstraints": [],
+      "columns": [
+        {
+          "columnDefault": null,
+          "columnType": "int(11)",
+          "extra": "auto_increment",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "id",
+          "ordinal": 1
+        },
+        {
+          "columnDefault": null,
+          "columnType": "varchar(20)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "token",
+          "ordinal": 2
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('reversion','breakout','macro')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "mode",
+          "ordinal": 3
+        },
+        {
+          "columnDefault": null,
+          "columnType": "enum('buy','sell')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "side",
+          "ordinal": 4
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "entryPrice",
+          "ordinal": 5
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "exitPrice",
+          "ordinal": 6
+        },
+        {
+          "columnDefault": null,
+          "columnType": "decimal(20,8)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "quantity",
+          "ordinal": 7
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(10,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "pnlDollars",
+          "ordinal": 8
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "decimal(8,4)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "pnlPct",
+          "ordinal": 9
+        },
+        {
+          "columnDefault": "'open'",
+          "columnType": "enum('win','loss','open')",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "outcome",
+          "ordinal": 10
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "text",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "claudeReason",
+          "ordinal": 11
+        },
+        {
+          "columnDefault": "NULL",
+          "columnType": "varchar(128)",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": true,
+          "name": "coinbaseOrderId",
+          "ordinal": 12
+        },
+        {
+          "columnDefault": "current_timestamp()",
+          "columnType": "timestamp",
+          "extra": "",
+          "generationExpression": null,
+          "isNullable": false,
+          "name": "executedAt",
+          "ordinal": 13
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "isPrimary": true,
+          "isUnique": true,
+          "name": "PRIMARY"
+        }
+      ],
+      "name": "trades"
+    }
+  ]
+}

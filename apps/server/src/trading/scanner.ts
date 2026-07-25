@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { CLAUDE_MODEL, Money, STRATEGY, STRATEGY_VERSION, TOKEN_UNIVERSE } from '@horizon/shared';
 import {
   countOpenPositions,
@@ -11,6 +12,17 @@ import {
   shrunkWinRate,
   updateBotConfig,
 } from '../db/queries';
+import {
+  completeScanRun,
+  createDecisionChain,
+  recordEligibility,
+  recordObservation,
+  recordRoutingDecision,
+  recordSetupEvaluation,
+  startScanRun,
+  transitionChainStatus,
+  type ChainStatus,
+} from '../db/lineage';
 import { CoinbaseError, getCandles, getProduct } from './coinbase';
 import { evaluateSignal } from './claude';
 import { detectBestMode, type MarketSnapshot } from './modes';
@@ -113,6 +125,21 @@ export async function scanForEntries(lease?: Lease): Promise<void> {
   // exit above blocks entries in this same cycle.
   const cfg = await getBotConfig();
 
+  // Phase 1.1 Gate 2: every scan attempt creates a scan_run record —
+  // including scans that are blocked before per-token evaluation. Blocking
+  // conditions attach to scan_runs (bot-wide), not to per-token chains.
+  const scanRun = await startScanRun({
+    triggerType: 'scheduled',
+    scannerVersion: STRATEGY_VERSION,
+    botState: cfg.isRunning ? (cfg.isPaused ? 'paused' : 'running') : 'stopped',
+    reconciliationStatus: cfg.reconciliationStatus,
+    marketWindowState: getMarketWindow(),
+  });
+
+  const blockAndReturn = async (reason: string): Promise<void> => {
+    await completeScanRun(scanRun.id, 'blocked', reason);
+  };
+
   if (cfg.reconciliationStatus !== 'ok') {
     const label =
       cfg.reconciliationStatus === 'degraded'
@@ -124,11 +151,16 @@ export async function scanForEntries(lease?: Lease): Promise<void> {
       action: 'SKIP_ENTRIES',
       detail: `Entries blocked: ${label}${cfg.reconciliationDetail ? ` — ${cfg.reconciliationDetail}` : ''}`,
     });
+    await blockAndReturn(label);
     return;
   }
-  if (!cfg.isRunning) return;
+  if (!cfg.isRunning) {
+    await blockAndReturn('bot_not_running');
+    return;
+  }
   if (cfg.isPaused) {
     await logActivity({ type: 'scan', action: 'SKIP_ENTRIES', detail: 'Bot is paused' });
+    await blockAndReturn('paused');
     return;
   }
   if (cfg.circuitBreakerUntil && cfg.circuitBreakerUntil > new Date()) {
@@ -138,6 +170,7 @@ export async function scanForEntries(lease?: Lease): Promise<void> {
       action: 'SKIP_ENTRIES',
       detail: `Circuit breaker active until ${cfg.circuitBreakerUntil.toISOString()}`,
     });
+    await blockAndReturn('circuit_breaker');
     return;
   }
   // Clear expired CB.
@@ -156,13 +189,20 @@ export async function scanForEntries(lease?: Lease): Promise<void> {
       action: 'SKIP_ENTRIES',
       detail: `Outside trading window (${getMarketWindow()})`,
     });
+    await blockAndReturn('market_window_exclusion');
     return;
   }
 
-  await selectAndOpenEntries(lease);
+  try {
+    await selectAndOpenEntries(lease, scanRun.id);
+    await completeScanRun(scanRun.id, 'completed');
+  } catch (err) {
+    await completeScanRun(scanRun.id, 'failed', err instanceof Error ? err.message : String(err));
+    throw err;
+  }
 }
 
-async function selectAndOpenEntries(lease?: Lease): Promise<void> {
+async function selectAndOpenEntries(lease?: Lease, scanRunId?: number): Promise<void> {
   const openCount = await countOpenPositions();
   const availableSlots = STRATEGY.MAX_OPEN_POSITIONS - openCount;
   if (availableSlots <= 0) {
@@ -173,6 +213,20 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
       tokensScanned: 0,
     });
     return;
+  }
+  // scanRunId is required for lineage. Callers of scanForEntries always pass it;
+  // tests / debug calls of selectAndOpenEntries via legacy paths still work
+  // because a synthetic scan run is created here.
+  if (scanRunId === undefined) {
+    const cfg = await getBotConfig();
+    const synthetic = await startScanRun({
+      triggerType: 'legacy_direct_call',
+      scannerVersion: STRATEGY_VERSION,
+      botState: cfg.isRunning ? 'running' : 'stopped',
+      reconciliationStatus: cfg.reconciliationStatus,
+      marketWindowState: getMarketWindow(),
+    });
+    scanRunId = synthetic.id;
   }
 
   const stats = await getAllTokenStats();
@@ -191,6 +245,8 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
     priorityScore: number;
     closes: number[];
     candles: unknown[];
+    decisionChainId: number;
+    marketObservationId: number;
   }
   const eligible = TOKEN_UNIVERSE.filter((t) => {
     const s = statByToken.get(t);
@@ -204,13 +260,57 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
 
   for (const token of eligible) {
     scanned++;
+    // Gate 2: create a decision chain for EVERY token evaluated — including
+    // ones that get rejected at volume or fail data fetch.
+    const observedAt = new Date();
+    const chain = await createDecisionChain({
+      scanRunId: scanRunId!,
+      productId: `${token}-USD`,
+      strategyVersion: STRATEGY_VERSION,
+      observedAt,
+      dataAvailableAt: observedAt,
+      decisionStartedAt: observedAt,
+    });
     try {
       const product = await getProduct(token);
       const price = Number(product.price);
       const volume24hBase = Number(product.volume_24h);
       const volume24h = volume24hBase * price;
       const changePct24h = Number(product.price_percentage_change_24h);
-      if (volume24h < STRATEGY.MIN_VOLUME_24HR) continue;
+      const observation = await recordObservation({
+        decisionChainId: chain.id,
+        productId: `${token}-USD`,
+        observedAt,
+        dataAvailableAt: observedAt,
+        marketDataVersion: FEATURE_VERSION,
+        price: String(price),
+        volume24h: String(volume24h),
+        dataQualityStatus: 'valid',
+        payload: { price, volume24h, changePct24h, product_id: product.product_id },
+      });
+      if (volume24h < STRATEGY.MIN_VOLUME_24HR) {
+        await recordEligibility({
+          decisionChainId: chain.id,
+          marketObservationId: observation.id,
+          eligible: false,
+          reasonCode: 'insufficient_volume',
+          reasonDetail: `24h volume ${volume24h.toFixed(2)} < ${STRATEGY.MIN_VOLUME_24HR}`,
+          policyVersion: STRATEGY_VERSION,
+        });
+        await transitionChainStatus(chain.id, 'ineligible', {
+          completeness: 'complete',
+          markDecisionCompleted: true,
+        });
+        continue;
+      }
+      // Eligible → continue building candidate.
+      await recordEligibility({
+        decisionChainId: chain.id,
+        marketObservationId: observation.id,
+        eligible: true,
+        reasonCode: 'eligible',
+        policyVersion: STRATEGY_VERSION,
+      });
       passedVolume++;
       const { closes, candles } = await getCandles(token, 'ONE_HOUR', 100);
       const s = statByToken.get(token);
@@ -224,6 +324,8 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
         priorityScore: winRate ?? 50,
         closes,
         candles,
+        decisionChainId: chain.id,
+        marketObservationId: observation.id,
       });
     } catch (err) {
       const msg =
@@ -232,6 +334,18 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
           : err instanceof Error
             ? err.message
             : 'unknown';
+      // Record the data failure on the chain — never fabricate the observation.
+      await recordEligibility({
+        decisionChainId: chain.id,
+        eligible: false,
+        reasonCode: 'market_data_failure',
+        reasonDetail: msg.slice(0, 250),
+        policyVersion: STRATEGY_VERSION,
+      });
+      await transitionChainStatus(chain.id, 'failed', {
+        completeness: 'complete',
+        markDecisionCompleted: true,
+      });
       await logActivity({
         type: 'error',
         severity: 'warn',
@@ -283,10 +397,57 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
       winRate: c.winRate,
     };
     const detected = detectBestMode(snapshot);
-    if (!detected) continue;
+
+    // Gate 2: record setup evaluation for every candidate — whether or not a
+    // mode was detected. A no-detection outcome routes to no_trade.
+    const inputHash = createHash('sha256')
+      .update(JSON.stringify({ price: c.price, volume: c.volume24h, closes: c.closes }))
+      .digest('hex');
+    const setupEval = await recordSetupEvaluation({
+      decisionChainId: c.decisionChainId,
+      marketObservationId: c.marketObservationId,
+      modeEvaluated: detected?.evaluation.mode,
+      setupDetected: !!detected,
+      strategyVersion: STRATEGY_VERSION,
+      indicatorVersion: FEATURE_VERSION,
+      inputHash,
+      reasonCodes: detected ? [`mode:${detected.evaluation.mode}`] : ['no_setup'],
+    });
+    if (!detected) {
+      await recordRoutingDecision({
+        decisionChainId: c.decisionChainId,
+        setupEvaluationId: setupEval.id,
+        routingOutcome: 'no_trade',
+        reasonCodes: ['no_setup'],
+        strategyVersion: STRATEGY_VERSION,
+      });
+      await transitionChainStatus(c.decisionChainId, 'no_setup', {
+        completeness: 'complete',
+        markDecisionCompleted: true,
+      });
+      continue;
+    }
 
     const { evaluation, signals } = detected;
     const modeCfg = STRATEGY.MODES[evaluation.mode];
+
+    const routing = await recordRoutingDecision({
+      decisionChainId: c.decisionChainId,
+      setupEvaluationId: setupEval.id,
+      selectedMode: evaluation.mode,
+      routingOutcome:
+        evaluation.mode === 'reversion'
+          ? 'reversion'
+          : evaluation.mode === 'breakout'
+            ? 'breakout'
+            : 'macro_floor',
+      reasonCodes: [
+        `passedSignals:${signals.passedSignals}/${signals.totalSignals}`,
+        `mode:${evaluation.mode}`,
+      ],
+      strategyVersion: STRATEGY_VERSION,
+    });
+    await transitionChainStatus(c.decisionChainId, 'candidate');
 
     // --------- Record the candidate (immutable) ---------
     const candidateRow = await insertSignalCandidate({
@@ -310,6 +471,10 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
       regimeLabel: 'unclassified', // regime engine arrives in slice 2
       regimeConfidence: null,
       marketWindow,
+      decisionChainId: c.decisionChainId,
+      marketObservationId: c.marketObservationId,
+      setupEvaluationId: setupEval.id,
+      routingDecisionId: routing.id,
     });
 
     // --------- Size (win-rate adjustment) ---------
@@ -355,6 +520,11 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
         strategyVersion: STRATEGY_VERSION,
         costModelVersion: COST_MODEL_VERSION,
         evGateVersion: EV_GATE_VERSION,
+        decisionChainId: c.decisionChainId,
+      });
+      await transitionChainStatus(c.decisionChainId, 'economically_rejected', {
+        completeness: 'complete',
+        markDecisionCompleted: true,
       });
       continue;
     }
@@ -371,6 +541,8 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
     });
 
     const forecastRow = await insertExecutionCostForecast({
+      decisionChainId: c.decisionChainId,
+      routingDecisionId: routing.id,
       candidateId: candidateRow.id,
       feeTierSnapshotId: feeTier.snapshotId,
       previewOrderTotal: previewResult.orderTotal?.toDecimalString() ?? null,
@@ -421,10 +593,15 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
       strategyVersion: STRATEGY_VERSION,
       costModelVersion: forecast.costModelVersion,
       evGateVersion: gate.version,
+      decisionChainId: c.decisionChainId,
     });
 
     if (gate.decision !== 'accept') {
       evGateRejects++;
+      await transitionChainStatus(c.decisionChainId, 'quantitatively_rejected', {
+        completeness: 'complete',
+        markDecisionCompleted: true,
+      });
       await logActivity({
         type: 'signal',
         token: c.token,
@@ -443,6 +620,12 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
       : { confidence: 0, shouldEnter: false, reason: 'Anthropic not configured' };
 
     if (!claude.shouldEnter || claude.confidence < modeCfg.claudeThreshold) {
+      await transitionChainStatus(c.decisionChainId, 'quantitatively_rejected', {
+        completeness: 'complete',
+        markDecisionCompleted: true,
+        actor: 'claude',
+        metadata: { confidence: claude.confidence, threshold: modeCfg.claudeThreshold },
+      });
       await logActivity({
         type: 'signal',
         token: c.token,
@@ -454,6 +637,10 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
       continue;
     }
     passedSignal++;
+
+    // Approved — the chain will finalize decisionCompletedAt once the
+    // executor either opens or fails to open the position. Mark approved now.
+    await transitionChainStatus(c.decisionChainId, 'approved');
 
     await logActivity({
       type: 'signal',
@@ -489,6 +676,19 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
       // was true at precheck.
       fenceGeneration: lease?.fenceGeneration,
       fenceResourceKey: lease?.key,
+      decisionChainId: c.decisionChainId,
+    });
+    // Gate 2: update chain status based on the executor outcome.
+    const nextStatus: ChainStatus =
+      result.kind === 'opened'
+        ? 'position_open'
+        : result.kind === 'skipped' || result.kind === 'rejected'
+          ? 'failed'
+          : 'order_pending';
+    await transitionChainStatus(c.decisionChainId, nextStatus, {
+      completeness: 'complete',
+      markDecisionCompleted: true,
+      metadata: { executorResult: result.kind, reason: result.reason },
     });
     if (result.kind === 'opened') opened++;
   }

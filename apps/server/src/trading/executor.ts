@@ -259,6 +259,12 @@ export interface EntryDecision {
    * that row to authoritatively reject stale workers.
    */
   fenceResourceKey?: string;
+  /**
+   * Phase 1.1 Gate 2: the decision chain that authorized this entry. Stamped
+   * on the order intent + on the position at creation so lineage from
+   * observation → intent → fill → position is directly queryable.
+   */
+  decisionChainId?: number;
 }
 
 export interface OpenResult {
@@ -337,6 +343,7 @@ export async function openPosition(decision: EntryDecision): Promise<OpenResult>
     state: 'created',
     fenceGeneration: decision.fenceGeneration ?? null,
     fenceResourceKey: decision.fenceResourceKey ?? null,
+    decisionChainId: decision.decisionChainId ?? null,
     dryRun: ENV.dryRun,
   });
 
@@ -512,6 +519,7 @@ export async function openPosition(decision: EntryDecision): Promise<OpenResult>
       protectionMode: 'polling_fallback',
       dryRun: ENV.dryRun,
       intentEndState,
+      entryDecisionChainId: decision.decisionChainId ?? null,
     });
     positionId = result.positionId;
   } catch (err) {

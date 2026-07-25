@@ -43,6 +43,13 @@
       "when": 1785700000000,
       "tag": "0005_phase1_1b_authoritative_fence_and_preview_binding",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1785800000000,
+      "tag": "0006_phase1_gate2_decision_lineage",
+      "breakpoints": true
     }
   ]
 }

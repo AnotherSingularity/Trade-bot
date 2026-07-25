@@ -384,6 +384,8 @@ export interface ApplyEntryInput {
   protectionMode: 'exchange_bracket' | 'polling_fallback' | 'unprotected';
   dryRun: boolean;
   intentEndState: 'filled' | 'partially_filled';
+  /** Phase 1.1 Gate 2: decision chain to stamp on the position. */
+  entryDecisionChainId?: number | null;
   /** For rollback tests: throw right after fills / ledger / position. */
   __testHook?: (stage: 'after_fills' | 'after_ledger' | 'after_position') => void;
 }
@@ -506,6 +508,7 @@ export async function applyEntryEconomicStateTx(
       strategyVersion: input.strategyVersion,
       lifecycleState: 'open',
       status: 'open',
+      entryDecisionChainId: input.entryDecisionChainId ?? intent.decisionChainId ?? null,
     });
     input.__testHook?.('after_position');
 

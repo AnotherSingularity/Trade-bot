@@ -141,6 +141,15 @@ export const orderIntents = mysqlTable(
     // clientOrderId).
     attemptGeneration: int('attemptGeneration'),
 
+    // Phase 1.1 Gate 2: direct lineage back to the decision chain that
+    // authorized this intent. Nullable for legacy rows created before Gate 2.
+    decisionChainId: int('decisionChainId'),
+    // For exit intents: the ENTRY decision chain the position originated from.
+    entryDecisionChainId: int('entryDecisionChainId'),
+    strategyVersionAt: varchar('strategyVersionAt', { length: 32 }),
+    costModelVersionAt: varchar('costModelVersionAt', { length: 32 }),
+    protectionGeneration: int('protectionGeneration'),
+
     // Phase 1.1.b §A: which execution_fences row authorizes this intent.
     // verifyFencingTx uses (fenceResourceKey, fenceGeneration) to lookup the
     // authoritative currentGeneration inside the atomic tx.
@@ -184,6 +193,8 @@ export const orderIntents = mysqlTable(
     fenceIdx: index('order_intents_fence_idx').on(table.fenceGeneration),
     fenceResourceIdx: index('order_intents_fence_resource_idx').on(table.fenceResourceKey),
     configHashIdx: index('order_intents_config_hash_idx').on(table.configHash),
+    decisionChainIdx: index('order_intents_decision_chain_idx').on(table.decisionChainId),
+    entryChainIdx: index('order_intents_entry_chain_idx').on(table.entryDecisionChainId),
     // (positionId, purpose, attemptGeneration) UNIQUE — race-safe exit
     // allocation. NULL positionId (entries) doesn't collide, so this only
     // constrains exit intents in practice.
@@ -295,6 +306,11 @@ export const positions = mysqlTable(
     // implication).
     residualBaseSize: decimal('residualBaseSize', { precision: 20, scale: 8 }),
 
+    // Phase 1.1 Gate 2: entry decision chain that authorized this position.
+    // A position may span multiple exit-decision chains; those are accessed
+    // via order_intents.entryDecisionChainId + positionId join.
+    entryDecisionChainId: int('entryDecisionChainId'),
+
     openedAt: timestamp('openedAt').defaultNow().notNull(),
     closedAt: timestamp('closedAt'),
 
@@ -311,6 +327,7 @@ export const positions = mysqlTable(
     tokenIdx: index('positions_token_idx').on(table.token),
     statusIdx: index('positions_status_idx').on(table.status),
     openTokenUq: uniqueIndex('positions_open_token_uq').on(table.openTokenKey),
+    entryChainIdx: index('positions_entry_chain_idx').on(table.entryDecisionChainId),
   }),
 );
 
@@ -347,12 +364,23 @@ export const roundTrips = mysqlTable(
     openedAt: timestamp('openedAt').notNull(),
     closedAt: timestamp('closedAt').notNull(),
     createdAt: timestamp('createdAt').defaultNow().notNull(),
+
+    // Phase 1.1 Gate 2: lineage back-references. entryDecisionChainId is the
+    // chain that authorized the entry; finalExitDecisionChainId is the LAST
+    // exit chain (there may have been earlier partial-exit chains which are
+    // discoverable via order_intents.entryDecisionChainId + positionId).
+    entryDecisionChainId: int('entryDecisionChainId'),
+    finalExitDecisionChainId: int('finalExitDecisionChainId'),
+    entryOrderIntentId: int('entryOrderIntentId'),
+    finalExitOrderIntentId: int('finalExitOrderIntentId'),
   },
   (table) => ({
     positionIdUnique: uniqueIndex('round_trips_position_uq').on(table.positionId),
     tokenIdx: index('round_trips_token_idx').on(table.token),
     outcomeIdx: index('round_trips_outcome_idx').on(table.outcome),
     closedAtIdx: index('round_trips_closed_at_idx').on(table.closedAt),
+    entryChainIdx: index('round_trips_entry_chain_idx').on(table.entryDecisionChainId),
+    finalExitChainIdx: index('round_trips_final_exit_chain_idx').on(table.finalExitDecisionChainId),
   }),
 );
 
@@ -387,12 +415,24 @@ export const cashLedger = mysqlTable(
     // rejects duplicates; the application catches ER_DUP_ENTRY as a no-op.
     idempotencyKey: varchar('idempotencyKey', { length: 128 }),
     createdAt: timestamp('createdAt').defaultNow().notNull(),
+    // Phase 1.1 Gate 2: every ledger event must have exactly one valid cause
+    // category. Fill-driven credits/debits carry fillId + orderIntentId +
+    // decisionChainId; explicit adjustments carry adjustmentType/Reason/actor;
+    // initial funding is its own category.
+    decisionChainId: int('decisionChainId'),
+    adjustmentType: varchar('adjustmentType', { length: 32 }),
+    adjustmentReason: varchar('adjustmentReason', { length: 255 }),
+    actor: varchar('actor', { length: 64 }),
+    reconciliationRunId: varchar('reconciliationRunId', { length: 64 }),
+    causeCategory: mysqlEnum('causeCategory', ['fill_driven', 'explicit_adjustment', 'initial_funding']),
   },
   (table) => ({
     dryRunIdx: index('cash_ledger_dryrun_idx').on(table.dryRun),
     createdAtIdx: index('cash_ledger_created_at_idx').on(table.createdAt),
     idempotencyUq: uniqueIndex('cash_ledger_idempotency_uq').on(table.idempotencyKey),
     fillIdIdx: index('cash_ledger_fillId_idx').on(table.fillId),
+    decisionChainIdx: index('cash_ledger_decision_chain_idx').on(table.decisionChainId),
+    causeIdx: index('cash_ledger_cause_idx').on(table.causeCategory),
   }),
 );
 
@@ -508,10 +548,16 @@ export const signalCandidates = mysqlTable(
     regimeConfidence: decimal('regimeConfidence', { precision: 5, scale: 4 }),
     marketWindow: mysqlEnum('marketWindow', ['PRIME', 'ACTIVE', 'CLOSED']).notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
+    // Phase 1.1 Gate 2 lineage refs (nullable for legacy rows).
+    decisionChainId: int('decisionChainId'),
+    marketObservationId: int('marketObservationId'),
+    setupEvaluationId: int('setupEvaluationId'),
+    routingDecisionId: int('routingDecisionId'),
   },
   (t) => ({
     scanSeedIdx: index('signal_candidates_scanSeed_idx').on(t.scanSeed),
     tokenIdx: index('signal_candidates_token_idx').on(t.token, t.createdAt),
+    chainIdx: index('signal_candidates_chain_idx').on(t.decisionChainId),
   }),
 );
 
@@ -564,11 +610,15 @@ export const executionCostForecasts = mysqlTable(
     realizedExitImpactBps: decimal('realizedExitImpactBps', { precision: 10, scale: 4 }),
     realizedRoundTripCost: decimal('realizedRoundTripCost', { precision: 20, scale: 8 }),
     realizedAt: timestamp('realizedAt'),
+    // Phase 1.1 Gate 2 lineage refs (nullable for legacy rows).
+    decisionChainId: int('decisionChainId'),
+    routingDecisionId: int('routingDecisionId'),
   },
   (t) => ({
     candidateIdx: index('execution_cost_forecasts_candidateId_idx').on(t.candidateId),
     feeTierIdx: index('execution_cost_forecasts_feeTierSnapshotId_idx').on(t.feeTierSnapshotId),
     createdIdx: index('execution_cost_forecasts_createdAt_idx').on(t.createdAt),
+    chainIdx: index('execution_cost_forecasts_chain_idx').on(t.decisionChainId),
     // Named FKs to match the original migration-0002 constraint names so
     // drizzle-kit's snapshot equals the actual DB state.
     candidateFk: foreignKey({
@@ -625,10 +675,13 @@ export const quantitativeDecisions = mysqlTable(
     costModelVersion: varchar('costModelVersion', { length: 32 }).notNull(),
     evGateVersion: varchar('evGateVersion', { length: 32 }).notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
+    // Phase 1.1 Gate 2 lineage refs.
+    decisionChainId: int('decisionChainId'),
   },
   (t) => ({
     candidateIdx: index('quantitative_decisions_candidateId_idx').on(t.candidateId),
     decisionIdx: index('quantitative_decisions_decision_idx').on(t.decision, t.createdAt),
+    chainIdx: index('quantitative_decisions_chain_idx').on(t.decisionChainId),
     // Named FKs to match the original migration-0002 constraint names.
     candidateFk: foreignKey({
       name: 'quantitative_decisions_candidateId_fk',
@@ -711,10 +764,351 @@ export const reconciliationActions = mysqlTable(
     failureReasonCode: varchar('failureReasonCode', { length: 64 }),
     detail: text('detail'),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
+    // Phase 1.1 Gate 2 lineage extension.
+    decisionChainId: int('decisionChainId'),
+    economicStateApplied: boolean('economicStateApplied').notNull().default(false),
+    fillsDiscovered: int('fillsDiscovered'),
   },
   (table) => ({
     runIdx: index('reconciliation_actions_run_idx').on(table.runId),
     intentIdx: index('reconciliation_actions_intent_idx').on(table.intentId),
+    chainIdx: index('reconciliation_actions_chain_idx').on(table.decisionChainId),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Phase 1.1 Gate 2 — decision-to-outcome lineage
+// ---------------------------------------------------------------------------
+
+/** One scanner cycle or manually initiated evaluation run. */
+export const scanRuns = mysqlTable(
+  'scan_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    triggerType: varchar('triggerType', { length: 64 }).notNull(),
+    startedAt: timestamp('startedAt').notNull().defaultNow(),
+    completedAt: timestamp('completedAt'),
+    status: mysqlEnum('status', [
+      'started',
+      'completed',
+      'partially_completed',
+      'blocked',
+      'failed',
+    ])
+      .notNull()
+      .default('started'),
+    botState: varchar('botState', { length: 32 }),
+    reconciliationStatus: varchar('reconciliationStatus', { length: 32 }),
+    marketWindowState: varchar('marketWindowState', { length: 32 }),
+    scannerVersion: varchar('scannerVersion', { length: 32 }).notNull(),
+    failureReason: varchar('failureReason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    startedIdx: index('scan_runs_started_idx').on(t.startedAt),
+    statusIdx: index('scan_runs_status_idx').on(t.status),
+  }),
+);
+
+/**
+ * Permanent decision-chain root — one chain per product evaluation per scan
+ * run. Every evaluated product gets a chain, whether it's rejected at
+ * eligibility, has no setup, is a candidate that's economically rejected, or
+ * proceeds all the way to a filled position and an outcome label.
+ */
+export const decisionChains = mysqlTable(
+  'decision_chains',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    scanRunId: int('scanRunId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    strategyVersion: varchar('strategyVersion', { length: 32 }).notNull(),
+    currentStatus: mysqlEnum('currentStatus', [
+      'observed',
+      'ineligible',
+      'no_setup',
+      'candidate',
+      'economically_rejected',
+      'quantitatively_rejected',
+      'approved',
+      'order_pending',
+      'partially_filled',
+      'position_open',
+      'position_closed',
+      'outcome_labeled',
+      'failed',
+    ])
+      .notNull()
+      .default('observed'),
+    observedAt: timestamp('observedAt').notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt').notNull(),
+    decisionStartedAt: timestamp('decisionStartedAt').notNull(),
+    decisionCompletedAt: timestamp('decisionCompletedAt'),
+    lineageCompleteness: mysqlEnum('lineageCompleteness', [
+      'complete',
+      'partial',
+      'broken',
+      'legacy_unresolved',
+    ])
+      .notNull()
+      .default('partial'),
+    legacyStatus: mysqlEnum('legacyStatus', ['current', 'legacy_backfilled', 'legacy_unresolved'])
+      .notNull()
+      .default('current'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow().onUpdateNow(),
+  },
+  (t) => ({
+    scanIdx: index('decision_chains_scan_idx').on(t.scanRunId),
+    productIdx: index('decision_chains_product_idx').on(t.productId, t.observedAt),
+    statusIdx: index('decision_chains_status_idx').on(t.currentStatus),
+    scanFk: foreignKey({
+      name: 'decision_chains_scanRunId_fk',
+      columns: [t.scanRunId],
+      foreignColumns: [scanRuns.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+/** Immutable snapshot of market data available at decision time. */
+export const marketObservations = mysqlTable(
+  'market_observations',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    observedAt: timestamp('observedAt').notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt').notNull(),
+    marketDataVersion: varchar('marketDataVersion', { length: 32 }).notNull(),
+    inputDataHash: varchar('inputDataHash', { length: 64 }).notNull(),
+    price: decimal('price', { precision: 20, scale: 8 }),
+    volume24h: decimal('volume24h', { precision: 20, scale: 8 }),
+    spread: decimal('spread', { precision: 20, scale: 8 }),
+    dataQualityStatus: mysqlEnum('dataQualityStatus', [
+      'valid',
+      'stale',
+      'incomplete',
+      'invalid',
+      'unavailable',
+    ]).notNull(),
+    failureReason: varchar('failureReason', { length: 255 }),
+    immutablePayload: text('immutablePayload').notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainIdx: index('market_observations_chain_idx').on(t.decisionChainId),
+    hashIdx: index('market_observations_hash_idx').on(t.inputDataHash),
+    chainFk: foreignKey({
+      name: 'market_observations_decisionChainId_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+/** Why a product was (in)eligible for this scan cycle. */
+export const eligibilityDecisions = mysqlTable(
+  'eligibility_decisions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    marketObservationId: int('marketObservationId'),
+    eligible: boolean('eligible').notNull(),
+    reasonCode: mysqlEnum('reasonCode', [
+      'eligible',
+      'reconciliation_degraded',
+      'unsupported_product',
+      'invalid_product_state',
+      'insufficient_volume',
+      'insufficient_history',
+      'stale_market_data',
+      'market_data_failure',
+      'existing_position',
+      'position_limit',
+      'market_window_exclusion',
+      'paused',
+      'circuit_breaker',
+    ]).notNull(),
+    reasonDetail: varchar('reasonDetail', { length: 255 }),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    decidedAt: timestamp('decidedAt').notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainIdx: index('eligibility_decisions_chain_idx').on(t.decisionChainId),
+    chainFk: foreignKey({
+      name: 'eligibility_decisions_decisionChainId_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    obsFk: foreignKey({
+      name: 'eligibility_decisions_marketObservationId_fk',
+      columns: [t.marketObservationId],
+      foreignColumns: [marketObservations.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+/** Records the current three-mode scanner evaluation for one product. */
+export const setupEvaluations = mysqlTable(
+  'setup_evaluations',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    marketObservationId: int('marketObservationId').notNull(),
+    modeEvaluated: varchar('modeEvaluated', { length: 32 }),
+    setupDetected: boolean('setupDetected').notNull(),
+    setupScore: decimal('setupScore', { precision: 10, scale: 6 }),
+    strategyVersion: varchar('strategyVersion', { length: 32 }).notNull(),
+    indicatorVersion: varchar('indicatorVersion', { length: 32 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    reasonCodes: text('reasonCodes').notNull(),
+    evaluatedAt: timestamp('evaluatedAt').notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainIdx: index('setup_evaluations_chain_idx').on(t.decisionChainId),
+    chainFk: foreignKey({
+      name: 'setup_evaluations_decisionChainId_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    obsFk: foreignKey({
+      name: 'setup_evaluations_marketObservationId_fk',
+      columns: [t.marketObservationId],
+      foreignColumns: [marketObservations.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+/** Which mode routed this product this scan, or a no-trade outcome. */
+export const strategyRoutingDecisions = mysqlTable(
+  'strategy_routing_decisions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    setupEvaluationId: int('setupEvaluationId').notNull(),
+    selectedMode: varchar('selectedMode', { length: 32 }),
+    routingOutcome: mysqlEnum('routingOutcome', [
+      'reversion',
+      'breakout',
+      'macro_floor',
+      'no_trade',
+      'conflict',
+      'unclassified',
+    ]).notNull(),
+    reasonCodes: text('reasonCodes').notNull(),
+    strategyVersion: varchar('strategyVersion', { length: 32 }).notNull(),
+    decidedAt: timestamp('decidedAt').notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainIdx: index('strategy_routing_decisions_chain_idx').on(t.decisionChainId),
+    chainFk: foreignKey({
+      name: 'strategy_routing_decisions_decisionChainId_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    setupFk: foreignKey({
+      name: 'strategy_routing_decisions_setupEvaluationId_fk',
+      columns: [t.setupEvaluationId],
+      foreignColumns: [setupEvaluations.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+/**
+ * Outcome labels — version-bumped; corrections create a NEW row with
+ * `supersedesOutcomeLabelId` set. UNIQUE(decisionChainId, labelVersion)
+ * enforces "immutable once written".
+ */
+export const outcomeLabels = mysqlTable(
+  'outcome_labels',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    roundTripId: int('roundTripId'),
+    labelVersion: int('labelVersion').notNull(),
+    labelType: varchar('labelType', { length: 64 }).notNull(),
+    tpReachedFirst: boolean('tpReachedFirst'),
+    slReachedFirst: boolean('slReachedFirst'),
+    timeout: boolean('timeout').notNull().default(false),
+    ambiguous: boolean('ambiguous').notNull().default(false),
+    maximumFavorableExcursion: decimal('maximumFavorableExcursion', { precision: 20, scale: 8 }),
+    maximumAdverseExcursion: decimal('maximumAdverseExcursion', { precision: 20, scale: 8 }),
+    timeToTp: int('timeToTp'),
+    timeToSl: int('timeToSl'),
+    grossPnl: decimal('grossPnl', { precision: 20, scale: 8 }),
+    netPnl: decimal('netPnl', { precision: 20, scale: 8 }),
+    totalFees: decimal('totalFees', { precision: 20, scale: 8 }),
+    forecastCost: decimal('forecastCost', { precision: 20, scale: 8 }),
+    realizedCost: decimal('realizedCost', { precision: 20, scale: 8 }),
+    labelWindowStart: timestamp('labelWindowStart').notNull(),
+    labelWindowEnd: timestamp('labelWindowEnd').notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt').notNull(),
+    supersedesOutcomeLabelId: int('supersedesOutcomeLabelId'),
+    correctionReason: varchar('correctionReason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainVersionUq: uniqueIndex('outcome_labels_chain_version_uq').on(
+      t.decisionChainId,
+      t.labelVersion,
+    ),
+    chainIdx: index('outcome_labels_chain_idx').on(t.decisionChainId),
+    roundtripIdx: index('outcome_labels_roundtrip_idx').on(t.roundTripId),
+    chainFk: foreignKey({
+      name: 'outcome_labels_decisionChainId_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+/** Append-only journal of state transitions + reconciliation events. */
+export const lineageEvents = mysqlTable(
+  'lineage_events',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    eventType: varchar('eventType', { length: 64 }).notNull(),
+    sourceEntityType: varchar('sourceEntityType', { length: 64 }).notNull(),
+    sourceRecordId: int('sourceRecordId'),
+    eventTime: timestamp('eventTime').notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt'),
+    actor: varchar('actor', { length: 64 }).notNull(),
+    componentVersion: varchar('componentVersion', { length: 32 }).notNull(),
+    metadata: text('metadata'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainIdx: index('lineage_events_chain_idx').on(t.decisionChainId, t.eventTime),
+    typeIdx: index('lineage_events_type_idx').on(t.eventType),
+    chainFk: foreignKey({
+      name: 'lineage_events_decisionChainId_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
   }),
 );
 
@@ -729,6 +1123,22 @@ export type ReconciliationRunRow = typeof reconciliationRuns.$inferSelect;
 export type ReconciliationRunInsert = typeof reconciliationRuns.$inferInsert;
 export type ReconciliationActionRow = typeof reconciliationActions.$inferSelect;
 export type ReconciliationActionInsert = typeof reconciliationActions.$inferInsert;
+export type ScanRunRow = typeof scanRuns.$inferSelect;
+export type ScanRunInsert = typeof scanRuns.$inferInsert;
+export type DecisionChainRow = typeof decisionChains.$inferSelect;
+export type DecisionChainInsert = typeof decisionChains.$inferInsert;
+export type MarketObservationRow = typeof marketObservations.$inferSelect;
+export type MarketObservationInsert = typeof marketObservations.$inferInsert;
+export type EligibilityDecisionRow = typeof eligibilityDecisions.$inferSelect;
+export type EligibilityDecisionInsert = typeof eligibilityDecisions.$inferInsert;
+export type SetupEvaluationRow = typeof setupEvaluations.$inferSelect;
+export type SetupEvaluationInsert = typeof setupEvaluations.$inferInsert;
+export type StrategyRoutingDecisionRow = typeof strategyRoutingDecisions.$inferSelect;
+export type StrategyRoutingDecisionInsert = typeof strategyRoutingDecisions.$inferInsert;
+export type OutcomeLabelRow = typeof outcomeLabels.$inferSelect;
+export type OutcomeLabelInsert = typeof outcomeLabels.$inferInsert;
+export type LineageEventRow = typeof lineageEvents.$inferSelect;
+export type LineageEventInsert = typeof lineageEvents.$inferInsert;
 export type FillRow = typeof fills.$inferSelect;
 export type FillInsert = typeof fills.$inferInsert;
 export type PositionRow = typeof positions.$inferSelect;

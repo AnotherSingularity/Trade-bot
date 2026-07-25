@@ -22,10 +22,24 @@ export async function resetDatabase(): Promise<void> {
       'token_stats',
       'trades',
       'bot_config',
+      // Phase 1 immutable decision tables.
+      'quantitative_decisions',
+      'execution_cost_forecasts',
+      'signal_candidates',
+      'fee_tier_snapshots',
       // Phase 1.1.b additions.
       'execution_fences',
       'reconciliation_runs',
       'reconciliation_actions',
+      // Phase 1.1 Gate 2 additions.
+      'lineage_events',
+      'outcome_labels',
+      'strategy_routing_decisions',
+      'setup_evaluations',
+      'eligibility_decisions',
+      'market_observations',
+      'decision_chains',
+      'scan_runs',
     ]) {
       await conn.query(`TRUNCATE TABLE \`${t}\``);
     }

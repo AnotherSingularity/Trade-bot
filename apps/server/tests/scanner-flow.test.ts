@@ -46,7 +46,7 @@ describe('scanner flow — Claude cannot rescue a negative-EV trade', () => {
   it('the entry loop bails on gate rejection before Claude ("continue" after gate)', () => {
     // Ensures the code short-circuits: `if (gate.decision !== 'accept') { ...
     // continue; }` — otherwise a negative-EV trade could reach Claude.
-    expect(scannerSrc).toMatch(/gate\.decision\s*!==\s*'accept'[\s\S]{0,400}continue/);
+    expect(scannerSrc).toMatch(/gate\.decision\s*!==\s*'accept'[\s\S]{0,1200}continue/);
   });
 
   it('every candidate — accepted or rejected — writes a quantitative_decisions row', () => {
