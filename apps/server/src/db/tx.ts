@@ -1,10 +1,11 @@
-import { eq } from 'drizzle-orm';
-import { Money } from '@horizon/shared';
+import { and, eq, gt, ne, or, sql } from 'drizzle-orm';
+import { Money, type TradingMode } from '@horizon/shared';
 import { db } from './index';
 import { cashLedger, fills, orderIntents, positions, roundTrips } from './schema';
 import type {
   CashLedgerInsert,
   FillInsert,
+  FillRow,
   OrderIntentRow,
   PositionInsert,
   PositionRow,
@@ -181,3 +182,442 @@ export async function findPositionByIdTx(
   const rows = await tx.select().from(positions).where(eq(positions.id, id)).limit(1);
   return rows[0] ?? null;
 }
+
+async function getOrderIntentTx(tx: typeof db, id: number): Promise<OrderIntentRow | null> {
+  const rows = await tx.select().from(orderIntents).where(eq(orderIntents.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// §H FIX — durable fencing verification (inside the tx)
+// ---------------------------------------------------------------------------
+
+/**
+ * FencingViolation is thrown when a stale worker attempts to commit under a
+ * lease generation that has been superseded by a peer. The caller SHOULD NOT
+ * retry — its lease is dead; only the newer worker is authoritative.
+ */
+export class FencingViolation extends Error {
+  readonly ourGeneration: number;
+  readonly latestGeneration: number;
+  constructor(ourGeneration: number, latestGeneration: number, context: string) {
+    super(
+      `fencing violation: our generation ${ourGeneration} is older than the current max ${latestGeneration} for ${context}. Aborting stale write.`,
+    );
+    this.ourGeneration = ourGeneration;
+    this.latestGeneration = latestGeneration;
+    this.name = 'FencingViolation';
+  }
+}
+
+/**
+ * Inside the atomic transaction, verify that no NEWER `fenceGeneration`
+ * exists for the same token+purpose. If a peer with a higher generation has
+ * already inserted an intent for this scan, our intent is stale — abort.
+ *
+ * `fenceGeneration=null` on the intent means "no fencing configured" (test
+ * paths, non-fenced entries) — treated as always valid.
+ */
+export async function verifyFencingTx(
+  tx: typeof db,
+  intent: Pick<OrderIntentRow, 'id' | 'token' | 'purpose' | 'fenceGeneration'>,
+): Promise<void> {
+  if (intent.fenceGeneration == null) return;
+  const maxRows = await tx
+    .select({ maxGen: sql<number | null>`max(${orderIntents.fenceGeneration})` })
+    .from(orderIntents)
+    .where(and(eq(orderIntents.token, intent.token), eq(orderIntents.purpose, intent.purpose)));
+  const maxGen = Number(maxRows[0]?.maxGen ?? intent.fenceGeneration);
+  if (maxGen > intent.fenceGeneration) {
+    throw new FencingViolation(intent.fenceGeneration, maxGen, `${intent.token}/${intent.purpose}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// §F/§D FIX — shared atomic economic-state functions
+// ---------------------------------------------------------------------------
+
+/**
+ * A fill as observed from Coinbase (or synthesized by the dry-run simulator).
+ * We normalize the shape here so the apply* functions don't have to know
+ * whether the fills came from a live createOrder response, a live
+ * listFillsForOrder call, or a dry-run simulator.
+ */
+export interface NormalizedFill {
+  exchangeFillId: string;
+  exchangeOrderId: string;
+  token: string;
+  side: 'BUY' | 'SELL';
+  filledSize: string; // decimal string
+  fillPrice: string;
+  fee: string;
+  feeCurrency: string;
+  tradeTime: Date;
+  rawResponse: string;
+}
+
+/**
+ * Idempotently inserts each fill by its unique `exchangeFillId`. Returns
+ * the resulting FillRow objects (including their DB ids) in the same order.
+ * A replay of the same fill during recovery is a silent no-op.
+ */
+async function upsertFillsTx(
+  tx: typeof db,
+  intentId: number,
+  incoming: NormalizedFill[],
+): Promise<FillRow[]> {
+  const result: FillRow[] = [];
+  for (const f of incoming) {
+    try {
+      await tx.insert(fills).values({
+        exchangeFillId: f.exchangeFillId,
+        orderIntentId: intentId,
+        exchangeOrderId: f.exchangeOrderId,
+        token: f.token,
+        side: f.side,
+        filledSize: f.filledSize,
+        fillPrice: f.fillPrice,
+        fee: f.fee,
+        feeCurrency: f.feeCurrency,
+        tradeTime: f.tradeTime,
+        rawResponse: f.rawResponse,
+      });
+    } catch (err) {
+      if (!isDuplicateKeyError(err)) throw err;
+      // Fill already persisted — a prior attempt saw it. That's fine.
+    }
+    const [row] = await tx
+      .select()
+      .from(fills)
+      .where(eq(fills.exchangeFillId, f.exchangeFillId))
+      .limit(1);
+    if (!row) throw new Error(`fill upsert vanished: ${f.exchangeFillId}`);
+    result.push(row);
+  }
+  return result;
+}
+
+function aggregateFillRows(rows: FillRow[]): {
+  filledSize: Money;
+  weightedAvgPrice: Money;
+  totalFees: Money;
+  quoteValue: Money;
+} {
+  if (rows.length === 0) {
+    return {
+      filledSize: Money.zero(),
+      weightedAvgPrice: Money.zero(),
+      totalFees: Money.zero(),
+      quoteValue: Money.zero(),
+    };
+  }
+  let filledSize = Money.zero();
+  let quoteValue = Money.zero();
+  let totalFees = Money.zero();
+  for (const f of rows) {
+    const size = Money.fromString(f.filledSize);
+    const price = Money.fromString(f.fillPrice);
+    filledSize = filledSize.add(size);
+    quoteValue = quoteValue.add(size.mul(price));
+    totalFees = totalFees.add(Money.fromString(f.fee));
+  }
+  return {
+    filledSize,
+    weightedAvgPrice: filledSize.isZero() ? Money.zero() : quoteValue.div(filledSize),
+    totalFees,
+    quoteValue,
+  };
+}
+
+export interface ApplyEntryInput {
+  intentId: number;
+  fillsToApply: NormalizedFill[];
+  mode: TradingMode;
+  takeProfitPct: number;
+  stopLossPct: number;
+  allocationPct: number;
+  claudeReason: string | null;
+  claudeModel: string | null;
+  claudeConfidence: number | null;
+  strategyVersion: string;
+  protectionMode: 'exchange_bracket' | 'polling_fallback' | 'unprotected';
+  dryRun: boolean;
+  intentEndState: 'filled' | 'partially_filled';
+  /** For rollback tests: throw right after fills / ledger / position. */
+  __testHook?: (stage: 'after_fills' | 'after_ledger' | 'after_position') => void;
+}
+
+export interface ApplyEntryResult {
+  kind: 'opened';
+  positionId: number;
+}
+
+/**
+ * Atomically applies an entry's economic state (Phase 1.1.a-FIX §F/§D).
+ *
+ * Inside ONE transaction:
+ *   1. Verify fencing (§H) — a stale worker is rejected.
+ *   2. Insert every fill (idempotent by exchangeFillId).
+ *   3. Insert per-fill ledger debits (idempotent by idempotencyKey).
+ *   4. Insert the position — DB-enforced one-open-per-token.
+ *   5. Update the intent state + positionId link.
+ *
+ * A throw at any stage rolls back everything. A replay by the reconciler
+ * sees the previously-inserted rows and completes idempotently: fills skip
+ * on dup, ledger events skip on dup, and the position insert is guarded by
+ * a pre-check for the specific `entryOrderIntentId`.
+ *
+ * Used by BOTH `openPosition` (normal path) and the reconciler (recovery
+ * path). No duplicate economic-application code.
+ */
+export async function applyEntryEconomicStateTx(
+  input: ApplyEntryInput,
+): Promise<ApplyEntryResult> {
+  return withTransaction(async (tx) => {
+    const intent = await getOrderIntentTx(tx, input.intentId);
+    if (!intent) throw new Error(`applyEntryEconomicStateTx: intent ${input.intentId} not found`);
+    if (intent.side !== 'BUY') {
+      throw new Error(`applyEntryEconomicStateTx: intent ${input.intentId} is not a BUY`);
+    }
+
+    // §H — durable fencing verification inside the tx.
+    await verifyFencingTx(tx, intent);
+
+    // Idempotent-recovery guard: if a position already exists for this intent,
+    // just return it (a prior replay committed successfully).
+    const existingByIntent = await tx
+      .select({ id: positions.id })
+      .from(positions)
+      .where(eq(positions.entryOrderIntentId, input.intentId))
+      .limit(1);
+    if (existingByIntent[0]) {
+      return { kind: 'opened', positionId: existingByIntent[0].id };
+    }
+
+    // 1. Insert missing fills.
+    const rows = await upsertFillsTx(tx, input.intentId, input.fillsToApply);
+    input.__testHook?.('after_fills');
+
+    const agg = aggregateFillRows(rows);
+    if (!agg.filledSize.isPositive()) {
+      throw new Error(
+        `applyEntryEconomicStateTx: refuse to open — zero filled size for intent ${input.intentId}`,
+      );
+    }
+    const avgEntry = agg.weightedAvgPrice;
+    const takeProfitPrice = avgEntry.mul(
+      Money.fromString('1').add(Money.fromNumber(input.takeProfitPct).divInt(100)),
+    );
+    const stopLossPrice = avgEntry.mul(
+      Money.fromString('1').sub(Money.fromNumber(input.stopLossPct).divInt(100)),
+    );
+
+    // 2. Insert per-fill ledger debits.
+    for (const f of rows) {
+      const size = Money.fromString(f.filledSize);
+      const price = Money.fromString(f.fillPrice);
+      const quote = size.mul(price);
+      const fee = Money.fromString(f.fee);
+      if (quote.isPositive()) {
+        await insertCashLedgerEvent(tx, {
+          idempotencyKey: ledgerKeyForFill('buy_cost', input.intentId, f.id),
+          deltaUsd: quote.neg(),
+          reason: 'buy_cost',
+          orderIntentId: input.intentId,
+          fillId: f.id,
+          dryRun: input.dryRun,
+        });
+      }
+      if (fee.isPositive()) {
+        await insertCashLedgerEvent(tx, {
+          idempotencyKey: ledgerKeyForFill('buy_fee', input.intentId, f.id),
+          deltaUsd: fee.neg(),
+          reason: 'buy_fee',
+          orderIntentId: input.intentId,
+          fillId: f.id,
+          dryRun: input.dryRun,
+        });
+      }
+    }
+    input.__testHook?.('after_ledger');
+
+    // 3. Insert position.
+    const positionId = await insertPositionTx(tx, {
+      token: intent.token,
+      mode: input.mode,
+      avgEntryPrice: avgEntry.toDecimalString(),
+      filledQuantity: agg.filledSize.toDecimalString(),
+      entryFees: agg.totalFees.toDecimalString(),
+      entryQuoteSpent: agg.quoteValue.toDecimalString(),
+      allocationPct: Money.fromNumber(input.allocationPct).toDecimalString(2),
+      takeProfitPrice: takeProfitPrice.toDecimalString(),
+      stopLossPrice: stopLossPrice.toDecimalString(),
+      takeProfitPct: Money.fromNumber(input.takeProfitPct).toDecimalString(2),
+      stopLossPct: Money.fromNumber(input.stopLossPct).toDecimalString(2),
+      entryOrderIntentId: input.intentId,
+      protectionMode: input.protectionMode,
+      claudeReason: input.claudeReason,
+      claudeModel: input.claudeModel,
+      claudeConfidence:
+        input.claudeConfidence !== null
+          ? Money.fromNumber(input.claudeConfidence).toDecimalString(4)
+          : null,
+      strategyVersion: input.strategyVersion,
+      lifecycleState: 'open',
+      status: 'open',
+    });
+    input.__testHook?.('after_position');
+
+    // 4. Update the intent state + positionId.
+    await updateOrderIntentTx(tx, input.intentId, {
+      state: input.intentEndState,
+      positionId,
+    });
+
+    return { kind: 'opened', positionId };
+  });
+}
+
+export interface ApplyExitInput {
+  intentId: number;
+  position: PositionRow;
+  fillsToApply: NormalizedFill[];
+  exitReason: 'take_profit' | 'stop_loss' | 'early_exit' | 'manual' | 'emergency' | 'reconciled';
+  dryRun: boolean;
+  __testHook?: (stage: 'after_fills' | 'after_ledger' | 'after_position') => void;
+}
+
+export interface ApplyExitResult {
+  kind: 'closed';
+  roundTripId: number;
+  outcome: 'win' | 'loss' | 'flat';
+}
+
+/**
+ * Atomically applies an exit's economic state.
+ *
+ * Inside ONE transaction:
+ *   1. Verify fencing.
+ *   2. Insert every fill (idempotent).
+ *   3. Insert per-fill ledger credits (idempotent).
+ *   4. Mark the position closed.
+ *   5. Create the round-trip (idempotent — round_trips has a UNIQUE positionId).
+ *   6. Update the intent state.
+ *
+ * A replay finds the existing round trip and returns it without duplicating
+ * economic state.
+ */
+export async function applyExitEconomicStateTx(input: ApplyExitInput): Promise<ApplyExitResult> {
+  return withTransaction(async (tx) => {
+    const intent = await getOrderIntentTx(tx, input.intentId);
+    if (!intent) throw new Error(`applyExitEconomicStateTx: intent ${input.intentId} not found`);
+    if (intent.side !== 'SELL') {
+      throw new Error(`applyExitEconomicStateTx: intent ${input.intentId} is not a SELL`);
+    }
+
+    await verifyFencingTx(tx, intent);
+
+    // Idempotent guard: if a round trip already exists for this position, we
+    // already ran successfully — return it.
+    const existingRt = await tx
+      .select({ id: roundTrips.id, outcome: roundTrips.outcome })
+      .from(roundTrips)
+      .where(eq(roundTrips.positionId, input.position.id))
+      .limit(1);
+    if (existingRt[0]) {
+      return {
+        kind: 'closed',
+        roundTripId: existingRt[0].id,
+        outcome: existingRt[0].outcome,
+      };
+    }
+
+    // 1. Insert fills.
+    const rows = await upsertFillsTx(tx, input.intentId, input.fillsToApply);
+    input.__testHook?.('after_fills');
+
+    const agg = aggregateFillRows(rows);
+    if (!agg.filledSize.isPositive()) {
+      throw new Error(
+        `applyExitEconomicStateTx: refuse to close — zero filled size for intent ${input.intentId}`,
+      );
+    }
+
+    // 2. Ledger credits (proceeds +, fees -).
+    for (const f of rows) {
+      const size = Money.fromString(f.filledSize);
+      const price = Money.fromString(f.fillPrice);
+      const quote = size.mul(price);
+      const fee = Money.fromString(f.fee);
+      if (quote.isPositive()) {
+        await insertCashLedgerEvent(tx, {
+          idempotencyKey: ledgerKeyForFill('sell_proceeds', input.intentId, f.id),
+          deltaUsd: quote,
+          reason: 'sell_proceeds',
+          orderIntentId: input.intentId,
+          positionId: input.position.id,
+          fillId: f.id,
+          dryRun: input.dryRun,
+        });
+      }
+      if (fee.isPositive()) {
+        await insertCashLedgerEvent(tx, {
+          idempotencyKey: ledgerKeyForFill('sell_fee', input.intentId, f.id),
+          deltaUsd: fee.neg(),
+          reason: 'sell_fee',
+          orderIntentId: input.intentId,
+          positionId: input.position.id,
+          fillId: f.id,
+          dryRun: input.dryRun,
+        });
+      }
+    }
+    input.__testHook?.('after_ledger');
+
+    // 3. Round-trip P&L.
+    const entryFees = Money.fromString(input.position.entryFees);
+    const entryValueGross = Money.fromString(input.position.entryQuoteSpent);
+    const exitValueGross = agg.quoteValue;
+    const exitFees = agg.totalFees;
+    const realizedNet = exitValueGross.sub(entryValueGross).sub(entryFees).sub(exitFees);
+    const realizedNetPct = entryValueGross.isZero()
+      ? Money.zero()
+      : realizedNet.div(entryValueGross).mul(Money.fromString('100'));
+    const outcome: 'win' | 'loss' | 'flat' = realizedNet.isPositive()
+      ? 'win'
+      : realizedNet.isNegative()
+        ? 'loss'
+        : 'flat';
+
+    // 4. Mark position closed.
+    const closedAt = new Date();
+    await markPositionClosedTx(tx, input.position.id, closedAt);
+    input.__testHook?.('after_position');
+
+    // 5. Round trip.
+    const roundTripId = await insertRoundTripTx(tx, {
+      positionId: input.position.id,
+      token: input.position.token,
+      mode: input.position.mode,
+      entryValueGross: entryValueGross.toDecimalString(),
+      exitValueGross: exitValueGross.toDecimalString(),
+      entryFees: entryFees.toDecimalString(),
+      exitFees: exitFees.toDecimalString(),
+      realizedNetPnl: realizedNet.toDecimalString(),
+      realizedNetPnlPct: realizedNetPct.toDecimalString(4),
+      outcome,
+      exitReason: input.exitReason,
+      openedAt: input.position.openedAt,
+      closedAt,
+    });
+
+    // 6. Intent state.
+    await updateOrderIntentTx(tx, input.intentId, { state: 'filled' });
+
+    return { kind: 'closed', roundTripId, outcome };
+  });
+}
+
+// (drizzle-orm helper re-exports so scanner/reconciler don't need to import
+// from drizzle-orm directly for the fencing max lookups)
+export { and, eq, gt, ne, or };

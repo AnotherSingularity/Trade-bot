@@ -126,6 +126,19 @@ export const orderIntents = mysqlTable(
     // simulated from live orders unambiguously even if DRY_RUN changes later.
     dryRun: boolean('dryRun').notNull(),
 
+    // Phase 1.1.a-FIX §H: durable fencing. The scanner's Redis lease hands
+    // out a monotonic `fenceGeneration`; every intent stamps the generation
+    // that authorized it, and the atomic economic transaction verifies that
+    // no NEWER generation exists for the same token/position before writing.
+    // A stale worker whose lease was silently taken cannot commit.
+    fenceGeneration: int('fenceGeneration'),
+
+    // Phase 1.1.a-FIX §B: attempt generation for exit intents. Combined with
+    // (positionId, purpose) forms a UNIQUE key so two workers cannot race to
+    // allocate the same generation. Null for entries (entry uniqueness is via
+    // clientOrderId).
+    attemptGeneration: int('attemptGeneration'),
+
     createdAt: timestamp('createdAt').defaultNow().notNull(),
     updatedAt: timestamp('updatedAt').defaultNow().onUpdateNow().notNull(),
   },
@@ -136,6 +149,15 @@ export const orderIntents = mysqlTable(
     exchangeOrderIdUnique: uniqueIndex('order_intents_exchange_uq').on(table.exchangeOrderId),
     positionIdIdx: index('order_intents_position_idx').on(table.positionId),
     stateIdx: index('order_intents_state_idx').on(table.state),
+    fenceIdx: index('order_intents_fence_idx').on(table.fenceGeneration),
+    // (positionId, purpose, attemptGeneration) UNIQUE — race-safe exit
+    // allocation. NULL positionId (entries) doesn't collide, so this only
+    // constrains exit intents in practice.
+    exitAttemptUq: uniqueIndex('order_intents_exit_attempt_uq').on(
+      table.positionId,
+      table.purpose,
+      table.attemptGeneration,
+    ),
   }),
 );
 

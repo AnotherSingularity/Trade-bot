@@ -1,27 +1,39 @@
 # Phase 1.1.a — Execution Integrity & Decimal-Safe Core
 
 > **DRY_RUN remains `true`.** **ORDER_SUBMISSION_ENABLED remains `false`.**
-> **No real Coinbase order was submitted at any point during this tranche.**
+> **No real Coinbase order was submitted at any point during this tranche
+> (including the P1.1.a-FIX pass — see PHASE1_1a_FIX.md).**
 
 Phase 1.1.a is the correction tranche the post-Slice-1 audit required BEFORE
 Slice 2 (L2 book / regime engine / risk engine / mode rebuilds). Its purpose
 is to close the execution-integrity gaps that would let dry-run-only theatre
 become real capital risk once ORDER_SUBMISSION_ENABLED flipped.
 
+> **Follow-up P1.1.a-FIX**: after the initial 1.1.a pass, an audit found that
+> §§A, F, and H were only PARTIALLY delivered. See **PHASE1_1a_FIX.md** for the
+> corrections and the revised status below.
+
 ## What shipped
 
 | Audit item | Status | Where |
 |---|---|---|
 | §M decimal-safe execution core | done | `Money` end-to-end in coinbase increment rounding, fill aggregation, ledger, sizing, TP/SL, dry-run simulator, round-trip P&L |
-| §F atomic entry / exit transactions | done | `db/tx.ts` + rewired executor entry & exit blocks |
+| §F atomic entry / exit transactions | **partial → completed in FIX** | Original 1.1.a wrapped intent-state transitions in a tx but persisted fills OUTSIDE the tx (fill row → separate tx for ledger/position). FIX moved fills INSIDE the tx via `applyEntryEconomicStateTx` / `applyExitEconomicStateTx`. See PHASE1_1a_FIX.md §F/§D. |
 | §G DB-enforced one-open-position-per-token | done | migration 0003 generated column `openTokenKey` + UNIQUE index |
-| §H renewable lease + fencing token | done | `jobs/lease.ts` `withRenewingLease` + monotonic `fenceGeneration` |
-| §A global unknown-order lock | done | `tripGlobalUnknownLock`; `reconciliationStatus='degraded'`; exit path refuses new sell for a position with an unknown intent |
-| §B stable economic identities | done | `deriveClientOrderId` pure function of (decisionId) for entries and (positionId, purpose, attemptGeneration) for exits |
+| §H renewable lease + fencing token | **partial → completed in FIX** | Original 1.1.a added `withRenewingLease` + monotonic `fenceGeneration` on the LEASE, and gated commits on `lease.isValid()` at precheck. But the fencing token was **not persisted on the intent** and was **not verified inside the atomic mutation boundary** — a stale worker whose lease was silently taken could still commit. FIX persists `fenceGeneration` on `order_intents` and calls `verifyFencingTx` inside `applyEntry/ExitEconomicStateTx`. See PHASE1_1a_FIX.md §H. |
+| §A global unknown-order lock | **partial → completed in FIX** | Original 1.1.a trips `reconciliationStatus='degraded'` on any unknown outcome and blocks new sells for a position with an unknown intent. But the lock is only cleared by **continuous reconciliation**, which is **still deferred to slice 1.1.b**. The lock-tripping half of §A is done; the lock-clearing half (which requires continuous reconciliation) remains open. See PHASE1_1a_FIX.md §A. |
+| §B stable economic identities | done (extended in FIX) | `deriveClientOrderId` pure function of (decisionId) for entries and (positionId, purpose, attemptGeneration) for exits. FIX adds a **UNIQUE (positionId, purpose, attemptGeneration)** index so two workers cannot race to allocate the same generation. |
 | §I correct preview schema | done | reads `est_average_filled_price`; NO midpoint fallback for marketable orders |
 | §O rename EV gate → cost-adjusted payoff gate + third-outcome interface | done | `costAdjustedPayoffGate.ts` with `OutcomeProbabilities {pTp, pSl, pTimeout}` |
 
-Deferred to slice 1.1.b (documented in "Remaining work" below).
+**Correction-tranche items still deferred to slice 1.1.b** (documented in
+"Remaining work" and in PHASE1_1a_FIX.md):
+
+- §A **lock CLEARING** — depends on §C continuous reconciliation
+- §F/§D **reconciler-side economic recovery** — the FIX made
+  `applyEntry/ExitEconomicStateTx` callable by both the executor AND the
+  reconciler, but the continuous reconciler itself is still to be built
+- §C **continuous reconciliation loop** — not delivered
 
 ## Files changed
 
@@ -39,8 +51,9 @@ Deferred to slice 1.1.b (documented in "Remaining work" below).
 - `src/trading/evGate.ts` — collapsed to a deprecated re-export shim (removed in 1.1.b)
 - `docs/decimal-arithmetic-policy.md` **(new)** — the authoritative policy for the money boundary
 
-**Migration**
-- `drizzle/migrations/0003_phase1_1a_atomicity_and_invariants.sql` — `openTokenKey` UNIQUE, `cash_ledger.idempotencyKey` UNIQUE + `fillId` FK, `bot_config.reconciliationStatus` enum + `degraded`
+**Migrations**
+- `drizzle/migrations/0003_phase1_1a_atomicity_and_invariants.sql` — `openTokenKey` UNIQUE, `cash_ledger.idempotencyKey` UNIQUE + `fillId` FK. **Migration history integrity note:** the initial 1.1.a pass added the `reconciliationStatus` enum extension INSIDE 0003 after 0003 had already been applied to running databases. The FIX restored 0003 to its originally-applied form and moved the enum change to a new immutable migration 0004. See PHASE1_1a_FIX.md §migration-integrity.
+- `drizzle/migrations/0004_phase1_1a_fix_fencing_and_race_safe_exits.sql` (FIX) — `bot_config.reconciliationStatus` enum + `degraded`; `order_intents.fenceGeneration` + `order_intents.attemptGeneration` columns + `order_intents_fence_idx`; UNIQUE `order_intents_exit_attempt_uq` on `(positionId, purpose, attemptGeneration)`.
 
 **Shared (`packages/shared`)**
 - `src/types.ts` — `BotStatus.reconciliationStatus` union extended with `'degraded'`
@@ -159,21 +172,36 @@ Deferred from Phase 1.1 into 1.1.b / 1.1.c / 1.1.d:
 
 ## Test results (verbatim)
 
+Initial 1.1.a pass:
 ```
 Test Files  18 passed (18)
      Tests  174 passed (174)
 Tasks:      9 successful, 9 total   (turbo run typecheck test build)
 ```
 
+After the P1.1.a-FIX tranche (see PHASE1_1a_FIX.md for the exact scope):
+```
+Test Files  19 passed (19)
+     Tests  189 passed (189)
+```
+
+The new file `tests/tx-rollback-fencing.test.ts` adds 15 tests covering the
+atomic-boundary rollback (three throw stages × entry + exit + replay), the
+durable fencing check (equal / older / precheck-then-peer-committed / exit
+path), and the race-safe exit UNIQUE constraint.
+
 ## Explicit confirmation
 
 - `DRY_RUN=true` in `apps/server/.env` — unchanged
 - `ORDER_SUBMISSION_ENABLED=false` in `apps/server/.env` — unchanged
 - The Phase 1 §Q killswitch inside `coinbase.createOrder` remains active; the
-  new atomic-transaction path did not touch that guard.
-- No real Coinbase order was placed at any point during Phase 1.1.a.
+  new atomic-transaction path (both the original and the FIX) did not touch
+  that guard.
+- No real Coinbase order was placed at any point during Phase 1.1.a or the
+  P1.1.a-FIX pass.
 - All Coinbase interactions in the test suite are mocked (either via
   `vi.mock` on the module or the killswitch test's `fetch` spy); no test
   hits `api.coinbase.com`.
-- Migration `0003` applied to both `horizon_trade` (dev) and
-  `horizon_trade_test` (test) databases.
+- Migrations `0003` and `0004` applied cleanly to a fresh database
+  (`horizon_migration_test`) from zero and to the existing
+  `horizon_trade` / `horizon_trade_test` databases.

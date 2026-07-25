@@ -484,6 +484,10 @@ async function selectAndOpenEntries(lease?: Lease): Promise<void> {
       claudeModel: CLAUDE_MODEL,
       claudeConfidence: claude.confidence,
       decisionId: decisionRow.id, // §B: stable economic identity
+      // §H FIX: durable fencing generation. Persisted on the intent so the
+      // atomic transaction can reject a stale worker even if lease.isValid()
+      // was true at precheck.
+      fenceGeneration: lease?.fenceGeneration,
     });
     if (result.kind === 'opened') opened++;
   }

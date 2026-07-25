@@ -2,37 +2,30 @@ import { createHash, randomBytes } from 'node:crypto';
 import { Money, ONE_MONEY, STRATEGY, STRATEGY_VERSION, type TradingMode } from '@horizon/shared';
 import { ENV } from '../env';
 import {
-  aggregateFills,
   countExitAttemptsForPosition,
   ensureInitialFund,
   findOrderIntentByClientOrderId,
   getBotConfig,
   getCashBalance as getLedgerCashBalance,
-  getFillsForOrderIntent,
   getOpenPositionForToken,
   getOrderIntent,
   hasUnknownIntentForPosition,
   insertOrderIntent,
-  insertFill,
   logActivity,
   recordTokenOutcome,
   updateBotConfig,
   updateOrderIntent,
   updatePositionVersioned,
-  type FillAggregate,
   type NewOrderIntent,
 } from '../db/queries';
 import {
-  insertCashLedgerEvent,
-  insertPositionTx,
-  insertRoundTripTx,
+  applyEntryEconomicStateTx,
+  applyExitEconomicStateTx,
+  FencingViolation,
   isDuplicateKeyError,
-  ledgerKeyForFill,
-  markPositionClosedTx,
-  updateOrderIntentTx,
-  withTransaction,
+  type NormalizedFill,
 } from '../db/tx';
-import type { FillRow, OrderIntentRow, PositionRow } from '../db/schema';
+import type { OrderIntentRow, PositionRow } from '../db/schema';
 import {
   CoinbaseError,
   createOrder,
@@ -186,153 +179,51 @@ function simulateSellFill(product: CoinbaseProduct, baseSize: Money): CoinbaseFi
 // Order state-machine primitives
 // ---------------------------------------------------------------------------
 
+/**
+ * Idempotent intent persistence. Two safety layers:
+ *   1. Fast path: lookup by clientOrderId — a retry of the same economic
+ *      order sees the existing row and skips the insert.
+ *   2. Race-safe path: if the lookup misses but a concurrent worker inserts
+ *      between the lookup and our insert, ER_DUP_ENTRY on the clientOrderId
+ *      or exit-attempt UNIQUE index throws — we catch and re-read.
+ */
 async function persistIntent(intent: NewOrderIntent): Promise<OrderIntentRow> {
-  // Idempotency: if this clientOrderId already exists, return the existing row
-  // (this is what makes retries safe).
   const existing = await findOrderIntentByClientOrderId(intent.clientOrderId);
   if (existing) return existing;
-  const id = await insertOrderIntent(intent);
-  return (await getOrderIntent(id))!;
-}
-
-/**
- * Idempotently persists a Coinbase fill. `exchangeFillId` has a UNIQUE index,
- * so a replay during startup reconciliation or after a mid-flight crash is a
- * silent no-op — the caller doesn't need to check first.
- */
-async function persistFillFromExchange(
-  intentId: number,
-  fill: CoinbaseFill,
-): Promise<void> {
   try {
-    await insertFill({
-      exchangeFillId: fill.trade_id,
-      orderIntentId: intentId,
-      exchangeOrderId: fill.order_id,
-      token: fill.product_id.split('-')[0],
-      side: fill.side,
-      filledSize: fill.size,
-      fillPrice: fill.price,
-      fee: fill.commission,
-      feeCurrency: 'USD',
-      tradeTime: new Date(fill.trade_time),
-      rawResponse: JSON.stringify(fill),
-    });
+    const id = await insertOrderIntent(intent);
+    return (await getOrderIntent(id))!;
   } catch (err) {
     if (!isDuplicateKeyError(err)) throw err;
-    // Already persisted — silent no-op (idempotent replay).
+    // Concurrent insert won — re-read via the deterministic key.
+    const found = await findOrderIntentByClientOrderId(intent.clientOrderId);
+    if (!found) {
+      // The dup might have been on (positionId,purpose,attemptGeneration) —
+      // meaning a peer allocated the same attempt for a different clientOrderId.
+      // That indicates a genuine race we can't resolve here; the caller must
+      // recompute attemptGeneration.
+      throw new Error(
+        `persistIntent race: duplicate exit attempt for position ${intent.positionId ?? 'n/a'} purpose ${intent.purpose}; caller must retry with a fresh generation`,
+      );
+    }
+    return found;
   }
 }
 
-/**
- * After submission (real or simulated), refreshes fills for the intent and
- * returns the aggregated result. In live mode this calls `listFillsForOrder`;
- * in dry-run it reads whatever was inserted by the simulator.
- *
- * All returned values are Money (Phase 1.1.a §M).
- */
-async function reconcileFillsForIntent(intent: OrderIntentRow): Promise<
-  FillAggregate & { fillRows: FillRow[] }
-> {
-  if (useLivePath() && intent.exchangeOrderId) {
-    try {
-      const remote = await listFillsForOrder(intent.exchangeOrderId);
-      for (const f of remote) await persistFillFromExchange(intent.id, f);
-    } catch (err) {
-      // Non-fatal here — we'll retry in the reconciler.
-      if (err instanceof CoinbaseError) {
-        await logActivity({
-          type: 'error',
-          severity: 'warn',
-          action: 'FILL_FETCH_FAILED',
-          detail: `${intent.clientOrderId}: ${err.code} ${err.message}`,
-        });
-      }
-    }
-  }
-  const fillRows = await getFillsForOrderIntent(intent.id);
-  return { ...aggregateFills(fillRows), fillRows };
-}
-
-/**
- * Fill-derived ledger writes inside an existing transaction.
- * Each row is keyed by (reason, intentId, fillId) so a replay during startup
- * reconciliation is a silent no-op (Phase 1.1.a §F).
- *
- * A market order can produce multiple fills at different prices/fees; we emit
- * one ledger row per fill for the notional and one per fill for the fee.
- * Aggregate ledger rows would lose the per-fill lineage the reconciler needs.
- */
-async function writeBuyLedgerRows(
-  tx: Parameters<Parameters<typeof withTransaction>[0]>[0],
-  intentId: number,
-  positionId: number | null,
-  fillRows: FillRow[],
-): Promise<void> {
-  for (const fill of fillRows) {
-    const size = Money.fromString(fill.filledSize);
-    const price = Money.fromString(fill.fillPrice);
-    const quote = size.mul(price);
-    const fee = Money.fromString(fill.fee);
-    if (quote.isPositive()) {
-      await insertCashLedgerEvent(tx, {
-        idempotencyKey: ledgerKeyForFill('buy_cost', intentId, fill.id),
-        deltaUsd: quote.neg(),
-        reason: 'buy_cost',
-        orderIntentId: intentId,
-        positionId,
-        fillId: fill.id,
-        dryRun: ENV.dryRun,
-      });
-    }
-    if (fee.isPositive()) {
-      await insertCashLedgerEvent(tx, {
-        idempotencyKey: ledgerKeyForFill('buy_fee', intentId, fill.id),
-        deltaUsd: fee.neg(),
-        reason: 'buy_fee',
-        orderIntentId: intentId,
-        positionId,
-        fillId: fill.id,
-        dryRun: ENV.dryRun,
-      });
-    }
-  }
-}
-
-async function writeSellLedgerRows(
-  tx: Parameters<Parameters<typeof withTransaction>[0]>[0],
-  intentId: number,
-  positionId: number | null,
-  fillRows: FillRow[],
-): Promise<void> {
-  for (const fill of fillRows) {
-    const size = Money.fromString(fill.filledSize);
-    const price = Money.fromString(fill.fillPrice);
-    const quote = size.mul(price);
-    const fee = Money.fromString(fill.fee);
-    if (quote.isPositive()) {
-      await insertCashLedgerEvent(tx, {
-        idempotencyKey: ledgerKeyForFill('sell_proceeds', intentId, fill.id),
-        deltaUsd: quote,
-        reason: 'sell_proceeds',
-        orderIntentId: intentId,
-        positionId,
-        fillId: fill.id,
-        dryRun: ENV.dryRun,
-      });
-    }
-    if (fee.isPositive()) {
-      await insertCashLedgerEvent(tx, {
-        idempotencyKey: ledgerKeyForFill('sell_fee', intentId, fill.id),
-        deltaUsd: fee.neg(),
-        reason: 'sell_fee',
-        orderIntentId: intentId,
-        positionId,
-        fillId: fill.id,
-        dryRun: ENV.dryRun,
-      });
-    }
-  }
+/** Converts a CoinbaseFill into the NormalizedFill shape apply* functions accept. */
+function normalizeCoinbaseFill(fill: CoinbaseFill): NormalizedFill {
+  return {
+    exchangeFillId: fill.trade_id,
+    exchangeOrderId: fill.order_id,
+    token: fill.product_id.split('-')[0],
+    side: fill.side,
+    filledSize: fill.size,
+    fillPrice: fill.price,
+    fee: fill.commission,
+    feeCurrency: 'USD',
+    tradeTime: new Date(fill.trade_time),
+    rawResponse: JSON.stringify(fill),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -354,6 +245,13 @@ export interface EntryDecision {
    * same accepted-decision id → same clientOrderId → Coinbase dedupe.
    */
   decisionId: number;
+  /**
+   * Phase 1.1.a-FIX §H: the current scan lease's fenceGeneration. Persisted
+   * on the intent + verified inside the atomic economic transaction so a
+   * stale worker whose lease was silently taken cannot commit an entry.
+   * Undefined only in tests / non-fenced entry paths.
+   */
+  fenceGeneration?: number;
 }
 
 export interface OpenResult {
@@ -430,6 +328,7 @@ export async function openPosition(decision: EntryDecision): Promise<OpenResult>
     mode: decision.mode,
     purpose: 'entry',
     state: 'created',
+    fenceGeneration: decision.fenceGeneration ?? null,
     dryRun: ENV.dryRun,
   });
 
@@ -470,6 +369,7 @@ export async function openPosition(decision: EntryDecision): Promise<OpenResult>
   };
 
   let exchangeOrderId: string;
+  const collectedFills: CoinbaseFill[] = [];
   if (!useLivePath()) {
     exchangeOrderId = `DRY-${clientOrderId}`;
     await updateOrderIntent(intent.id, {
@@ -477,10 +377,12 @@ export async function openPosition(decision: EntryDecision): Promise<OpenResult>
       exchangeOrderId,
       rawResponse: '{"dryRun":true}',
     });
-    // Simulate one fill and persist it exactly like a real fill.
+    // FIX §F/§D: do NOT persist fills here. Collect them in memory and hand
+    // the whole set to applyEntryEconomicStateTx so fill insertion happens
+    // INSIDE the atomic economic transaction.
     const fakeFill = simulateBuyFill(product, Money.fromString(normalizedQuote));
     fakeFill.order_id = exchangeOrderId;
-    await persistFillFromExchange(intent.id, fakeFill);
+    collectedFills.push(fakeFill);
   } else {
     try {
       const submitResult = await createOrder(submitIntent);
@@ -523,9 +425,26 @@ export async function openPosition(decision: EntryDecision): Promise<OpenResult>
     }
   }
 
-  // ── 6. Reconcile fills → derive position from actual execution.
-  const agg = await reconcileFillsForIntent((await getOrderIntent(intent.id))!);
-  if (!agg.filledSize.isPositive()) {
+  // ── 6. Live path: fetch fills from Coinbase now that we know the order id.
+  if (useLivePath()) {
+    try {
+      const liveFills = await listFillsForOrder(exchangeOrderId);
+      for (const lf of liveFills) collectedFills.push(lf);
+    } catch (err) {
+      // Non-fatal here — reconciler can retry later. The intent stays in
+      // 'submitted' state so the recovery path picks it up.
+      await logActivity({
+        type: 'error',
+        severity: 'warn',
+        token: decision.token,
+        action: 'FILL_FETCH_FAILED',
+        detail: `${clientOrderId}: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      return { kind: 'unknown', intentId: intent.id, reason: 'fill_fetch_failed' };
+    }
+  }
+
+  if (collectedFills.length === 0) {
     // Zero fill — likely IOC couldn't match. Mark canceled and stop.
     await updateOrderIntent(intent.id, { state: 'canceled' });
     await logActivity({
@@ -538,61 +457,76 @@ export async function openPosition(decision: EntryDecision): Promise<OpenResult>
     return { kind: 'skipped', intentId: intent.id, reason: 'zero_fill' };
   }
 
-  // ── 7. Compute protective levels from actual avg entry — Money-native.
   const modeCfg = STRATEGY.MODES[decision.mode];
-  const avgEntry = agg.weightedAvgPrice;
-  const takeProfitPrice = avgEntry.mul(ONE_MONEY.add(Money.fromNumber(modeCfg.takeProfitPct).divInt(100)));
-  const stopLossPrice = avgEntry.mul(ONE_MONEY.sub(Money.fromNumber(modeCfg.stopLossPct).divInt(100)));
+  const normalizedFills = collectedFills.map(normalizeCoinbaseFill);
 
-  // partial_filled if the total quote spent + fees is materially below what we
-  // asked for; otherwise filled. (We can't compare filledSize to normalizedQuote
-  // directly — one is base, one is quote.)
+  // Partial-fill classification: compare requested quote to actual (fills * price + fees).
+  // (This is a heuristic slice-1.1.b replaces with Coinbase order.status + completion_percentage.)
   const requestedQuote = Money.fromString(normalizedQuote);
-  const filledQuote = agg.quoteValue.add(agg.totalFees);
+  let filledQuoteSum = Money.zero();
+  let filledSizeSum = Money.zero();
+  for (const nf of normalizedFills) {
+    const size = Money.fromString(nf.filledSize);
+    filledSizeSum = filledSizeSum.add(size);
+    filledQuoteSum = filledQuoteSum.add(size.mul(Money.fromString(nf.fillPrice))).add(
+      Money.fromString(nf.fee),
+    );
+  }
+  if (!filledSizeSum.isPositive()) {
+    await updateOrderIntent(intent.id, { state: 'canceled' });
+    return { kind: 'skipped', intentId: intent.id, reason: 'zero_fill' };
+  }
   const partialCushion = requestedQuote.pct(1);
-  const intentEndState: OrderIntentRow['state'] = requestedQuote
-    .sub(filledQuote)
+  const intentEndState: 'filled' | 'partially_filled' = requestedQuote
+    .sub(filledQuoteSum)
     .abs()
     .gt(partialCushion)
     ? 'partially_filled'
     : 'filled';
 
-  // ── 8-9. ATOMIC: position insert + per-fill ledger debits + intent update.
-  //         The DB-enforced unique open-token index protects against a racing
-  //         peer opening a duplicate; ledger idempotency keys protect against
-  //         mid-flight crash + retry (Phase 1.1.a §F).
+  // ── 7. ATOMIC: fills + ledger + position + intent, all inside ONE transaction
+  //           via the shared applyEntryEconomicStateTx (FIX §F/§D). Same function
+  //           is called by the reconciler's recovery path — no duplicate
+  //           economic-application code.
   let positionId: number;
   try {
-    positionId = await withTransaction(async (tx) => {
-      const pid = await insertPositionTx(tx, {
-        token: decision.token,
-        mode: decision.mode,
-        avgEntryPrice: avgEntry.toDecimalString(),
-        filledQuantity: agg.filledSize.toDecimalString(),
-        entryFees: agg.totalFees.toDecimalString(),
-        entryQuoteSpent: agg.quoteValue.toDecimalString(),
-        allocationPct: Money.fromNumber(decision.allocationPct).toDecimalString(2),
-        takeProfitPrice: takeProfitPrice.toDecimalString(),
-        stopLossPrice: stopLossPrice.toDecimalString(),
-        takeProfitPct: Money.fromNumber(modeCfg.takeProfitPct).toDecimalString(2),
-        stopLossPct: Money.fromNumber(modeCfg.stopLossPct).toDecimalString(2),
-        entryOrderIntentId: intent.id,
-        protectionMode: 'polling_fallback',
-        claudeReason: decision.claudeReason,
-        claudeModel: decision.claudeModel,
-        claudeConfidence: Money.fromNumber(decision.claudeConfidence).toDecimalString(4),
-        strategyVersion: STRATEGY_VERSION,
-        lifecycleState: 'open',
-        status: 'open',
-      });
-      await writeBuyLedgerRows(tx, intent.id, pid, agg.fillRows);
-      await updateOrderIntentTx(tx, intent.id, { state: intentEndState, positionId: pid });
-      return pid;
+    const result = await applyEntryEconomicStateTx({
+      intentId: intent.id,
+      fillsToApply: normalizedFills,
+      mode: decision.mode,
+      takeProfitPct: modeCfg.takeProfitPct,
+      stopLossPct: modeCfg.stopLossPct,
+      allocationPct: decision.allocationPct,
+      claudeReason: decision.claudeReason,
+      claudeModel: decision.claudeModel,
+      claudeConfidence: decision.claudeConfidence,
+      strategyVersion: STRATEGY_VERSION,
+      protectionMode: 'polling_fallback',
+      dryRun: ENV.dryRun,
+      intentEndState,
     });
+    positionId = result.positionId;
   } catch (err) {
-    // DB-enforced open-position uniqueness (§G) fires here as ER_DUP_ENTRY on
-    // positions_open_token_uq. The transaction rolled back — no ledger writes.
+    if (err instanceof FencingViolation) {
+      // §H FIX: a stale worker was outrun by a newer generation. Abort cleanly
+      // — the newer worker is authoritative. Mark our intent failed.
+      await updateOrderIntent(intent.id, {
+        state: 'failed',
+        failureClass: 'non_retryable_validation',
+        errorCode: 'fencing_violation',
+        errorMessage: err.message,
+      });
+      await logActivity({
+        type: 'system',
+        severity: 'high',
+        token: decision.token,
+        action: 'FENCING_VIOLATION',
+        detail: err.message,
+      });
+      return { kind: 'rejected', intentId: intent.id, reason: 'fencing_violation' };
+    }
     if (isDuplicateKeyError(err)) {
+      // §G — DB-enforced open-position uniqueness.
       await updateOrderIntent(intent.id, { state: 'canceled' });
       await logActivity({
         type: 'trade',
@@ -611,7 +545,7 @@ export async function openPosition(decision: EntryDecision): Promise<OpenResult>
     severity: 'info',
     token: decision.token,
     action: 'OPEN_POSITION',
-    detail: `${ENV.dryRun ? '[DRY RUN] ' : ''}${decision.mode} ${agg.filledSize.toDecimalString(6)} @ $${avgEntry.toDecimalString(6)} (fees $${agg.totalFees.toDecimalString(4)}) TP $${takeProfitPrice.toDecimalString(4)} SL $${stopLossPrice.toDecimalString(4)}`,
+    detail: `${ENV.dryRun ? '[DRY RUN] ' : ''}${decision.mode} filled ${filledSizeSum.toDecimalString(6)} into position ${positionId} (${normalizedFills.length} fill${normalizedFills.length === 1 ? '' : 's'})`,
   });
 
   return { kind: 'opened', positionId, intentId: intent.id };
@@ -712,9 +646,13 @@ export async function closePosition(
     positionId: position.id,
     state: 'created',
     dryRun: ENV.dryRun,
+    // §B FIX: attemptGeneration is part of the race-safe UNIQUE constraint.
+    // A concurrent worker computing the same generation is caught by the DB.
+    attemptGeneration,
   });
 
   let exchangeOrderId: string;
+  const exitFills: CoinbaseFill[] = [];
   if (!useLivePath()) {
     exchangeOrderId = `DRY-${clientOrderId}`;
     await updateOrderIntent(intent.id, {
@@ -722,9 +660,12 @@ export async function closePosition(
       exchangeOrderId,
       rawResponse: '{"dryRun":true}',
     });
+    // FIX §F/§D: collect the simulated fill; do NOT persist here. The atomic
+    // exit apply function inserts fills inside the same transaction as the
+    // ledger credit, position close, and round-trip creation.
     const fakeFill = simulateSellFill(product, Money.fromString(baseSizeStr));
     fakeFill.order_id = exchangeOrderId;
-    await persistFillFromExchange(intent.id, fakeFill);
+    exitFills.push(fakeFill);
   } else {
     try {
       const submitResult = await createOrder({
@@ -767,73 +708,71 @@ export async function closePosition(
     }
   }
 
-  const exitAgg = await reconcileFillsForIntent((await getOrderIntent(intent.id))!);
-  if (!exitAgg.filledSize.isPositive()) {
+  // Live path: fetch exit fills now that we have the order id.
+  if (useLivePath()) {
+    try {
+      const liveFills = await listFillsForOrder(exchangeOrderId);
+      for (const lf of liveFills) exitFills.push(lf);
+    } catch (err) {
+      await logActivity({
+        type: 'error',
+        severity: 'warn',
+        token: position.token,
+        action: 'EXIT_FILL_FETCH_FAILED',
+        detail: `${clientOrderId}: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      return { kind: 'pending', intentId: intent.id, reason: 'fill_fetch_failed' };
+    }
+  }
+
+  if (exitFills.length === 0) {
     await updateOrderIntent(intent.id, { state: 'canceled' });
     return { kind: 'failed', intentId: intent.id, reason: 'exit_zero_fill' };
   }
 
-  // Round-trip P&L (Money-native, Phase 1.1.a §M):
-  //   realizedNet = (exitQuote - entryQuote) - (entryFees + exitFees)
-  const entryFees = Money.fromString(position.entryFees);
-  const entryValueGross = Money.fromString(position.entryQuoteSpent);
-  const exitValueGross = exitAgg.quoteValue;
-  const exitFees = exitAgg.totalFees;
-  const realizedNet = exitValueGross.sub(entryValueGross).sub(entryFees).sub(exitFees);
-  const realizedNetPct = entryValueGross.isZero()
-    ? Money.zero()
-    : realizedNet.div(entryValueGross).mul(Money.fromString('100'));
-  const outcome: 'win' | 'loss' | 'flat' = realizedNet.isPositive()
-    ? 'win'
-    : realizedNet.isNegative()
-      ? 'loss'
-      : 'flat';
+  const normalizedExit = exitFills.map(normalizeCoinbaseFill);
 
-  // ATOMIC exit block: per-fill ledger credits + position close + round-trip
-  // creation + intent update — all one transaction (Phase 1.1.a §F). Any
-  // failure rolls back the entire economic effect.
-  const closedAt = new Date();
-  const roundTripId = await withTransaction(async (tx) => {
-    await writeSellLedgerRows(tx, intent.id, position.id, exitAgg.fillRows);
-    await markPositionClosedTx(tx, position.id, closedAt);
-    const rtId = await insertRoundTripTx(tx, {
-      positionId: position.id,
-      token: position.token,
-      mode: position.mode,
-      entryValueGross: entryValueGross.toDecimalString(),
-      exitValueGross: exitValueGross.toDecimalString(),
-      entryFees: entryFees.toDecimalString(),
-      exitFees: exitFees.toDecimalString(),
-      realizedNetPnl: realizedNet.toDecimalString(),
-      realizedNetPnlPct: realizedNetPct.toDecimalString(4),
-      outcome,
+  // ATOMIC EXIT: fills + ledger + close + round-trip + intent, all inside ONE
+  // transaction via the shared applyExitEconomicStateTx (FIX §F/§D).
+  let result: Awaited<ReturnType<typeof applyExitEconomicStateTx>>;
+  try {
+    result = await applyExitEconomicStateTx({
+      intentId: intent.id,
+      position,
+      fillsToApply: normalizedExit,
       exitReason: reason === 'emergency' ? 'emergency' : reason,
-      openedAt: position.openedAt,
-      closedAt,
+      dryRun: ENV.dryRun,
     });
-    await updateOrderIntentTx(tx, intent.id, { state: 'filled' });
-    return rtId;
-  });
+  } catch (err) {
+    if (err instanceof FencingViolation) {
+      await updateOrderIntent(intent.id, {
+        state: 'failed',
+        failureClass: 'non_retryable_validation',
+        errorCode: 'fencing_violation',
+        errorMessage: err.message,
+      });
+      return { kind: 'failed', intentId: intent.id, reason: 'fencing_violation' };
+    }
+    throw err;
+  }
 
   // Win/loss stats + circuit breaker — flats don't move the counter.
   // Kept OUTSIDE the transaction because they touch token_stats + bot_config
   // and are not required to be atomic with the round-trip creation.
-  if (outcome === 'win' || outcome === 'loss') {
-    await recordTokenOutcome(position.token, outcome);
-    await updateCircuitBreaker(outcome);
+  if (result.outcome === 'win' || result.outcome === 'loss') {
+    await recordTokenOutcome(position.token, result.outcome);
+    await updateCircuitBreaker(result.outcome);
   }
 
   await logActivity({
     type: 'trade',
-    severity: outcome === 'loss' ? 'warn' : 'info',
+    severity: result.outcome === 'loss' ? 'warn' : 'info',
     token: position.token,
     action: 'CLOSE_POSITION',
-    detail: `${ENV.dryRun ? '[DRY RUN] ' : ''}${reason} — net ${
-      realizedNet.isNegative() ? '' : '+'
-    }$${realizedNet.toDecimalString(4)} (${realizedNetPct.toDecimalString(2)}%)`,
+    detail: `${ENV.dryRun ? '[DRY RUN] ' : ''}${reason} — outcome ${result.outcome} (round-trip ${result.roundTripId})`,
   });
 
-  return { kind: 'closed', intentId: intent.id, roundTripId };
+  return { kind: 'closed', intentId: intent.id, roundTripId: result.roundTripId };
 }
 
 // ---------------------------------------------------------------------------

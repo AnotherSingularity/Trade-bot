@@ -40,15 +40,3 @@ ALTER TABLE `cash_ledger`
   ADD COLUMN `fillId` INT NULL,
   ADD UNIQUE KEY `cash_ledger_idempotency_uq` (`idempotencyKey`),
   ADD KEY `cash_ledger_fillId_idx` (`fillId`);
---> statement-breakpoint
-
--- ---------------------------------------------------------------------------
--- §A — global unknown-order lock. Extend the reconciliationStatus enum with
--- `degraded` so an in-flight unknown intent can trip a system-wide block on
--- new economic activity without also implying startup reconciliation failed.
--- ---------------------------------------------------------------------------
-ALTER TABLE `bot_config`
-  MODIFY COLUMN `reconciliationStatus`
-    ENUM('pending','in_progress','ok','failed','degraded')
-    NOT NULL DEFAULT 'pending';
-

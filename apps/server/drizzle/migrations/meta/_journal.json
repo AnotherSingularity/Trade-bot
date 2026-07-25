@@ -29,6 +29,13 @@
       "when": 1785500000000,
       "tag": "0003_phase1_1a_atomicity_and_invariants",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1785600000000,
+      "tag": "0004_phase1_1a_fix_fencing_and_race_safe_exits",
+      "breakpoints": true
     }
   ]
 }
