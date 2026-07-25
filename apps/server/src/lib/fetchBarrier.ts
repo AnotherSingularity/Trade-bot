@@ -17,7 +17,25 @@
 
 export interface HttpCounters {
   totalRequestCount: number;
+  /**
+   * How many times the `createOrder(...)` function was CALLED (regardless
+   * of whether the killswitch let it proceed to fetch). Set at the very
+   * top of `coinbase.createOrder`. Under SHADOW_LIVE this MUST stay 0 —
+   * the runtime is not allowed to even reach the abstraction.
+   */
+  createOrderFunctionInvocations: number;
+  /**
+   * How many times `fetch(POST /api/v3/brokerage/orders)` was attempted.
+   * Incremented by the fetch barrier BEFORE the socket opens. The
+   * barrier throws immediately; the network is never touched.
+   */
   createOrderAttemptCount: number;
+  /**
+   * How many `POST /api/v3/brokerage/orders` requests completed on the
+   * network. Only incremented if the fetch barrier is bypassed AND the
+   * network responds. Both must be zero for
+   * `mechanically_ready_for_shadow`.
+   */
   createOrderNetworkCount: number;
   byPath: Record<string, number>;
   byMethod: Record<string, number>;
@@ -25,6 +43,7 @@ export interface HttpCounters {
 
 const COUNTERS: HttpCounters = {
   totalRequestCount: 0,
+  createOrderFunctionInvocations: 0,
   createOrderAttemptCount: 0,
   createOrderNetworkCount: 0,
   byPath: {},
@@ -101,6 +120,7 @@ export function uninstallFetchBarrier(): void {
 export function httpCounters(): Readonly<HttpCounters> {
   return {
     totalRequestCount: COUNTERS.totalRequestCount,
+    createOrderFunctionInvocations: COUNTERS.createOrderFunctionInvocations,
     createOrderAttemptCount: COUNTERS.createOrderAttemptCount,
     createOrderNetworkCount: COUNTERS.createOrderNetworkCount,
     byPath: { ...COUNTERS.byPath },
@@ -110,10 +130,20 @@ export function httpCounters(): Readonly<HttpCounters> {
 
 export function resetHttpCounters(): void {
   COUNTERS.totalRequestCount = 0;
+  COUNTERS.createOrderFunctionInvocations = 0;
   COUNTERS.createOrderAttemptCount = 0;
   COUNTERS.createOrderNetworkCount = 0;
   COUNTERS.byPath = {};
   COUNTERS.byMethod = {};
+}
+
+/**
+ * Called at the very top of `coinbase.createOrder` (before the
+ * killswitch check) so we can prove that under SHADOW_LIVE the runtime
+ * NEVER invokes the abstraction — not that the abstraction refused it.
+ */
+export function recordCreateOrderFunctionInvocation(): void {
+  COUNTERS.createOrderFunctionInvocations++;
 }
 
 /**

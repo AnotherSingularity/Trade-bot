@@ -278,8 +278,17 @@ export interface OpenResult {
  * Opens a position through the full state machine. Safe to call multiple times
  * with the same `decisionId` — the derived clientOrderId ensures the exchange
  * sees exactly one order (Phase 1.1.a §B).
+ *
+ * Phase 1.1 Gate 3D-FIX §F — under SIMULATION_MODE=SHADOW_LIVE, the
+ * legacy path is BLOCKED. Callers must use
+ * `runtimeShadowScan` + `runtimeShadowExecute` instead. The guard runs
+ * before any economic write so a scan cannot slip through.
  */
 export async function openPosition(decision: EntryDecision): Promise<OpenResult> {
+  // Phase 1.1 Gate 3D-FIX §F — legacy-bypass barrier.
+  const { assertRuntimeShadowOrLegacyBypass } = await import('./shadow/runtimeService');
+  assertRuntimeShadowOrLegacyBypass('openPosition');
+
   // ── 0. Sanity: only one open position per token, enforced in application
   //           since MySQL doesn't have partial unique indexes. Check + re-check
   //           inside the DB write below.
@@ -584,11 +593,18 @@ export interface ClosePositionResult {
  * Closes an open position through the state machine. Returns `pending` (NOT
  * closed) if the exchange result is unknown, and `failed` on definite rejection
  * — the API layer must not report success in either case.
+ *
+ * Phase 1.1 Gate 3D-FIX §F — SHADOW_LIVE routes exits through
+ * `runtimeShadowExit`. This legacy path is blocked in SHADOW_LIVE.
  */
 export async function closePosition(
   position: PositionRow,
   reason: ExitReason,
 ): Promise<ClosePositionResult> {
+  // Phase 1.1 Gate 3D-FIX §F — legacy-bypass barrier.
+  const { assertRuntimeShadowOrLegacyBypass } = await import('./shadow/runtimeService');
+  assertRuntimeShadowOrLegacyBypass('closePosition');
+
   // §A: if this position already has an unresolved `unknown` exit intent,
   // refuse to create another. A prior exit may or may not have hit the
   // exchange; issuing a fresh sell here could double-close.

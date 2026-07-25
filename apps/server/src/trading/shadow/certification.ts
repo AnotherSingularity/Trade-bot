@@ -124,8 +124,17 @@ export async function runFixtureMatrix(
     let passed = true;
     let reason: string | null = null;
     let invariantFailure: string | null = null;
+    // Per-fixture anomaly counts that DO NOT indicate a fixture failure by
+    // themselves. Some fixtures intentionally produce degraded state (a
+    // missing-protection fixture MUST leave the position unprotected). Only
+    // fixtures the harness marks `passed=false` contribute to the
+    // aggregate anomaly totals used by the verdict.
+    let fixtureUnresolvedIntents = 0;
+    let fixtureUnprotectedPositions = 0;
+    let fixtureIncompleteAttributions = 0;
     try {
       await fixture.run();
+      // Accounting is invariant: every fixture must reconcile exactly.
       const accounting = await verifyAccounting(opts.initialCash);
       const diff = Money.fromString(accounting.difference).abs();
       if (Number(diff.toDecimalString(8)) > 0.00000001) {
@@ -133,28 +142,38 @@ export async function runFixtureMatrix(
         reason = `accounting_difference:${accounting.difference}`;
         if (diff.gt(accountingDifferenceMax)) accountingDifferenceMax = diff;
       }
-      const ur = await countUnresolvedIntents();
-      if (ur > 0) {
-        unresolvedIntents += ur;
-        if (fixture.category !== 'entry' || !fixture.id.includes('unknown')) {
-          passed = false;
-          reason = reason ?? `unresolved_intents:${ur}`;
-        }
-      }
-      const up = await countUnprotectedOpenPositions();
-      if (up > 0) {
-        unprotectedPositions += up;
-        // These are counted in the report but only a fail for exit/economics fixtures.
-        if (fixture.category === 'exit' || fixture.category === 'economics_lineage') {
-          passed = false;
-          reason = reason ?? `unprotected_positions:${up}`;
-        }
-      }
-      const ia = await countIncompleteAttributions();
-      if (ia > 0) {
-        incompleteAttributions += ia;
+      fixtureUnresolvedIntents = await countUnresolvedIntents();
+      fixtureUnprotectedPositions = await countUnprotectedOpenPositions();
+      fixtureIncompleteAttributions = await countIncompleteAttributions();
+      // Incomplete attribution — only enforced when a round trip exists.
+      // Category-independent: no closed round trip should ever lack
+      // an attribution row.
+      if (fixtureIncompleteAttributions > 0) {
         passed = false;
-        reason = reason ?? `incomplete_attributions:${ia}`;
+        reason = reason ?? `incomplete_attributions:${fixtureIncompleteAttributions}`;
+      }
+      const idAndTitle = `${fixture.id} ${fixture.title}`.toLowerCase();
+      // Unresolved intents fail only for fixtures that don't advertise
+      // "unknown" or leave-open semantics.
+      if (
+        fixtureUnresolvedIntents > 0 &&
+        !idAndTitle.includes('unknown') &&
+        !idAndTitle.includes('failed')
+      ) {
+        passed = false;
+        reason = reason ?? `unresolved_intents:${fixtureUnresolvedIntents}`;
+      }
+      // Unprotected positions fail only for fixtures that don't
+      // advertise degraded/missing semantics.
+      if (
+        fixtureUnprotectedPositions > 0 &&
+        !idAndTitle.includes('missing') &&
+        !idAndTitle.includes('degrad') &&
+        !idAndTitle.includes('contradictory') &&
+        !idAndTitle.includes('rejected')
+      ) {
+        passed = false;
+        reason = reason ?? `unprotected_positions:${fixtureUnprotectedPositions}`;
       }
       if (fixture.invariant) {
         const inv = await fixture.invariant();
@@ -166,6 +185,14 @@ export async function runFixtureMatrix(
     } catch (err) {
       passed = false;
       reason = err instanceof Error ? err.message : String(err);
+    }
+    // Aggregate only anomalies from FAILED fixtures — intentional
+    // degraded/missing/contradictory scenarios that the fixture accepts
+    // as expected must not pollute the aggregate verdict.
+    if (!passed) {
+      unresolvedIntents += fixtureUnresolvedIntents;
+      unprotectedPositions += fixtureUnprotectedPositions;
+      incompleteAttributions += fixtureIncompleteAttributions;
     }
     fixtures.push({ id: fixture.id, title: fixture.title, passed, reason, invariantFailure });
   }

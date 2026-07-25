@@ -1639,6 +1639,10 @@ export const shadowCertificationRuns = mysqlTable(
       .default('not_ready'),
     fixtureResults: text('fixtureResults'),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
+    // Phase 1.1 Gate 3D-FIX
+    runtimeIntegrated: boolean('runtimeIntegrated').notNull().default(false),
+    supersedesRunId: varchar('supersedesRunId', { length: 64 }),
+    createOrderFunctionInvocations: int('createOrderFunctionInvocations').notNull().default(0),
   },
   (t) => ({
     runUq: uniqueIndex('shadow_cert_run_uq').on(t.certificationRunId),

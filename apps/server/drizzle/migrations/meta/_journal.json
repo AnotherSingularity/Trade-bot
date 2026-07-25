@@ -78,6 +78,13 @@
       "when": 1786200000000,
       "tag": "0010_phase1_gate3d_integrated_shadow",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1786300000000,
+      "tag": "0011_phase1_gate3d_fix_runtime_integration",
+      "breakpoints": true
     }
   ]
 }

@@ -452,6 +452,11 @@ export interface CreateOrderResult {
  * is a second lock behind DRY_RUN; both must consent to reach the exchange.
  */
 export async function createOrder(intent: MarketOrderIntent): Promise<CreateOrderResult> {
+  // Phase 1.1 Gate 3D-FIX §H — count the FUNCTION invocation BEFORE the
+  // killswitch. Under SHADOW_LIVE the runtime must not even reach here;
+  // certification asserts this stays 0.
+  const { recordCreateOrderFunctionInvocation } = await import('../lib/fetchBarrier');
+  recordCreateOrderFunctionInvocation();
   if (!ENV.orderSubmissionEnabled) {
     throw new CoinbaseError({
       class: 'non_retryable_validation',
