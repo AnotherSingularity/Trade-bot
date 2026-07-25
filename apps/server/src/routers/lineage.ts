@@ -130,6 +130,7 @@ export const lineageRouter = router({
         outcomeLabels: base.outcomes,
         lineageEvents: base.events,
         protection: base.protection,
+        shadow: base.shadow,
       };
     }),
 });

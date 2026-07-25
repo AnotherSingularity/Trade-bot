@@ -1508,6 +1508,145 @@ export const protectionEvents = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Phase 1.1 Gate 3D — integrated shadow execution + certification
+// ---------------------------------------------------------------------------
+export const shadowExecutionPlans = mysqlTable(
+  'shadow_execution_plans',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    planVersion: int('planVersion').notNull().default(1),
+    decisionChainId: int('decisionChainId').notNull(),
+    approvedPreviewId: int('approvedPreviewId').notNull(),
+    quantitativeDecisionId: int('quantitativeDecisionId'),
+    costForecastId: int('costForecastId').notNull(),
+    protectionPolicyVersionId: int('protectionPolicyVersionId').notNull(),
+    protectionCapabilityId: int('protectionCapabilityId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    side: mysqlEnum('side', ['BUY', 'SELL']).notNull(),
+    orderType: varchar('orderType', { length: 32 }).notNull(),
+    timeInForce: varchar('timeInForce', { length: 16 }).notNull(),
+    exactBaseSize: decimal('exactBaseSize', { precision: 20, scale: 8 }),
+    exactQuoteSize: decimal('exactQuoteSize', { precision: 20, scale: 8 }),
+    entryLimitPrice: decimal('entryLimitPrice', { precision: 20, scale: 8 }),
+    targetPrice: decimal('targetPrice', { precision: 20, scale: 8 }).notNull(),
+    stopTriggerPrice: decimal('stopTriggerPrice', { precision: 20, scale: 8 }).notNull(),
+    stopLimitPrice: decimal('stopLimitPrice', { precision: 20, scale: 8 }),
+    configurationHash: varchar('configurationHash', { length: 64 }).notNull(),
+    feeTierSnapshotId: int('feeTierSnapshotId').notNull(),
+    previewedAt: timestamp('previewedAt').notNull(),
+    expiresAt: timestamp('expiresAt').notNull(),
+    strategyVersion: varchar('strategyVersion', { length: 32 }).notNull(),
+    costModelVersion: varchar('costModelVersion', { length: 32 }).notNull(),
+    protectionPolicyVersion: varchar('protectionPolicyVersion', { length: 32 }).notNull(),
+    simulationMode: mysqlEnum('simulationMode', ['STANDARD_DRY_RUN', 'SHADOW_LIVE'])
+      .notNull()
+      .default('SHADOW_LIVE'),
+    supersedesPlanId: int('supersedesPlanId'),
+    status: mysqlEnum('status', ['approved', 'consumed', 'superseded', 'invalidated'])
+      .notNull()
+      .default('approved'),
+    invalidationReason: varchar('invalidationReason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainVersionUq: uniqueIndex('shadow_plan_chain_version_uq').on(t.decisionChainId, t.planVersion),
+    hashIdx: index('shadow_plan_hash_idx').on(t.configurationHash),
+    statusIdx: index('shadow_plan_status_idx').on(t.status),
+    productIdx: index('shadow_plan_product_idx').on(t.productId),
+    chainFk: foreignKey({
+      name: 'shadow_plan_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const postFillRevalidations = mysqlTable(
+  'post_fill_revalidations',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    executionPlanId: int('executionPlanId').notNull(),
+    orderIntentId: int('orderIntentId').notNull(),
+    positionId: int('positionId'),
+    approvedEntryFillPrice: decimal('approvedEntryFillPrice', { precision: 20, scale: 8 }).notNull(),
+    realizedEntryFillPrice: decimal('realizedEntryFillPrice', { precision: 20, scale: 8 }).notNull(),
+    approvedEntryCommission: decimal('approvedEntryCommission', { precision: 20, scale: 8 }).notNull(),
+    realizedEntryCommission: decimal('realizedEntryCommission', { precision: 20, scale: 8 }).notNull(),
+    approvedEntryOutflow: decimal('approvedEntryOutflow', { precision: 20, scale: 8 }).notNull(),
+    realizedEntryOutflow: decimal('realizedEntryOutflow', { precision: 20, scale: 8 }).notNull(),
+    remainingTargetPayoff: decimal('remainingTargetPayoff', { precision: 20, scale: 8 }),
+    remainingStopLoss: decimal('remainingStopLoss', { precision: 20, scale: 8 }),
+    updatedCostToTargetPct: decimal('updatedCostToTargetPct', { precision: 10, scale: 4 }),
+    updatedNetRewardRisk: decimal('updatedNetRewardRisk', { precision: 10, scale: 4 }),
+    deviationBps: decimal('deviationBps', { precision: 10, scale: 4 }).notNull(),
+    verdict: mysqlEnum('verdict', [
+      'still_valid',
+      'degraded_but_managed',
+      'invalid_after_fill',
+      'incomplete',
+    ]).notNull(),
+    reason: varchar('reason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainIdx: index('post_fill_chain_idx').on(t.decisionChainId),
+    planIdx: index('post_fill_plan_idx').on(t.executionPlanId),
+    intentIdx: index('post_fill_intent_idx').on(t.orderIntentId),
+    chainFk: foreignKey({
+      name: 'post_fill_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const shadowCertificationRuns = mysqlTable(
+  'shadow_certification_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    certificationRunId: varchar('certificationRunId', { length: 64 }).notNull(),
+    commitHash: varchar('commitHash', { length: 40 }),
+    migrationVersion: varchar('migrationVersion', { length: 64 }),
+    schemaFingerprint: varchar('schemaFingerprint', { length: 64 }),
+    simulationMode: varchar('simulationMode', { length: 32 }).notNull(),
+    strategyVersion: varchar('strategyVersion', { length: 32 }),
+    costModelVersion: varchar('costModelVersion', { length: 32 }),
+    protectionPolicyVersion: varchar('protectionPolicyVersion', { length: 32 }),
+    lineageVersion: varchar('lineageVersion', { length: 32 }),
+    startedAt: timestamp('startedAt').notNull(),
+    completedAt: timestamp('completedAt'),
+    fixtureCount: int('fixtureCount').notNull().default(0),
+    passedFixtures: int('passedFixtures').notNull().default(0),
+    failedFixtures: int('failedFixtures').notNull().default(0),
+    accountingDifference: decimal('accountingDifference', { precision: 20, scale: 8 })
+      .notNull()
+      .default('0'),
+    unresolvedIntents: int('unresolvedIntents').notNull().default(0),
+    unprotectedPositions: int('unprotectedPositions').notNull().default(0),
+    incompleteAttributions: int('incompleteAttributions').notNull().default(0),
+    lineageFailures: int('lineageFailures').notNull().default(0),
+    createOrderAttemptCount: int('createOrderAttemptCount').notNull().default(0),
+    createOrderNetworkCount: int('createOrderNetworkCount').notNull().default(0),
+    safeFlagsSnapshot: text('safeFlagsSnapshot'),
+    knownLimitations: text('knownLimitations'),
+    verdict: mysqlEnum('verdict', ['not_ready', 'degraded', 'mechanically_ready_for_shadow'])
+      .notNull()
+      .default('not_ready'),
+    fixtureResults: text('fixtureResults'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runUq: uniqueIndex('shadow_cert_run_uq').on(t.certificationRunId),
+    verdictIdx: index('shadow_cert_verdict_idx').on(t.verdict),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -1546,6 +1685,12 @@ export type ProtectionInstanceRow = typeof protectionInstances.$inferSelect;
 export type ProtectionInstanceInsert = typeof protectionInstances.$inferInsert;
 export type ProtectionEventRow = typeof protectionEvents.$inferSelect;
 export type ProtectionEventInsert = typeof protectionEvents.$inferInsert;
+export type ShadowExecutionPlanRow = typeof shadowExecutionPlans.$inferSelect;
+export type ShadowExecutionPlanInsert = typeof shadowExecutionPlans.$inferInsert;
+export type PostFillRevalidationRow = typeof postFillRevalidations.$inferSelect;
+export type PostFillRevalidationInsert = typeof postFillRevalidations.$inferInsert;
+export type ShadowCertificationRunRow = typeof shadowCertificationRuns.$inferSelect;
+export type ShadowCertificationRunInsert = typeof shadowCertificationRuns.$inferInsert;
 export type FillRow = typeof fills.$inferSelect;
 export type FillInsert = typeof fills.$inferInsert;
 export type PositionRow = typeof positions.$inferSelect;

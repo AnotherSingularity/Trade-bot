@@ -63,6 +63,14 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+
+  // Phase 1.1 Gate 3D — explicit shadow-execution mode. STANDARD_DRY_RUN
+  // preserves the pre-integration baseline for A/B comparison; SHADOW_LIVE
+  // routes every scan through the certified authorization pipeline (Gate
+  // 3B economics + Gate 3C protection). Neither mode may reach Coinbase.
+  SIMULATION_MODE: z
+    .enum(['STANDARD_DRY_RUN', 'SHADOW_LIVE'])
+    .default('STANDARD_DRY_RUN'),
 });
 
 const KNOWN_WEAK_SECRETS = new Set([
@@ -148,6 +156,7 @@ function loadEnv() {
     loginRateLimitPerMinute: e.LOGIN_RATE_LIMIT_PER_MINUTE,
     coinbaseConfigured,
     anthropicConfigured,
+    simulationMode: e.SIMULATION_MODE,
   };
 }
 

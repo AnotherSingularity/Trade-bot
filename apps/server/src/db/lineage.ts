@@ -7,6 +7,7 @@ import {
   lineageEvents,
   marketObservations,
   outcomeLabels,
+  postFillRevalidations,
   protectionCapabilities,
   protectionEvents,
   protectionInstances,
@@ -14,12 +15,14 @@ import {
   protectionValidationRuns,
   scanRuns,
   setupEvaluations,
+  shadowExecutionPlans,
   strategyRoutingDecisions,
   type DecisionChainRow,
   type EligibilityDecisionRow,
   type LineageEventInsert,
   type MarketObservationRow,
   type OutcomeLabelRow,
+  type PostFillRevalidationRow,
   type ProtectionCapabilityRow,
   type ProtectionEventRow,
   type ProtectionInstanceRow,
@@ -27,6 +30,7 @@ import {
   type ProtectionValidationRunRow,
   type ScanRunRow,
   type SetupEvaluationRow,
+  type ShadowExecutionPlanRow,
   type StrategyRoutingDecisionRow,
 } from './schema';
 
@@ -592,6 +596,7 @@ export async function getDecisionChainAggregate(chainId: number) {
     .where(eq(outcomeLabels.decisionChainId, chainId))
     .orderBy(outcomeLabels.labelVersion);
   const protection = await loadProtectionChain(chainId);
+  const shadow = await loadShadowChain(chainId);
   return {
     chain,
     scan: scan ?? null,
@@ -602,7 +607,30 @@ export async function getDecisionChainAggregate(chainId: number) {
     events,
     outcomes,
     protection,
+    shadow,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1.1 Gate 3D — shadow-integration aggregate for the audit route.
+// ---------------------------------------------------------------------------
+export interface ShadowChainAggregate {
+  plans: ShadowExecutionPlanRow[];
+  revalidations: PostFillRevalidationRow[];
+}
+
+async function loadShadowChain(chainId: number): Promise<ShadowChainAggregate> {
+  const plans = await db
+    .select()
+    .from(shadowExecutionPlans)
+    .where(eq(shadowExecutionPlans.decisionChainId, chainId))
+    .orderBy(shadowExecutionPlans.planVersion);
+  const revalidations = await db
+    .select()
+    .from(postFillRevalidations)
+    .where(eq(postFillRevalidations.decisionChainId, chainId))
+    .orderBy(postFillRevalidations.createdAt);
+  return { plans, revalidations };
 }
 
 // ---------------------------------------------------------------------------

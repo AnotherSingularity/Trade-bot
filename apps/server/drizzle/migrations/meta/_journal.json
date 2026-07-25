@@ -71,6 +71,13 @@
       "when": 1786100000000,
       "tag": "0009_phase1_gate3c_protection_matrix",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1786200000000,
+      "tag": "0010_phase1_gate3d_integrated_shadow",
+      "breakpoints": true
     }
   ]
 }

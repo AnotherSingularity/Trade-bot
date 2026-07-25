@@ -35,6 +35,10 @@ export async function resetDatabase(): Promise<void> {
       'protection_validation_runs',
       'protection_capabilities',
       'protection_policy_versions',
+      // Phase 1.1 Gate 3D additions — child first.
+      'shadow_certification_runs',
+      'post_fill_revalidations',
+      'shadow_execution_plans',
       // Phase 1.1.b additions.
       'execution_fences',
       'reconciliation_runs',
