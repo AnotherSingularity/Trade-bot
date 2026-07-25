@@ -782,6 +782,20 @@ export async function closePosition(
     throw err;
   }
 
+  // Gate 3A: `result` may be 'partial' (partial exit, position remains open),
+  // 'closed' (fully closed), or 'dust_closed' (closed with dust remainder).
+  // Only closure paths update win/loss stats + circuit breaker.
+  if (result.kind === 'partial') {
+    await logActivity({
+      type: 'trade',
+      severity: 'info',
+      token: position.token,
+      action: 'PARTIAL_EXIT',
+      detail: `${ENV.dryRun ? '[DRY RUN] ' : ''}${reason} — sold ${result.newlyAppliedBase} base; residual ${result.residualBaseSize} remains open`,
+    });
+    return { kind: 'pending', intentId: intent.id, reason: 'partial_exit_residual_remains' };
+  }
+
   // Win/loss stats + circuit breaker — flats don't move the counter.
   // Kept OUTSIDE the transaction because they touch token_stats + bot_config
   // and are not required to be atomic with the round-trip creation.
@@ -794,8 +808,8 @@ export async function closePosition(
     type: 'trade',
     severity: result.outcome === 'loss' ? 'warn' : 'info',
     token: position.token,
-    action: 'CLOSE_POSITION',
-    detail: `${ENV.dryRun ? '[DRY RUN] ' : ''}${reason} — outcome ${result.outcome} (round-trip ${result.roundTripId})`,
+    action: result.kind === 'dust_closed' ? 'CLOSE_POSITION_DUST' : 'CLOSE_POSITION',
+    detail: `${ENV.dryRun ? '[DRY RUN] ' : ''}${reason} — outcome ${result.outcome} (round-trip ${result.roundTripId})${result.kind === 'dust_closed' ? ` [dust residual ${result.residualBaseSize}]` : ''}`,
   });
 
   return { kind: 'closed', intentId: intent.id, roundTripId: result.roundTripId };

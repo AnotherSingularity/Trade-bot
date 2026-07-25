@@ -118,3 +118,62 @@ export async function allocateExitAttempt(
 export function isExitAttemptCollision(err: unknown): boolean {
   return isDuplicateKeyError(err);
 }
+
+// ---------------------------------------------------------------------------
+// Gate 3A §G — configuration verification on reuse
+// ---------------------------------------------------------------------------
+
+/**
+ * When a duplicate-key error is raised on the (positionId, purpose,
+ * attemptGeneration) UNIQUE index, the caller may re-read the "winning"
+ * intent — but MUST NOT blindly adopt it as its own. The winner may have
+ * been created with a different baseSize / purpose / positionId, in which
+ * case it is not the same economic action and the caller must fail.
+ *
+ * Returns a verdict:
+ *   - `{ ok: true }` — the persisted intent matches the intended config.
+ *   - `{ ok: false, mismatches }` — the persisted intent describes a
+ *     DIFFERENT economic action. The caller must abort and let a fresh
+ *     allocation happen.
+ */
+export interface IntendedExitConfig {
+  positionId: number;
+  purpose: ExitPurpose;
+  side: 'SELL';
+  baseSize?: string; // decimal string
+  orderType: OrderIntentRow['orderType'];
+  mode: OrderIntentRow['mode'];
+}
+
+export type ConfigMatchVerdict =
+  | { ok: true }
+  | { ok: false; mismatches: string[] };
+
+export function verifyExitConfigMatches(
+  intent: OrderIntentRow,
+  intended: IntendedExitConfig,
+): ConfigMatchVerdict {
+  const mismatches: string[] = [];
+  if (intent.positionId !== intended.positionId) {
+    mismatches.push(`positionId: intent=${intent.positionId} intended=${intended.positionId}`);
+  }
+  if (intent.purpose !== intended.purpose) {
+    mismatches.push(`purpose: intent=${intent.purpose} intended=${intended.purpose}`);
+  }
+  if (intent.side !== 'SELL') {
+    mismatches.push(`side: intent=${intent.side} intended=SELL`);
+  }
+  if (intent.orderType !== intended.orderType) {
+    mismatches.push(`orderType: intent=${intent.orderType} intended=${intended.orderType}`);
+  }
+  if (intent.mode !== intended.mode) {
+    mismatches.push(`mode: intent=${intent.mode} intended=${intended.mode}`);
+  }
+  if (intended.baseSize && intent.baseSize && intent.baseSize !== intended.baseSize) {
+    // Allow small rounding drift equivalent to one base_increment; strict
+    // comparison here matches the exit-attempt UNIQUE contract that says
+    // "same generation → same economic action".
+    mismatches.push(`baseSize: intent=${intent.baseSize} intended=${intended.baseSize}`);
+  }
+  return mismatches.length === 0 ? { ok: true } : { ok: false, mismatches };
+}

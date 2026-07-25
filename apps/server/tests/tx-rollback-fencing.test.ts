@@ -380,10 +380,16 @@ describe('§F applyExitEconomicStateTx — rollback leaves ZERO partial state', 
     expect(closed.status).toBe('closed');
     const rts = await roundTripsForPosition(position.id);
     expect(rts).toHaveLength(1);
+    if (result.kind !== 'closed' && result.kind !== 'dust_closed') {
+      throw new Error('expected closed');
+    }
     expect(rts[0].id).toBe(result.roundTripId);
 
     // Third attempt — replay after successful close. Idempotent no-op.
     const replay = await applyExitEconomicStateTx(clean);
+    if (replay.kind !== 'closed' && replay.kind !== 'dust_closed') {
+      throw new Error('expected replay closed');
+    }
     expect(replay.roundTripId).toBe(result.roundTripId);
     expect(await roundTripsForPosition(position.id)).toHaveLength(1);
   });

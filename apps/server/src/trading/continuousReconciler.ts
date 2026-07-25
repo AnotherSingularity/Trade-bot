@@ -14,9 +14,13 @@ import { RECONCILE_LEASE_KEY, acquireLease } from '../jobs/lease';
 import { getOrder, type CoinbaseFill, type CoinbaseOrder } from './coinbase';
 import {
   applyEntryEconomicStateTx,
+  applyExitEconomicStateTx,
   FencingViolation,
   type NormalizedFill,
 } from '../db/tx';
+import { db } from '../db';
+import { positions } from '../db/schema';
+import { eq } from 'drizzle-orm';
 import { classifyFillState, type FillStateResult } from './fillState';
 import {
   classifySingleTargetSearch,
@@ -481,13 +485,35 @@ async function reconcileOneIntent(args: {
           protectionMode: 'polling_fallback',
           dryRun: false,
           intentEndState: fillState.kind === 'completely_filled' ? 'filled' : 'partially_filled',
+          entryDecisionChainId: intent.decisionChainId ?? null,
         });
         economicApplied = true;
       }
+    } else if (
+      intent.purpose !== 'entry' &&
+      filledBase.isPositive() &&
+      intent.positionId !== null
+    ) {
+      // Gate 3A §H — exit recovery. Reuse the ORIGINAL position + intent +
+      // decision chain. Never create a replacement authorization chain.
+      if (intent.state !== 'filled' && intent.state !== 'partially_filled') {
+        const [pos] = await db
+          .select()
+          .from(positions)
+          .where(eq(positions.id, intent.positionId))
+          .limit(1);
+        if (pos) {
+          await applyExitEconomicStateTx({
+            intentId: intent.id,
+            position: pos,
+            fillsToApply: normalized,
+            exitReason: 'reconciled',
+            dryRun: false,
+          });
+          economicApplied = true;
+        }
+      }
     }
-    // For exits: only the executor drives these initially; reconciliation
-    // recovery of exits is a slice 1.1.c concern (needs the position to be
-    // in the right lifecycle state); we still update the intent state below.
   } catch (err) {
     if (err instanceof FencingViolation) {
       // Reconciler is authoritative — a fencing violation here means our

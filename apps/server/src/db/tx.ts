@@ -528,28 +528,67 @@ export interface ApplyExitInput {
   fillsToApply: NormalizedFill[];
   exitReason: 'take_profit' | 'stop_loss' | 'early_exit' | 'manual' | 'emergency' | 'reconciled';
   dryRun: boolean;
+  /**
+   * Gate 3A §F: dust threshold in base units. A residual quantity
+   * ≤ dustThreshold at the end of an exit is treated as fully closed,
+   * with dust fields populated. Default: `product.base_min_size` or the
+   * caller's canonical dust threshold. Setting `0` disables dust
+   * classification (residual > 0 always keeps the position open).
+   */
+  dustThresholdBase?: Money;
+  dustPolicyVersion?: string;
   __testHook?: (stage: 'after_fills' | 'after_ledger' | 'after_position') => void;
 }
 
-export interface ApplyExitResult {
-  kind: 'closed';
-  roundTripId: number;
-  outcome: 'win' | 'loss' | 'flat';
-}
+/**
+ * Result of applying an exit's economic state.
+ *   - `partial`: some base sold, position remains open with residual.
+ *   - `closed`: position is fully closed; round trip created.
+ *   - `dust_closed`: residual ≤ dustThreshold; position closed with dust
+ *     fields populated; round trip created.
+ */
+export type ApplyExitResult =
+  | {
+      kind: 'closed' | 'dust_closed';
+      roundTripId: number;
+      outcome: 'win' | 'loss' | 'flat';
+      residualBaseSize: string;
+    }
+  | {
+      kind: 'partial';
+      residualBaseSize: string;
+      newlyAppliedBase: string;
+    };
 
 /**
- * Atomically applies an exit's economic state.
+ * Atomically applies an exit's economic state, correctly handling PARTIAL
+ * exits (Gate 3A §E).
  *
  * Inside ONE transaction:
  *   1. Verify fencing.
  *   2. Insert every fill (idempotent).
  *   3. Insert per-fill ledger credits (idempotent).
- *   4. Mark the position closed.
- *   5. Create the round-trip (idempotent — round_trips has a UNIQUE positionId).
- *   6. Update the intent state.
+ *   4. Compute residualBaseSize = position.filledQuantity - Σ(all exit fills
+ *      across all exit intents for this position).
+ *   5. If residual > dustThreshold:
+ *        - Position remains open (lifecycleState='partially_closing').
+ *        - residualBaseSize is updated.
+ *        - Intent state may be 'partially_filled' or 'filled' depending on
+ *          how much of this specific intent's target was filled.
+ *        - NO round trip yet.
+ *   6. If residual ≤ dustThreshold:
+ *        - Position closed. Round trip created.
+ *        - When residual > 0 but ≤ dustThreshold, dust fields populated
+ *          and lifecycleState='dust_residual'. `kind='dust_closed'`.
+ *   7. Update the intent state.
  *
- * A replay finds the existing round trip and returns it without duplicating
- * economic state.
+ * The round-trip aggregates ALL exit fills across ALL exit intents for
+ * the position (not just this intent's fills). Multiple partial exit
+ * attempts fold into ONE round trip when the position finally closes.
+ *
+ * Replay on the same fills is idempotent: the ledger events dedupe by
+ * idempotencyKey, the fills dedupe by exchangeFillId, and the residual
+ * math re-derives from the DB — so re-running produces the same result.
  */
 export async function applyExitEconomicStateTx(input: ApplyExitInput): Promise<ApplyExitResult> {
   return withTransaction(async (tx) => {
@@ -561,33 +600,46 @@ export async function applyExitEconomicStateTx(input: ApplyExitInput): Promise<A
 
     await verifyFencingTx(tx, intent);
 
-    // Idempotent guard: if a round trip already exists for this position, we
-    // already ran successfully — return it.
+    // Load LIVE position — Gate 3A: multiple exit attempts share one
+    // position lifecycle, so we must re-read state (input.position may be
+    // stale from a prior partial-close).
+    const [livePosition] = await tx
+      .select()
+      .from(positions)
+      .where(eq(positions.id, input.position.id))
+      .limit(1);
+    if (!livePosition) {
+      throw new Error(`applyExitEconomicStateTx: position ${input.position.id} not found`);
+    }
+
+    // Idempotent guard: if a round trip already exists for this position,
+    // we already fully closed — return it.
     const existingRt = await tx
       .select({ id: roundTrips.id, outcome: roundTrips.outcome })
       .from(roundTrips)
-      .where(eq(roundTrips.positionId, input.position.id))
+      .where(eq(roundTrips.positionId, livePosition.id))
       .limit(1);
     if (existingRt[0]) {
       return {
         kind: 'closed',
         roundTripId: existingRt[0].id,
         outcome: existingRt[0].outcome,
+        residualBaseSize: '0',
       };
     }
 
-    // 1. Insert fills.
+    // 1. Insert fills (idempotent).
     const rows = await upsertFillsTx(tx, input.intentId, input.fillsToApply);
     input.__testHook?.('after_fills');
 
-    const agg = aggregateFillRows(rows);
-    if (!agg.filledSize.isPositive()) {
+    const thisIntentAgg = aggregateFillRows(rows);
+    if (!thisIntentAgg.filledSize.isPositive()) {
       throw new Error(
-        `applyExitEconomicStateTx: refuse to close — zero filled size for intent ${input.intentId}`,
+        `applyExitEconomicStateTx: refuse to apply — zero filled size for intent ${input.intentId}`,
       );
     }
 
-    // 2. Ledger credits (proceeds +, fees -).
+    // 2. Ledger credits (proceeds +, fees -). Idempotent per fill.
     for (const f of rows) {
       const size = Money.fromString(f.filledSize);
       const price = Money.fromString(f.fillPrice);
@@ -599,7 +651,7 @@ export async function applyExitEconomicStateTx(input: ApplyExitInput): Promise<A
           deltaUsd: quote,
           reason: 'sell_proceeds',
           orderIntentId: input.intentId,
-          positionId: input.position.id,
+          positionId: livePosition.id,
           fillId: f.id,
           dryRun: input.dryRun,
         });
@@ -610,7 +662,7 @@ export async function applyExitEconomicStateTx(input: ApplyExitInput): Promise<A
           deltaUsd: fee.neg(),
           reason: 'sell_fee',
           orderIntentId: input.intentId,
-          positionId: input.position.id,
+          positionId: livePosition.id,
           fillId: f.id,
           dryRun: input.dryRun,
         });
@@ -618,12 +670,74 @@ export async function applyExitEconomicStateTx(input: ApplyExitInput): Promise<A
     }
     input.__testHook?.('after_ledger');
 
-    // 3. Round-trip P&L.
-    const entryFees = Money.fromString(input.position.entryFees);
-    const entryValueGross = Money.fromString(input.position.entryQuoteSpent);
-    const exitValueGross = agg.quoteValue;
-    const exitFees = agg.totalFees;
-    const realizedNet = exitValueGross.sub(entryValueGross).sub(entryFees).sub(exitFees);
+    // 3. Aggregate ALL exit fills for this position across every exit intent.
+    //    We can't just sum this-intent's fills because a prior partial exit
+    //    (different intent) may already have sold some of the position.
+    const allExitFillRows = await tx
+      .select({
+        filledSize: fills.filledSize,
+        fillPrice: fills.fillPrice,
+        fee: fills.fee,
+      })
+      .from(fills)
+      .innerJoin(orderIntents, eq(fills.orderIntentId, orderIntents.id))
+      .where(
+        and(
+          eq(orderIntents.positionId, livePosition.id),
+          eq(orderIntents.side, 'SELL'),
+        ),
+      );
+    let totalExitBase = Money.zero();
+    let totalExitQuote = Money.zero();
+    let totalExitFees = Money.zero();
+    for (const r of allExitFillRows) {
+      const s = Money.fromString(r.filledSize);
+      const p = Money.fromString(r.fillPrice);
+      totalExitBase = totalExitBase.add(s);
+      totalExitQuote = totalExitQuote.add(s.mul(p));
+      totalExitFees = totalExitFees.add(Money.fromString(r.fee));
+    }
+    const entryBase = Money.fromString(livePosition.filledQuantity);
+    const residualBase = entryBase.sub(totalExitBase);
+    const dustThreshold = input.dustThresholdBase ?? Money.fromString('0.00000001');
+    const dustPolicyVersion = input.dustPolicyVersion ?? 'v1';
+
+    // 4. Update intent — this specific intent's state depends on whether
+    //    THIS intent's requested baseSize was fully matched.
+    const requestedBase = intent.baseSize
+      ? Money.fromString(intent.baseSize)
+      : thisIntentAgg.filledSize;
+    const thisIntentEndState =
+      thisIntentAgg.filledSize.gte(requestedBase) ? 'filled' : 'partially_filled';
+
+    // 5. Decide: partial-close vs full close vs dust close.
+    const isFullyClosedExact = residualBase.lte(Money.zero());
+    const isDustClosed = !isFullyClosedExact && residualBase.lte(dustThreshold);
+    const shouldClose = isFullyClosedExact || isDustClosed;
+
+    if (!shouldClose) {
+      // Partial close — position remains open with a smaller effective size.
+      await tx
+        .update(positions)
+        .set({
+          residualBaseSize: residualBase.toDecimalString(8),
+          lifecycleState: 'partially_closing',
+        })
+        .where(eq(positions.id, livePosition.id));
+      input.__testHook?.('after_position');
+      await updateOrderIntentTx(tx, input.intentId, { state: thisIntentEndState });
+      return {
+        kind: 'partial',
+        residualBaseSize: residualBase.toDecimalString(8),
+        newlyAppliedBase: thisIntentAgg.filledSize.toDecimalString(8),
+      };
+    }
+
+    // 6. Full/dust close — mark position closed + create round trip aggregating
+    //    ALL exit fills.
+    const entryFees = Money.fromString(livePosition.entryFees);
+    const entryValueGross = Money.fromString(livePosition.entryQuoteSpent);
+    const realizedNet = totalExitQuote.sub(entryValueGross).sub(entryFees).sub(totalExitFees);
     const realizedNetPct = entryValueGross.isZero()
       ? Money.zero()
       : realizedNet.div(entryValueGross).mul(Money.fromString('100'));
@@ -633,32 +747,51 @@ export async function applyExitEconomicStateTx(input: ApplyExitInput): Promise<A
         ? 'loss'
         : 'flat';
 
-    // 4. Mark position closed.
     const closedAt = new Date();
-    await markPositionClosedTx(tx, input.position.id, closedAt);
+    const dustResidualClamped = residualBase.isPositive() ? residualBase : Money.zero();
+    const positionPatch: Record<string, unknown> = {
+      status: 'closed',
+      lifecycleState: isDustClosed ? 'dust_residual' : 'closed',
+      closedAt,
+      residualBaseSize: dustResidualClamped.toDecimalString(8),
+    };
+    if (isDustClosed) {
+      positionPatch.dustQuantity = dustResidualClamped.toDecimalString(8);
+      positionPatch.dustReason = 'below_dust_threshold';
+      positionPatch.dustDetectedAt = closedAt;
+      positionPatch.dustPolicyVersion = dustPolicyVersion;
+    }
+    await tx.update(positions).set(positionPatch).where(eq(positions.id, livePosition.id));
     input.__testHook?.('after_position');
 
-    // 5. Round trip.
     const roundTripId = await insertRoundTripTx(tx, {
-      positionId: input.position.id,
-      token: input.position.token,
-      mode: input.position.mode,
+      positionId: livePosition.id,
+      token: livePosition.token,
+      mode: livePosition.mode,
       entryValueGross: entryValueGross.toDecimalString(),
-      exitValueGross: exitValueGross.toDecimalString(),
+      exitValueGross: totalExitQuote.toDecimalString(),
       entryFees: entryFees.toDecimalString(),
-      exitFees: exitFees.toDecimalString(),
+      exitFees: totalExitFees.toDecimalString(),
       realizedNetPnl: realizedNet.toDecimalString(),
       realizedNetPnlPct: realizedNetPct.toDecimalString(4),
       outcome,
       exitReason: input.exitReason,
-      openedAt: input.position.openedAt,
+      openedAt: livePosition.openedAt,
       closedAt,
+      entryDecisionChainId: livePosition.entryDecisionChainId ?? null,
+      finalExitDecisionChainId: intent.decisionChainId ?? null,
+      entryOrderIntentId: livePosition.entryOrderIntentId ?? null,
+      finalExitOrderIntentId: input.intentId,
     });
 
-    // 6. Intent state.
-    await updateOrderIntentTx(tx, input.intentId, { state: 'filled' });
+    await updateOrderIntentTx(tx, input.intentId, { state: thisIntentEndState });
 
-    return { kind: 'closed', roundTripId, outcome };
+    return {
+      kind: isDustClosed ? 'dust_closed' : 'closed',
+      roundTripId,
+      outcome,
+      residualBaseSize: dustResidualClamped.toDecimalString(8),
+    };
   });
 }
 

@@ -281,14 +281,28 @@ export const positions = mysqlTable(
     claudeConfidence: decimal('claudeConfidence', { precision: 5, scale: 4 }),
     strategyVersion: varchar('strategyVersion', { length: 20 }),
 
-    // Lifecycle. `opening`/`closing` are transient during multi-step exchange
-    // interactions. `reconciling` marks a state pending startup reconciliation.
+    // Canonical position lifecycle state (Gate 3A §A).
+    // Legacy values 'opening', 'open', 'closing', 'closed', 'reconciling'
+    // remain valid for pre-Gate-3 rows. New Gate 3A states surface exact
+    // conditions: partially_open (some fills in, remainder still working),
+    // open_unprotected/open_protected (protection state known),
+    // partially_closing (partial exit in progress), dust_residual (closed
+    // by policy with a documented dust remainder), reconciliation_required
+    // (state ambiguous — blocks new entries), failed (terminal error).
     lifecycleState: mysqlEnum('lifecycleState', [
       'opening',
       'open',
       'closing',
       'closed',
       'reconciling',
+      'pending_entry',
+      'partially_open',
+      'open_unprotected',
+      'open_protected',
+      'partially_closing',
+      'dust_residual',
+      'reconciliation_required',
+      'failed',
     ])
       .default('opening')
       .notNull(),
@@ -310,6 +324,29 @@ export const positions = mysqlTable(
     // A position may span multiple exit-decision chains; those are accessed
     // via order_intents.entryDecisionChainId + positionId join.
     entryDecisionChainId: int('entryDecisionChainId'),
+
+    // Phase 1.1 Gate 3A §F: dust policy fields — populated when the
+    // position is closed with a documented dust remainder. Never fabricated
+    // as a sale at the last market price.
+    dustQuantity: decimal('dustQuantity', { precision: 20, scale: 8 }),
+    dustEstimatedValue: decimal('dustEstimatedValue', { precision: 20, scale: 8 }),
+    dustReason: varchar('dustReason', { length: 64 }),
+    dustDetectedAt: timestamp('dustDetectedAt'),
+    dustPolicyVersion: varchar('dustPolicyVersion', { length: 32 }),
+
+    // Phase 1.1 Gate 3A §Q (placeholder; Gate 3C wires the matrix). Records
+    // the position's current protection state so the RiskEngine + entry
+    // gate can block on `open_unprotected` / `degraded`.
+    protectionState: mysqlEnum('protectionState', [
+      'unknown',
+      'none',
+      'polling_only',
+      'attached_active',
+      'attached_partial',
+      'degraded',
+    ])
+      .notNull()
+      .default('unknown'),
 
     openedAt: timestamp('openedAt').defaultNow().notNull(),
     closedAt: timestamp('closedAt'),
