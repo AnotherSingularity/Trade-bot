@@ -16,7 +16,7 @@ import { evaluateSignal } from './claude';
 import { detectBestMode, type MarketSnapshot } from './modes';
 import { closePosition, getPortfolioCash, openPosition, shouldExit } from './executor';
 import { getMarketWindow, isTradeableNow } from './marketWindow';
-import { withLease, SCAN_LEASE_KEY } from '../jobs/lease';
+import { withRenewingLease, SCAN_LEASE_KEY, type Lease } from '../jobs/lease';
 import { getCurrentFeeTierOrFailClosed } from './feeTier';
 import { previewCandidate } from './preview';
 import { buildCostForecast, COST_MODEL_VERSION } from './costModel';
@@ -45,8 +45,12 @@ export async function runScanCycle(): Promise<void> {
   // executor's per-position optimistic lock prevents duplicate exits.
   await manageOpenRisk();
 
-  const leased = await withLease(SCAN_LEASE_KEY, 2 * 60 * 1000, async () => {
-    await scanForEntries();
+  // Phase 1.1.a §H: renewing lease with fencing token. TTL 90s; renewal
+  // fires every ~30s while the scan is running. Every entry-open call must
+  // recheck lease.isValid() so a worker whose renewal failed cannot commit
+  // an entry a fresher holder is about to take.
+  const leased = await withRenewingLease(SCAN_LEASE_KEY, 90_000, async (lease) => {
+    await scanForEntries(lease);
     return true;
   });
   if (!leased.ran) {
@@ -68,7 +72,7 @@ export async function manageOpenRisk(): Promise<void> {
   for (const position of open) {
     try {
       const product = await getProduct(position.token);
-      const currentPrice = Number(product.price);
+      const currentPrice = Money.fromString(product.price);
       const decision = shouldExit(position, currentPrice);
       if (decision.exit) {
         const result = await closePosition(position, decision.reason);
@@ -104,17 +108,21 @@ export async function manageOpenRisk(): Promise<void> {
 // Entry scanning — gated
 // ---------------------------------------------------------------------------
 
-export async function scanForEntries(): Promise<void> {
+export async function scanForEntries(lease?: Lease): Promise<void> {
   // Reload config here (not before manageOpenRisk) so a CB triggered by an
   // exit above blocks entries in this same cycle.
   const cfg = await getBotConfig();
 
   if (cfg.reconciliationStatus !== 'ok') {
+    const label =
+      cfg.reconciliationStatus === 'degraded'
+        ? 'GLOBAL UNKNOWN-ORDER LOCK ENGAGED'
+        : `reconciliation ${cfg.reconciliationStatus}`;
     await logActivity({
       type: 'scan',
-      severity: 'warn',
+      severity: cfg.reconciliationStatus === 'degraded' ? 'critical' : 'warn',
       action: 'SKIP_ENTRIES',
-      detail: `Startup reconciliation not complete (${cfg.reconciliationStatus})`,
+      detail: `Entries blocked: ${label}${cfg.reconciliationDetail ? ` — ${cfg.reconciliationDetail}` : ''}`,
     });
     return;
   }
@@ -151,10 +159,10 @@ export async function scanForEntries(): Promise<void> {
     return;
   }
 
-  await selectAndOpenEntries();
+  await selectAndOpenEntries(lease);
 }
 
-async function selectAndOpenEntries(): Promise<void> {
+async function selectAndOpenEntries(lease?: Lease): Promise<void> {
   const openCount = await countOpenPositions();
   const availableSlots = STRATEGY.MAX_OPEN_POSITIONS - openCount;
   if (availableSlots <= 0) {
@@ -309,12 +317,17 @@ async function selectAndOpenEntries(): Promise<void> {
     if (c.winRate !== null && c.winRate < STRATEGY.WIN_RATE_REDUCE) {
       allocationPct = STRATEGY.WIN_RATE_REDUCED_PCT;
     }
-    const quoteSize = (bankroll * allocationPct) / 100;
+    const quoteSize = bankroll.pct(allocationPct);
 
     // --------- Preview (Phase 1 §B) ---------
     const arrivalMid = Money.fromNumber(c.price);
     const previewResult = await previewCandidate({
-      intent: { side: 'BUY', token: c.token, clientOrderId: '__preview__', quoteSize: String(quoteSize) },
+      intent: {
+        side: 'BUY',
+        token: c.token,
+        clientOrderId: '__preview__',
+        quoteSize: quoteSize.toDecimalString(),
+      },
       arrivalMid,
       takerRate: feeTier.takerFeeRate,
     });
@@ -329,7 +342,7 @@ async function selectAndOpenEntries(): Promise<void> {
             : previewResult.reason === 'preview_failure'
               ? 'reject_preview_error'
               : previewResult.reason === 'missing_commission' ||
-                  previewResult.reason === 'missing_avg_fill'
+                  previewResult.reason === 'missing_est_avg_fill'
                 ? 'reject_data_stale'
                 : 'reject_preview_error',
         rejectionReason: previewResult.detail.slice(0, 250),
@@ -392,7 +405,7 @@ async function selectAndOpenEntries(): Promise<void> {
 
     // --------- EV / cost / R/R gate (Phase 1 §E) ---------
     const gate = applyEvGate(forecast);
-    await insertQuantitativeDecision({
+    const decisionRow = await insertQuantitativeDecision({
       candidateId: candidateRow.id,
       costForecastId: forecastRow.id,
       decision: gate.decision,
@@ -449,6 +462,19 @@ async function selectAndOpenEntries(): Promise<void> {
       detail: `${evaluation.mode} confirmed @ ${(claude.confidence * 100).toFixed(0)}% — ${claude.reason}`,
     });
 
+    // Phase 1.1.a §H: re-check the fencing lease before committing an entry.
+    // A long scan may have lost its lease to a fresher replica; if so, abort
+    // rather than compete with the new writer.
+    if (lease && !lease.isValid()) {
+      await logActivity({
+        type: 'scan',
+        severity: 'warn',
+        action: 'LEASE_LOST_MID_SCAN',
+        detail: `Fence generation ${lease.fenceGeneration} lost the lease before opening ${c.token} — aborting remaining entries`,
+      });
+      break;
+    }
+
     const result = await openPosition({
       token: c.token,
       mode: evaluation.mode,
@@ -457,7 +483,7 @@ async function selectAndOpenEntries(): Promise<void> {
       claudeReason: claude.reason,
       claudeModel: CLAUDE_MODEL,
       claudeConfidence: claude.confidence,
-      scanSeed,
+      decisionId: decisionRow.id, // §B: stable economic identity
     });
     if (result.kind === 'opened') opened++;
   }

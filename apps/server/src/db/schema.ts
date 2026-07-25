@@ -38,11 +38,14 @@ export const botConfig = mysqlTable('bot_config', {
   consecutiveLosses: int('consecutiveLosses').default(0).notNull(),
   circuitBreakerUntil: timestamp('circuitBreakerUntil'),
   // Startup-reconciliation gate: entries are blocked until this is 'ok'.
+  // 'degraded' = a live intent transitioned to `unknown`; new economic activity
+  // is blocked until continuous reconciliation resolves it (Phase 1.1.a §A).
   reconciliationStatus: mysqlEnum('reconciliationStatus', [
     'pending',
     'in_progress',
     'ok',
     'failed',
+    'degraded',
   ])
     .default('pending')
     .notNull(),
@@ -307,13 +310,20 @@ export const cashLedger = mysqlTable(
     // Optional links to the causal entity.
     orderIntentId: int('orderIntentId'),
     positionId: int('positionId'),
+    fillId: int('fillId'),
     dryRun: boolean('dryRun').notNull(),
     detail: text('detail'),
+    // Phase 1.1.a §F: unique-per-causal-event so a replay of the same fill
+    // during startup reconciliation cannot double-book the ledger. The DB
+    // rejects duplicates; the application catches ER_DUP_ENTRY as a no-op.
+    idempotencyKey: varchar('idempotencyKey', { length: 128 }),
     createdAt: timestamp('createdAt').defaultNow().notNull(),
   },
   (table) => ({
     dryRunIdx: index('cash_ledger_dryrun_idx').on(table.dryRun),
     createdAtIdx: index('cash_ledger_created_at_idx').on(table.createdAt),
+    idempotencyUq: uniqueIndex('cash_ledger_idempotency_uq').on(table.idempotencyKey),
+    fillIdIdx: index('cash_ledger_fillId_idx').on(table.fillId),
   }),
 );
 

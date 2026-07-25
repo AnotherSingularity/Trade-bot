@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import { Money } from '@horizon/shared';
 import type {
   CoinbaseCreateOrderResponse,
   CoinbaseFill,
@@ -175,19 +176,24 @@ export const coinbaseMock = {
   cancelOrder: vi.fn(async () => true),
   testConnection: vi.fn(async () => ({ connected: true, message: 'mock' })),
 
-  // Passthroughs — no mocking needed.
-  roundToIncrement: (value: number, increment: string): number => {
-    const n = Number(increment);
-    if (!Number.isFinite(n) || n <= 0) return value;
-    const dp = Math.max(0, -Math.floor(Math.log10(n)));
-    return Number((Math.floor(value / n) * n).toFixed(dp));
+  // Money-native passthroughs — Phase 1.1.a §M.
+  roundToIncrement: (value: Money, increment: string): Money => {
+    if (!increment || increment === '0') return value;
+    const inc = Money.fromString(increment);
+    if (!inc.isPositive()) return value;
+    return value.roundToIncrement(inc, 'DOWN');
+  },
+  decimalDigitsForIncrement: (inc: string): number => {
+    if (!inc || !inc.includes('.')) return 0;
+    const frac = inc.split('.')[1] ?? '';
+    return frac.replace(/0+$/, '').length;
   },
   validateProductForTrading: (p: CoinbaseProduct) => {
     if (p.trading_disabled) throw new Error('trading_disabled');
   },
-  normalizeBuyQuoteSize: (p: CoinbaseProduct, v: number) => {
+  normalizeBuyQuoteSize: (p: CoinbaseProduct, v: Money): string => {
     const rounded = coinbaseMock.roundToIncrement(v, p.quote_increment);
-    if (p.quote_min_size && rounded < Number(p.quote_min_size)) {
+    if (p.quote_min_size && rounded.lt(Money.fromString(p.quote_min_size))) {
       const { CoinbaseError } = require('../../src/trading/coinbase');
       throw new CoinbaseError({
         class: 'non_retryable_validation',
@@ -195,11 +201,11 @@ export const coinbaseMock = {
         message: `below min ${p.quote_min_size}`,
       });
     }
-    return rounded.toString();
+    return rounded.toDecimalString(coinbaseMock.decimalDigitsForIncrement(p.quote_increment));
   },
-  normalizeSellBaseSize: (p: CoinbaseProduct, v: number) => {
+  normalizeSellBaseSize: (p: CoinbaseProduct, v: Money): string => {
     const rounded = coinbaseMock.roundToIncrement(v, p.base_increment);
-    if (p.base_min_size && rounded < Number(p.base_min_size)) {
+    if (p.base_min_size && rounded.lt(Money.fromString(p.base_min_size))) {
       const { CoinbaseError } = require('../../src/trading/coinbase');
       throw new CoinbaseError({
         class: 'non_retryable_validation',
@@ -207,7 +213,7 @@ export const coinbaseMock = {
         message: `below min ${p.base_min_size}`,
       });
     }
-    return rounded.toString();
+    return rounded.toDecimalString(coinbaseMock.decimalDigitsForIncrement(p.base_increment));
   },
 };
 

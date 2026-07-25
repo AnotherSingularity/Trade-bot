@@ -28,7 +28,7 @@ export interface BotStatus {
   updatedAt: string;
   // Phase 0 additions surfaced to the mobile app.
   dryRun: boolean;
-  reconciliationStatus: 'pending' | 'in_progress' | 'ok' | 'failed';
+  reconciliationStatus: 'pending' | 'in_progress' | 'ok' | 'failed' | 'degraded';
   protectionMode: 'exchange_bracket' | 'polling_fallback' | 'unprotected';
   strategyVersion: string;
 }

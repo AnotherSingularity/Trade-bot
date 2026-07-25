@@ -1,6 +1,6 @@
 import { createHmac, createSign, randomBytes } from 'node:crypto';
 import { ENV } from '../env';
-import { QUOTE_CURRENCY } from '@horizon/shared';
+import { Money, QUOTE_CURRENCY } from '@horizon/shared';
 
 /**
  * Coinbase Advanced Trade API client — Phase 0 rebuild.
@@ -262,6 +262,13 @@ export interface CoinbasePreviewResponse {
   best_bid?: string;
   best_ask?: string;
   slippage?: string;
+  /**
+   * Coinbase's Preview Order response uses `est_average_filled_price`
+   * (documented). We keep `average_filled_price` for defensive fallback in
+   * case the field name differs in some sandbox versions, but it must not be
+   * relied upon.
+   */
+  est_average_filled_price?: string;
   average_filled_price?: string;
   preview_id?: string;
   order_configuration?: unknown;
@@ -611,15 +618,30 @@ export async function testConnection(): Promise<{ connected: boolean; message: s
 // ---------------------------------------------------------------------------
 
 /**
- * Rounds a numeric value DOWN to the nearest multiple of `increment`. Handles
- * decimal-place accounting so we don't accidentally submit e.g. 0.10000001.
+ * Rounds a Money value DOWN (toward zero) to the nearest multiple of `increment`.
+ * All arithmetic is bigint-exact via Money.roundToIncrement — no Number/toFixed
+ * anywhere on the path, so we cannot accidentally submit e.g. 0.10000001 due to
+ * float drift (Phase 1.1.a §M).
+ *
+ * The Coinbase-facing wire format is a decimal string; callers get the
+ * post-rounding value as `.toDecimalString(digits)`.
  */
-export function roundToIncrement(value: number, incrementStr: string): number {
-  const increment = Number(incrementStr);
-  if (!Number.isFinite(increment) || increment <= 0) return value;
-  const dp = Math.max(0, -Math.floor(Math.log10(increment)));
-  const rounded = Math.floor(value / increment) * increment;
-  return Number(rounded.toFixed(dp));
+export function roundToIncrement(value: Money, incrementStr: string): Money {
+  if (!incrementStr || incrementStr === '0') return value;
+  const inc = Money.fromString(incrementStr);
+  if (!inc.isPositive()) return value;
+  return value.roundToIncrement(inc, 'DOWN');
+}
+
+/**
+ * Returns the number of decimal digits implied by `incrementStr` — e.g.
+ * "0.01" → 2, "0.00000001" → 8, "1" → 0. Used to serialize a rounded Money
+ * to a decimal string that carries exactly the exchange-required precision.
+ */
+export function decimalDigitsForIncrement(incrementStr: string): number {
+  if (!incrementStr || !incrementStr.includes('.')) return 0;
+  const frac = incrementStr.split('.')[1] ?? '';
+  return frac.replace(/0+$/, '').length;
 }
 
 export function validateProductForTrading(product: CoinbaseProduct): void {
@@ -649,48 +671,57 @@ export function validateProductForTrading(product: CoinbaseProduct): void {
 /**
  * For a BUY, validates the intended quote size against min/max quote limits
  * (Coinbase). For a SELL, validates base size against base limits. Also rounds
- * to the appropriate increment.
+ * to the appropriate increment. Decimal-safe end-to-end: takes Money, returns
+ * the decimal string Coinbase expects on the wire.
  */
-export function normalizeBuyQuoteSize(product: CoinbaseProduct, quoteSize: number): string {
+export function normalizeBuyQuoteSize(product: CoinbaseProduct, quoteSize: Money): string {
   const rounded = roundToIncrement(quoteSize, product.quote_increment);
-  const min = product.quote_min_size ? Number(product.quote_min_size) : 0;
-  const max = product.quote_max_size ? Number(product.quote_max_size) : Infinity;
-  if (rounded < min) {
+  const min = product.quote_min_size ? Money.fromString(product.quote_min_size) : Money.zero();
+  const max = product.quote_max_size ? Money.fromString(product.quote_max_size) : null;
+  if (rounded.lt(min)) {
     throw new CoinbaseError({
       class: 'non_retryable_validation',
       code: 'below_min_quote_size',
-      message: `${product.product_id} BUY quote_size ${rounded} below min ${min}`,
+      message: `${product.product_id} BUY quote_size ${rounded.toDecimalString(8)} below min ${min.toDecimalString(
+        8,
+      )}`,
     });
   }
-  if (rounded > max) {
+  if (max && rounded.gt(max)) {
     throw new CoinbaseError({
       class: 'non_retryable_validation',
       code: 'above_max_quote_size',
-      message: `${product.product_id} BUY quote_size ${rounded} above max ${max}`,
+      message: `${product.product_id} BUY quote_size ${rounded.toDecimalString(8)} above max ${max.toDecimalString(
+        8,
+      )}`,
     });
   }
-  return rounded.toString();
+  return rounded.toDecimalString(decimalDigitsForIncrement(product.quote_increment));
 }
 
-export function normalizeSellBaseSize(product: CoinbaseProduct, baseSize: number): string {
+export function normalizeSellBaseSize(product: CoinbaseProduct, baseSize: Money): string {
   const rounded = roundToIncrement(baseSize, product.base_increment);
-  const min = product.base_min_size ? Number(product.base_min_size) : 0;
-  const max = product.base_max_size ? Number(product.base_max_size) : Infinity;
-  if (rounded < min) {
+  const min = product.base_min_size ? Money.fromString(product.base_min_size) : Money.zero();
+  const max = product.base_max_size ? Money.fromString(product.base_max_size) : null;
+  if (rounded.lt(min)) {
     throw new CoinbaseError({
       class: 'non_retryable_validation',
       code: 'below_min_base_size',
-      message: `${product.product_id} SELL base_size ${rounded} below min ${min}`,
+      message: `${product.product_id} SELL base_size ${rounded.toDecimalString(8)} below min ${min.toDecimalString(
+        8,
+      )}`,
     });
   }
-  if (rounded > max) {
+  if (max && rounded.gt(max)) {
     throw new CoinbaseError({
       class: 'non_retryable_validation',
       code: 'above_max_base_size',
-      message: `${product.product_id} SELL base_size ${rounded} above max ${max}`,
+      message: `${product.product_id} SELL base_size ${rounded.toDecimalString(8)} above max ${max.toDecimalString(
+        8,
+      )}`,
     });
   }
-  return rounded.toString();
+  return rounded.toDecimalString(decimalDigitsForIncrement(product.base_increment));
 }
 
 // Exported for potential webhook signature verification (not used yet).

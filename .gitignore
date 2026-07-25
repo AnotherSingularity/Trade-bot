@@ -46,3 +46,6 @@ Thumbs.db
 
 # Drizzle
 drizzle/meta/_journal.json.bak
+
+# Redis snapshot dump created by redis-server
+dump.rdb

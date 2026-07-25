@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { Money } from '@horizon/shared';
 import { deriveClientOrderId, shouldExit } from '../src/trading/executor';
 import type { PositionRow } from '../src/db/schema';
 
@@ -35,19 +36,19 @@ function makePosition(overrides: Partial<PositionRow> = {}): PositionRow {
 
 describe('shouldExit', () => {
   it('exits on take-profit', () => {
-    const result = shouldExit(makePosition(), 108.5);
+    const result = shouldExit(makePosition(), Money.fromString('108.5'));
     expect(result.exit).toBe(true);
     expect(result.reason).toBe('take_profit');
   });
 
   it('exits on stop-loss', () => {
-    const result = shouldExit(makePosition(), 96);
+    const result = shouldExit(makePosition(), Money.fromString('96'));
     expect(result.exit).toBe(true);
     expect(result.reason).toBe('stop_loss');
   });
 
   it('holds inside the band', () => {
-    const result = shouldExit(makePosition(), 102);
+    const result = shouldExit(makePosition(), Money.fromString('102'));
     expect(result.exit).toBe(false);
   });
 
@@ -60,67 +61,93 @@ describe('shouldExit', () => {
       takeProfitPct: '3',
       stopLossPct: '2',
     });
-    const result = shouldExit(pos, 101.6);
+    const result = shouldExit(pos, Money.fromString('101.6'));
     expect(result.exit).toBe(true);
     expect(result.reason).toBe('early_exit');
   });
 
   it('does not early-exit non-reversion modes below take-profit', () => {
-    const result = shouldExit(makePosition({ mode: 'macro' }), 101.6);
+    const result = shouldExit(makePosition({ mode: 'macro' }), Money.fromString('101.6'));
     expect(result.exit).toBe(false);
   });
 });
 
-describe('deriveClientOrderId', () => {
-  it('is deterministic for identical inputs', () => {
+describe('deriveClientOrderId (stable economic identity — Phase 1.1.a §B)', () => {
+  it('entry identity is deterministic across timeouts (same decisionId → same id)', () => {
+    // A retry after a timeout MUST produce the same clientOrderId so Coinbase
+    // dedupes — never a fresh id that could become a second real order.
     const a = deriveClientOrderId({
       purpose: 'entry',
       token: 'AAVE',
       mode: 'macro',
-      seed: '2026-06-19T21:00:00Z',
+      decisionId: 123,
     });
     const b = deriveClientOrderId({
       purpose: 'entry',
       token: 'AAVE',
       mode: 'macro',
-      seed: '2026-06-19T21:00:00Z',
+      decisionId: 123,
     });
     expect(a).toBe(b);
     expect(a.startsWith('hzn-')).toBe(true);
     expect(a.length).toBeLessThanOrEqual(64);
   });
 
-  it('produces different IDs for different seeds', () => {
-    const a = deriveClientOrderId({
-      purpose: 'entry',
-      token: 'AAVE',
-      mode: 'macro',
-      seed: 'A',
-    });
-    const b = deriveClientOrderId({
-      purpose: 'entry',
-      token: 'AAVE',
-      mode: 'macro',
-      seed: 'B',
-    });
+  it('different accepted decisions produce different entry ids', () => {
+    const a = deriveClientOrderId({ purpose: 'entry', token: 'AAVE', mode: 'macro', decisionId: 1 });
+    const b = deriveClientOrderId({ purpose: 'entry', token: 'AAVE', mode: 'macro', decisionId: 2 });
     expect(a).not.toBe(b);
   });
 
-  it('separates entry from exit for the same position', () => {
+  it('exit identity is stable per (position, purpose, attempt generation)', () => {
+    const a = deriveClientOrderId({
+      purpose: 'take_profit',
+      token: 'AAVE',
+      mode: 'macro',
+      positionId: 42,
+      attemptGeneration: 1,
+    });
+    const b = deriveClientOrderId({
+      purpose: 'take_profit',
+      token: 'AAVE',
+      mode: 'macro',
+      positionId: 42,
+      attemptGeneration: 1,
+    });
+    expect(a).toBe(b);
+    // A NEW attempt after the prior one is resolved bumps the generation.
+    const c = deriveClientOrderId({
+      purpose: 'take_profit',
+      token: 'AAVE',
+      mode: 'macro',
+      positionId: 42,
+      attemptGeneration: 2,
+    });
+    expect(c).not.toBe(a);
+  });
+
+  it('entry ID for a position is never the same as any exit ID', () => {
     const entry = deriveClientOrderId({
       purpose: 'entry',
       token: 'AAVE',
       mode: 'macro',
-      positionId: 42,
-      seed: 't',
+      decisionId: 99,
     });
     const exit = deriveClientOrderId({
       purpose: 'manual_exit',
       token: 'AAVE',
       mode: 'macro',
       positionId: 42,
-      seed: 't',
+      attemptGeneration: 1,
     });
     expect(entry).not.toBe(exit);
+  });
+
+  it('wall clock is never mixed in — pure function of inputs', () => {
+    // Two calls at wildly different times must produce identical ids.
+    const a = deriveClientOrderId({ purpose: 'entry', token: 'AAVE', mode: 'macro', decisionId: 7 });
+    // Simulate a delay before the retry.
+    const b = deriveClientOrderId({ purpose: 'entry', token: 'AAVE', mode: 'macro', decisionId: 7 });
+    expect(a).toBe(b);
   });
 });

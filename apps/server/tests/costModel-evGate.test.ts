@@ -237,8 +237,8 @@ describe('EV gate', () => {
     });
     const g = applyEvGate(f, {
       ...DEFAULT_EV_GATE_THRESHOLDS,
-      minNetRewardRisk: 0.5, // relax so we test EV gate specifically
-      minExpectedValue: Money.fromString('0.01'), // must be > 0
+      minNetRewardRisk: 0.5, // relax so we test payoff gate specifically
+      minCostAdjustedPayoff: Money.fromString('0.01'), // must be > 0 (renamed §O)
     });
     expect(g.decision).toBe('reject_ev_gate');
     expect(g.reason).toBe('expected_value_below_minimum');

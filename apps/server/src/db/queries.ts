@@ -6,7 +6,9 @@ import type {
   TokenStat,
   ActivityType,
 } from '@horizon/shared';
+import { Money } from '@horizon/shared';
 import { db } from './index';
+import { isDuplicateKeyError } from './tx';
 import {
   activityLog,
   botConfig,
@@ -275,6 +277,39 @@ export async function getNonTerminalOrderIntents(): Promise<OrderIntentRow[]> {
     );
 }
 
+/** Returns unresolved `unknown` intents (§A — used to gate the global lock). */
+export async function getUnknownOrderIntents(): Promise<OrderIntentRow[]> {
+  return db.select().from(orderIntents).where(eq(orderIntents.state, 'unknown'));
+}
+
+/** Does the given position have an unresolved `unknown` intent? (§A) */
+export async function hasUnknownIntentForPosition(positionId: number): Promise<boolean> {
+  const rows = await db
+    .select({ id: orderIntents.id })
+    .from(orderIntents)
+    .where(and(eq(orderIntents.positionId, positionId), eq(orderIntents.state, 'unknown')))
+    .limit(1);
+  return rows.length > 0;
+}
+
+/**
+ * Count of prior exit intents for a position, keyed by purpose (§B). Used to
+ * derive the `attemptGeneration` component of an exit's clientOrderId. A retry
+ * of the same attempt (e.g. after a timeout) reuses the current count until
+ * the reconciler marks the prior attempt terminal; a NEW attempt afterwards
+ * bumps the count by one.
+ */
+export async function countExitAttemptsForPosition(
+  positionId: number,
+  purpose: 'take_profit' | 'stop_loss' | 'manual_exit' | 'emergency_exit',
+): Promise<number> {
+  const rows = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(orderIntents)
+    .where(and(eq(orderIntents.positionId, positionId), eq(orderIntents.purpose, purpose)));
+  return Number(rows[0]?.n ?? 0);
+}
+
 // ---------------------------------------------------------------------------
 // Fills
 // ---------------------------------------------------------------------------
@@ -299,27 +334,40 @@ export async function getFillsForOrderIntent(orderIntentId: number): Promise<Fil
   return db.select().from(fills).where(eq(fills.orderIntentId, orderIntentId));
 }
 
-/** Weighted-average fill price + totals for a set of fills. */
-export function aggregateFills(fillRows: FillRow[]): {
-  filledSize: number;
-  weightedAvgPrice: number;
-  totalFees: number;
-  quoteValue: number;
-} {
+/**
+ * Weighted-average fill price + totals for a set of fills.
+ *
+ * DECIMAL-SAFE (Phase 1.1.a §M): everything runs on Money — no Number
+ * intermediate. Weighted avg = Σ(price·size) / Σ(size) computed with the
+ * bigint-backed Money type so summing 100 fills of 0.01 does not drift.
+ */
+export interface FillAggregate {
+  filledSize: Money;
+  weightedAvgPrice: Money;
+  totalFees: Money;
+  quoteValue: Money;
+}
+
+export function aggregateFills(fillRows: FillRow[]): FillAggregate {
   if (fillRows.length === 0) {
-    return { filledSize: 0, weightedAvgPrice: 0, totalFees: 0, quoteValue: 0 };
+    return {
+      filledSize: Money.zero(),
+      weightedAvgPrice: Money.zero(),
+      totalFees: Money.zero(),
+      quoteValue: Money.zero(),
+    };
   }
-  let filledSize = 0;
-  let quoteValue = 0;
-  let totalFees = 0;
+  let filledSize = Money.zero();
+  let quoteValue = Money.zero();
+  let totalFees = Money.zero();
   for (const f of fillRows) {
-    const size = Number(f.filledSize);
-    const price = Number(f.fillPrice);
-    filledSize += size;
-    quoteValue += size * price;
-    totalFees += Number(f.fee);
+    const size = Money.fromString(f.filledSize);
+    const price = Money.fromString(f.fillPrice);
+    filledSize = filledSize.add(size);
+    quoteValue = quoteValue.add(size.mul(price));
+    totalFees = totalFees.add(Money.fromString(f.fee));
   }
-  const weightedAvgPrice = filledSize === 0 ? 0 : quoteValue / filledSize;
+  const weightedAvgPrice = filledSize.isZero() ? Money.zero() : quoteValue.div(filledSize);
   return { filledSize, weightedAvgPrice, totalFees, quoteValue };
 }
 
@@ -386,30 +434,54 @@ export async function getRoundTrips(opts: {
 // Cash ledger
 // ---------------------------------------------------------------------------
 
-export async function recordCash(entry: CashLedgerInsert): Promise<void> {
-  await db.insert(cashLedger).values(entry);
+/**
+ * Records a single cash-ledger row. Callers pass Money for `deltaUsd`; we
+ * serialize to a decimal string at the DB boundary. No Number in between
+ * (Phase 1.1.a §M).
+ *
+ * Prefer `insertCashLedgerEvent` from db/tx.ts for anything caused by a fill
+ * — it takes an idempotency key so a replay during startup reconciliation
+ * cannot double-book. This function stays for the few paths that write
+ * one-off adjustments outside a transaction.
+ */
+export async function recordCash(
+  entry: Omit<CashLedgerInsert, 'deltaUsd'> & { deltaUsd: Money },
+): Promise<void> {
+  await db.insert(cashLedger).values({ ...entry, deltaUsd: entry.deltaUsd.toDecimalString() });
 }
 
-export async function getCashBalance(dryRun: boolean): Promise<number> {
+/**
+ * Sums the cash ledger and returns the balance as Money.
+ * mysql2 returns SUM(decimal) as either a decimal string or null; both are
+ * safely converted to Money.
+ */
+export async function getCashBalance(dryRun: boolean): Promise<Money> {
   const rows = await db
-    .select({ total: sql<number>`coalesce(sum(${cashLedger.deltaUsd}), 0)` })
+    .select({ total: sql<string | null>`coalesce(sum(${cashLedger.deltaUsd}), 0)` })
     .from(cashLedger)
     .where(eq(cashLedger.dryRun, dryRun));
-  return Number(rows[0]?.total ?? 0);
+  const raw = rows[0]?.total;
+  return raw == null ? Money.zero() : Money.fromString(String(raw));
 }
 
-export async function ensureInitialFund(dryRun: boolean, amountUsd: number): Promise<void> {
-  const rows = await db
-    .select({ n: sql<number>`count(*)` })
-    .from(cashLedger)
-    .where(and(eq(cashLedger.dryRun, dryRun), eq(cashLedger.reason, 'initial_fund')));
-  if (Number(rows[0]?.n ?? 0) > 0) return;
-  await recordCash({
-    deltaUsd: String(amountUsd),
-    reason: 'initial_fund',
-    dryRun,
-    detail: `Initial funding of $${amountUsd} for ${dryRun ? 'dry-run' : 'live'} account`,
-  });
+/**
+ * Idempotently seeds the ledger with an initial fund for the given mode.
+ * `amountUsd` is Money — accepting `number` for backwards-compat callers.
+ */
+export async function ensureInitialFund(dryRun: boolean, amountUsd: Money | number): Promise<void> {
+  const amount = typeof amountUsd === 'number' ? Money.fromNumber(amountUsd) : amountUsd;
+  // Idempotent by design — the unique idempotencyKey lets us race safely.
+  try {
+    await db.insert(cashLedger).values({
+      idempotencyKey: `initial_fund:${dryRun ? 'dry' : 'live'}`,
+      deltaUsd: amount.toDecimalString(),
+      reason: 'initial_fund',
+      dryRun,
+      detail: `Initial funding of $${amount.toDecimalString(2)} for ${dryRun ? 'dry-run' : 'live'} account`,
+    });
+  } catch (err) {
+    if (!isDuplicateKeyError(err)) throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------

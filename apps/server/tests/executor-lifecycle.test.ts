@@ -21,6 +21,9 @@ import {
 import { closePosition, deriveClientOrderId, openPosition } from '../src/trading/executor';
 import { _testOverride } from '../src/env';
 
+// Monotonic decisionId helper — each call yields a fresh id so tests that
+// open MULTIPLE positions don't accidentally reuse the same clientOrderId.
+let __nextDecisionId = 10_000;
 const decision = (overrides: Partial<Parameters<typeof openPosition>[0]> = {}) => ({
   token: 'AAVE',
   mode: 'macro' as const,
@@ -29,7 +32,7 @@ const decision = (overrides: Partial<Parameters<typeof openPosition>[0]> = {}) =
   claudeReason: 'test',
   claudeModel: 'test-model',
   claudeConfidence: 0.8,
-  scanSeed: '2026-06-19T22:00:00Z',
+  decisionId: __nextDecisionId++, // §B: stable economic identity
   ...overrides,
 });
 
@@ -90,8 +93,8 @@ describe('idempotency — same clientOrderId is never economically duplicated', 
   });
 
   it('deterministic clientOrderId collapses race attempts', async () => {
-    const a = deriveClientOrderId({ purpose: 'entry', token: 'AAVE', mode: 'macro', seed: 'S' });
-    const b = deriveClientOrderId({ purpose: 'entry', token: 'AAVE', mode: 'macro', seed: 'S' });
+    const a = deriveClientOrderId({ purpose: 'entry', token: 'AAVE', mode: 'macro', decisionId: 1 });
+    const b = deriveClientOrderId({ purpose: 'entry', token: 'AAVE', mode: 'macro', decisionId: 1 });
     expect(a).toBe(b);
   });
 });
@@ -100,14 +103,15 @@ describe('unknown outcome — never blindly retried', () => {
   it('marks intent state=unknown and returns kind=unknown (does not create position)', async () => {
     await withForcedLivePath(async () => {
       mockState.createOrderBehavior = { type: 'throw_unknown' };
-      const result = await openPosition(decision());
+      const d = decision();
+      const result = await openPosition(d);
       expect(result.kind).toBe('unknown');
 
       const cid = deriveClientOrderId({
         purpose: 'entry',
         token: 'AAVE',
         mode: 'macro',
-        seed: '2026-06-19T22:00:00Z',
+        decisionId: d.decisionId,
       });
       const intent = await findOrderIntentByClientOrderId(cid);
       expect(intent?.state).toBe('unknown');
@@ -122,14 +126,15 @@ describe('rejected order — captured, no position', () => {
   it('records rejection with failureClass=definitely_rejected', async () => {
     await withForcedLivePath(async () => {
       mockState.createOrderBehavior = { type: 'reject', reason: 'INSUFFICIENT_FUND' };
-      const result = await openPosition(decision());
+      const d = decision();
+      const result = await openPosition(d);
       expect(result.kind).toBe('rejected');
 
       const cid = deriveClientOrderId({
         purpose: 'entry',
         token: 'AAVE',
         mode: 'macro',
-        seed: '2026-06-19T22:00:00Z',
+        decisionId: d.decisionId,
       });
       const intent = await findOrderIntentByClientOrderId(cid);
       expect(intent?.state).toBe('rejected');
@@ -147,7 +152,8 @@ describe('zero fill', () => {
         type: 'success',
         fills: [{ size: '0', commission: '0', price: '100' }],
       };
-      const result = await openPosition(decision());
+      const d = decision();
+      const result = await openPosition(d);
       expect(result.kind).toBe('skipped');
       expect(result.reason).toBe('zero_fill');
 
@@ -155,7 +161,7 @@ describe('zero fill', () => {
         purpose: 'entry',
         token: 'AAVE',
         mode: 'macro',
-        seed: '2026-06-19T22:00:00Z',
+        decisionId: d.decisionId,
       });
       const intent = await findOrderIntentByClientOrderId(cid);
       expect(intent?.state).toBe('canceled');
@@ -223,10 +229,10 @@ describe('close position — round-trip accounting', () => {
 describe('accounting reconciliation — dry-run cash balances', () => {
   it('cash DECREASES after a buy (previously stayed at $10k)', async () => {
     const before = await getCashBalance(true);
-    expect(before).toBe(10_000);
+    expect(before.toDecimalString(2)).toBe('10000.00');
     await openPosition(decision());
     const after = await getCashBalance(true);
-    expect(after).toBeLessThan(before);
+    expect(after.lt(before)).toBe(true);
   });
 
   it('cash INCREASES after a sell (net of fees applied on both sides)', async () => {
@@ -236,7 +242,7 @@ describe('accounting reconciliation — dry-run cash balances', () => {
     mockState.createOrderBehavior = null;
     await closePosition(p, 'manual');
     const afterSell = await getCashBalance(true);
-    expect(afterSell).toBeGreaterThan(afterBuy);
+    expect(afterSell.gt(afterBuy)).toBe(true);
     const summary = await getRoundTripSummary();
     expect(summary.totalTrades).toBe(1);
     // With zero price move + 2× taker fee, net P&L must be NEGATIVE.
@@ -247,8 +253,7 @@ describe('accounting reconciliation — dry-run cash balances', () => {
 describe('circuit breaker — trips after CONSECUTIVE_LOSS_LIMIT losses', () => {
   it('after three losses, consecutiveLosses hits limit and circuitBreakerUntil is set', async () => {
     for (let i = 0; i < 3; i++) {
-      const seed = `cycle-${i}`;
-      await openPosition({ ...decision({ scanSeed: seed }) });
+      await openPosition(decision());
       const p = (await getOpenPositions())[0]!;
       // Force a losing exit by moving the mocked mid-price down.
       mockState.product = { ...mockState.product, price: (Number(mockState.product.price) * 0.9).toString() };
@@ -264,7 +269,7 @@ describe('circuit breaker — trips after CONSECUTIVE_LOSS_LIMIT losses', () => 
 describe('one open position per token', () => {
   it('a second openPosition on the same token is skipped', async () => {
     await openPosition(decision());
-    const second = await openPosition(decision({ scanSeed: 'different' }));
+    const second = await openPosition(decision());
     expect(second.kind).toBe('skipped');
     expect((await getOpenPositions()).length).toBe(1);
   });
@@ -276,14 +281,15 @@ describe('order intent persisted BEFORE submission (recoverable on crash)', () =
       coinbaseMock.createOrder.mockImplementationOnce(async () => {
         throw new Error('unexpected explosion');
       });
-      const result = await openPosition(decision());
+      const d = decision();
+      const result = await openPosition(d);
       expect(result.kind).toBe('rejected');
 
       const cid = deriveClientOrderId({
         purpose: 'entry',
         token: 'AAVE',
         mode: 'macro',
-        seed: '2026-06-19T22:00:00Z',
+        decisionId: d.decisionId,
       });
       const intent = await findOrderIntentByClientOrderId(cid);
       expect(intent).toBeTruthy();

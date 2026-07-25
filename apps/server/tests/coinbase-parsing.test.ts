@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { Money } from '@horizon/shared';
 import type { CoinbaseCreateOrderResponse } from '../src/trading/coinbase';
 import {
   CoinbaseError,
   roundToIncrement,
+  decimalDigitsForIncrement,
   normalizeBuyQuoteSize,
   normalizeSellBaseSize,
   validateProductForTrading,
@@ -66,15 +68,35 @@ describe('response fixtures', () => {
   });
 });
 
-describe('roundToIncrement', () => {
-  it('rounds DOWN to the increment', () => {
-    expect(roundToIncrement(1.234, '0.01')).toBe(1.23);
-    expect(roundToIncrement(1.239, '0.01')).toBe(1.23);
-    expect(roundToIncrement(0.0000000567, '0.00000001')).toBe(0.00000005);
+describe('roundToIncrement (Money, decimal-safe)', () => {
+  it('rounds DOWN to the increment — exact, no float drift', () => {
+    expect(roundToIncrement(Money.fromString('1.234'), '0.01').toDecimalString(2)).toBe('1.23');
+    expect(roundToIncrement(Money.fromString('1.239'), '0.01').toDecimalString(2)).toBe('1.23');
+    // The classic float trap: 0.10000001 must round DOWN to 0.10, not up.
+    expect(roundToIncrement(Money.fromString('0.10000001'), '0.01').toDecimalString(2)).toBe(
+      '0.10',
+    );
+    // 8-decimal precision preserved.
+    expect(roundToIncrement(Money.fromString('0.00000567'), '0.00000001').toDecimalString(8)).toBe(
+      '0.00000567',
+    );
   });
-  it('is a no-op for invalid increment', () => {
-    expect(roundToIncrement(5, '0')).toBe(5);
-    expect(roundToIncrement(5, 'abc')).toBe(5);
+  it('rounds down for negative sizes (toward zero, never magnifying)', () => {
+    expect(roundToIncrement(Money.fromString('-1.237'), '0.01').toDecimalString(2)).toBe('-1.23');
+  });
+  it('is a no-op for invalid or zero increment', () => {
+    expect(roundToIncrement(Money.fromString('5'), '0').toDecimalString(2)).toBe('5.00');
+    // The empty-string case represents "no increment configured".
+    expect(roundToIncrement(Money.fromString('5'), '').toDecimalString(2)).toBe('5.00');
+  });
+});
+
+describe('decimalDigitsForIncrement', () => {
+  it('derives digit count from the increment string', () => {
+    expect(decimalDigitsForIncrement('0.01')).toBe(2);
+    expect(decimalDigitsForIncrement('0.00000001')).toBe(8);
+    expect(decimalDigitsForIncrement('1')).toBe(0);
+    expect(decimalDigitsForIncrement('0.100')).toBe(1); // trailing zeros trimmed
   });
 });
 
@@ -93,22 +115,26 @@ describe('validateProductForTrading', () => {
   });
 });
 
-describe('size validation + increment rounding', () => {
-  it('rounds a BUY quote to the increment', () => {
-    expect(normalizeBuyQuoteSize(product, 12.3456)).toBe('12.34');
+describe('size validation + increment rounding (Money-native)', () => {
+  it('rounds a BUY quote to the increment and returns the exchange-shaped string', () => {
+    expect(normalizeBuyQuoteSize(product, Money.fromString('12.3456'))).toBe('12.34');
   });
   it('rejects a BUY quote below the min_size', () => {
-    expect(() => normalizeBuyQuoteSize({ ...product, quote_min_size: '10' }, 5)).toThrow(CoinbaseError);
+    expect(() =>
+      normalizeBuyQuoteSize({ ...product, quote_min_size: '10' }, Money.fromString('5')),
+    ).toThrow(CoinbaseError);
   });
   it('rejects a BUY quote above the max_size', () => {
-    expect(() => normalizeBuyQuoteSize({ ...product, quote_max_size: '100' }, 1000)).toThrow(CoinbaseError);
+    expect(() =>
+      normalizeBuyQuoteSize({ ...product, quote_max_size: '100' }, Money.fromString('1000')),
+    ).toThrow(CoinbaseError);
   });
   it('rounds a SELL base to the base_increment', () => {
-    expect(normalizeSellBaseSize(product, 1.2345)).toBe('1.234');
+    expect(normalizeSellBaseSize(product, Money.fromString('1.2345'))).toBe('1.234');
   });
   it('rejects a SELL base below min_size', () => {
     expect(() =>
-      normalizeSellBaseSize({ ...product, base_min_size: '1' }, 0.5),
+      normalizeSellBaseSize({ ...product, base_min_size: '1' }, Money.fromString('0.5')),
     ).toThrow(CoinbaseError);
   });
 });

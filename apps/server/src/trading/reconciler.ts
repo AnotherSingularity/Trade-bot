@@ -161,7 +161,9 @@ async function reconcileIntent(intent: OrderIntentRow): Promise<boolean> {
     const fills = await getFillsForOrderIntent(intent.id);
     if (fills.length > 0) {
       const agg = aggregateFills(fills);
-      await updateOrderIntent(intent.id, { state: agg.filledSize > 0 ? 'filled' : 'canceled' });
+      await updateOrderIntent(intent.id, {
+        state: agg.filledSize.isPositive() ? 'filled' : 'canceled',
+      });
       return true;
     }
     // No fills recorded and no exchange to consult → mark failed.

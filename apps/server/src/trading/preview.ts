@@ -50,7 +50,7 @@ export interface PreviewRejected {
     | 'preview_error'
     | 'preview_warning'
     | 'missing_commission'
-    | 'missing_avg_fill'
+    | 'missing_est_avg_fill'
     | 'preview_failure';
   detail: string;
   raw: CoinbasePreviewResponse | null;
@@ -175,21 +175,21 @@ export async function previewCandidate(input: PreviewInput): Promise<PreviewResu
     };
   }
 
+  // Phase 1.1.a §I: Coinbase's Preview response uses `est_average_filled_price`
+  // (see docs). The older `average_filled_price` is retained as a defensive
+  // fallback (some sandbox versions have differed). NO midpoint fallback: for
+  // a marketable order, the midpoint underestimates the fill price on the
+  // aggressive side and would suppress exactly the spread + impact costs the
+  // model exists to measure. Missing estimate → REJECT.
   const estimatedAvgFillPrice =
-    moneyOrNull(raw.average_filled_price) ??
-    // Fall back to mid of best bid/ask when Coinbase omits the estimate.
-    (() => {
-      const bid = moneyOrNull(raw.best_bid);
-      const ask = moneyOrNull(raw.best_ask);
-      if (bid && ask) return bid.add(ask).divInt(2);
-      return null;
-    })();
+    moneyOrNull(raw.est_average_filled_price) ?? moneyOrNull(raw.average_filled_price);
 
   if (estimatedAvgFillPrice === null) {
     return {
       status: 'rejected',
-      reason: 'missing_avg_fill',
-      detail: 'preview response missing average_filled_price and best_bid/ask',
+      reason: 'missing_est_avg_fill',
+      detail:
+        'preview response missing est_average_filled_price — midpoint is not a conservative fallback for a marketable order',
       raw,
       warnings: raw.warning ?? [],
     };

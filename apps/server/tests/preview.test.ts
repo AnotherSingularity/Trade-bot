@@ -12,14 +12,17 @@ const INTENT: MarketOrderIntent = {
   quoteSize: '500',
 };
 
+// Fixture matches the documented Coinbase Preview Order response shape
+// (Phase 1.1.a §I) — `est_average_filled_price`, NOT `average_filled_price`.
 const OK_RESPONSE = {
   order_total: '500.00',
   commission_total: '3.00',
   best_bid: '99.90',
   best_ask: '100.10',
-  average_filled_price: '100.05',
+  est_average_filled_price: '100.05',
   base_size: '4.997',
   quote_size: '500',
+  preview_id: 'prev-abc123',
 } as const;
 
 describe('previewCandidate', () => {
@@ -126,12 +129,12 @@ describe('previewCandidate', () => {
     }
   });
 
-  it('falls back to bid/ask midpoint when average_filled_price is missing', async () => {
+  it('reads est_average_filled_price (the correct field per Coinbase docs)', async () => {
     const restore = _testOverride({ coinbaseConfigured: true });
     try {
       vi.spyOn(coinbase, 'previewOrder').mockResolvedValue({
         ...OK_RESPONSE,
-        average_filled_price: undefined,
+        est_average_filled_price: '100.07',
       });
       const r = await previewCandidate({
         intent: INTENT,
@@ -140,8 +143,51 @@ describe('previewCandidate', () => {
       });
       expect(r.status).toBe('ok');
       if (r.status !== 'ok') throw new Error();
-      // Mid of 99.90 / 100.10 = 100.00
-      expect(r.estimatedAvgFillPrice.toDecimalString(2)).toBe('100.00');
+      expect(r.estimatedAvgFillPrice.toDecimalString(2)).toBe('100.07');
+    } finally {
+      restore();
+    }
+  });
+
+  it('falls back to legacy average_filled_price if est_average_filled_price absent', async () => {
+    const restore = _testOverride({ coinbaseConfigured: true });
+    try {
+      vi.spyOn(coinbase, 'previewOrder').mockResolvedValue({
+        ...OK_RESPONSE,
+        est_average_filled_price: undefined,
+        average_filled_price: '100.10',
+      });
+      const r = await previewCandidate({
+        intent: INTENT,
+        arrivalMid: Money.fromString('100'),
+        takerRate: Money.fromString('0.006'),
+      });
+      expect(r.status).toBe('ok');
+      if (r.status !== 'ok') throw new Error();
+      expect(r.estimatedAvgFillPrice.toDecimalString(2)).toBe('100.10');
+    } finally {
+      restore();
+    }
+  });
+
+  it('REJECTS a marketable order when the estimated fill is missing (§I — no midpoint fallback)', async () => {
+    const restore = _testOverride({ coinbaseConfigured: true });
+    try {
+      vi.spyOn(coinbase, 'previewOrder').mockResolvedValue({
+        ...OK_RESPONSE,
+        est_average_filled_price: undefined,
+        average_filled_price: undefined,
+      });
+      const r = await previewCandidate({
+        intent: INTENT,
+        arrivalMid: Money.fromString('100'),
+        takerRate: Money.fromString('0.006'),
+      });
+      expect(r.status).toBe('rejected');
+      if (r.status !== 'rejected') throw new Error();
+      // §I: previously midpoint was silently substituted — the whole point of
+      // the fix is that a missing estimate is a REJECTION, not a soft fallback.
+      expect(r.reason).toBe('missing_est_avg_fill');
     } finally {
       restore();
     }

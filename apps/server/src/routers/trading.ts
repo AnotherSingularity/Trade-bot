@@ -111,20 +111,22 @@ export const tradingRouter = router({
 
     // Cash comes from the LEDGER — decreases when we buy, increases when we
     // sell. In live mode we also cross-check against Coinbase available cash.
-    let cashBalance = await ledgerCashBalance(ENV.dryRun);
+    // Money → number conversion happens ONCE, at this tRPC boundary (Phase
+    // 1.1.a decimal-arithmetic-policy).
+    let cashBalanceNum = (await ledgerCashBalance(ENV.dryRun)).toNumber();
     if (!ENV.dryRun && ENV.coinbaseConfigured) {
       try {
-        cashBalance = await coinbaseCashBalance();
+        cashBalanceNum = await coinbaseCashBalance();
       } catch {
         // fall back to ledger — logged elsewhere
       }
     }
 
-    const totalValue = cashBalance + positionsValue;
+    const totalValue = cashBalanceNum + positionsValue;
     const costBasis = positionsValue - unrealizedPnlDollars;
     return {
       totalValue,
-      cashBalance,
+      cashBalance: cashBalanceNum,
       positionsValue,
       unrealizedPnlDollars,
       unrealizedPnlPct: costBasis === 0 ? 0 : (unrealizedPnlDollars / costBasis) * 100,
