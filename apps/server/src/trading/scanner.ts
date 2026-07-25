@@ -1,67 +1,60 @@
-import { STRATEGY, TOKEN_UNIVERSE } from '@horizon/shared';
+import { STRATEGY, STRATEGY_VERSION, TOKEN_UNIVERSE } from '@horizon/shared';
 import {
   countOpenPositions,
   getAllTokenStats,
   getBotConfig,
   getOpenPositions,
   logActivity,
+  shrunkWinRate,
   updateBotConfig,
 } from '../db/queries';
-import { getCandles, getProduct } from './coinbase';
+import { CLAUDE_MODEL } from '@horizon/shared';
+import { CoinbaseError, getCandles, getProduct } from './coinbase';
 import { evaluateSignal } from './claude';
 import { detectBestMode, type MarketSnapshot } from './modes';
-import { closePositionAtPrice, openPosition, shouldExit } from './executor';
+import { closePosition, openPosition, shouldExit } from './executor';
 import { getMarketWindow, isTradeableNow } from './marketWindow';
+import { withLease, SCAN_LEASE_KEY } from '../jobs/lease';
 import { ENV } from '../env';
 
 /**
- * The scan cycle — the heart of the bot. Runs every 5 minutes via BullMQ.
+ * Scan cycle — rebuilt to enforce Phase 0 semantics:
  *
- * Order of operations:
- *  1. Gatekeeping (running / paused / circuit breaker / market window).
- *  2. Manage open positions → exit on TP/SL/early-exit.
- *  3. Scan token universe for new entries (respecting max positions + filters).
+ *   • manageOpenRisk() ALWAYS runs — regardless of isRunning, isPaused,
+ *     window, or circuit breaker. Existing exposure is never abandoned.
+ *   • scanForEntries() is gated on all four AND on completed startup
+ *     reconciliation. It also RELOADS bot config after risk management so a
+ *     circuit breaker tripped by an exit inside the same cycle blocks entries
+ *     in that same cycle.
+ *   • The whole cycle runs under a Redis leader lease so only one replica can
+ *     open positions at a time.
  */
+
 export async function runScanCycle(): Promise<void> {
-  const cfg = await getBotConfig();
+  // Lease guards ENTRY submission. Risk management still runs even if we
+  // don't hold the lease so a lagging replica doesn't leave exposure unmanaged;
+  // executor's per-position optimistic lock prevents duplicate exits.
+  await manageOpenRisk();
 
-  if (!cfg.isRunning) return;
-  if (cfg.isPaused) {
-    await logActivity({ type: 'scan', action: 'SKIP', detail: 'Bot is paused' });
-    return;
-  }
-
-  // Circuit breaker check (auto-clears when the timeout passes).
-  if (cfg.circuitBreakerUntil && cfg.circuitBreakerUntil > new Date()) {
+  const leased = await withLease(SCAN_LEASE_KEY, 2 * 60 * 1000, async () => {
+    await scanForEntries();
+    return true;
+  });
+  if (!leased.ran) {
     await logActivity({
       type: 'scan',
-      action: 'SKIP',
-      detail: `Circuit breaker active until ${cfg.circuitBreakerUntil.toISOString()}`,
+      severity: 'info',
+      action: 'LEASE_HELD_ELSEWHERE',
+      detail: 'Another replica held the scan lease — entry scan skipped',
     });
-    return;
   }
-  if (cfg.circuitBreakerUntil && cfg.circuitBreakerUntil <= new Date()) {
-    await updateBotConfig({ circuitBreakerUntil: null, consecutiveLosses: 0 });
-    await logActivity({ type: 'system', action: 'CIRCUIT_RESET', detail: 'Circuit breaker cleared' });
-  }
-
-  // Always manage existing positions, even outside trade windows.
-  await manageOpenPositions();
-
-  if (!isTradeableNow()) {
-    await logActivity({
-      type: 'scan',
-      action: 'SKIP',
-      detail: `Outside trading window (${getMarketWindow()})`,
-    });
-    return;
-  }
-
-  await scanForEntries();
 }
 
-/** Checks every open position against its exit rules using live prices. */
-export async function manageOpenPositions(): Promise<void> {
+// ---------------------------------------------------------------------------
+// Risk management — always runs
+// ---------------------------------------------------------------------------
+
+export async function manageOpenRisk(): Promise<void> {
   const open = await getOpenPositions();
   for (const position of open) {
     try {
@@ -69,24 +62,92 @@ export async function manageOpenPositions(): Promise<void> {
       const currentPrice = Number(product.price);
       const decision = shouldExit(position, currentPrice);
       if (decision.exit) {
-        await closePositionAtPrice(position, currentPrice, decision.reason);
+        const result = await closePosition(position, decision.reason);
+        if (result.kind !== 'closed') {
+          await logActivity({
+            type: 'error',
+            severity: 'high',
+            token: position.token,
+            action: 'EXIT_NOT_COMPLETED',
+            detail: `${decision.reason} attempted, result=${result.kind} reason=${result.reason}`,
+          });
+        }
       }
     } catch (err) {
+      const msg =
+        err instanceof CoinbaseError
+          ? `${err.class}:${err.code} ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : 'unknown';
       await logActivity({
         type: 'error',
+        severity: 'warn',
         token: position.token,
         action: 'MANAGE_FAILED',
-        detail: err instanceof Error ? err.message : 'Failed to evaluate exit',
+        detail: msg,
       });
     }
   }
 }
 
-/** Scans the token universe and opens qualifying positions. */
-export async function scanForEntries(): Promise<void> {
-  const openCount = await countOpenPositions();
-  let availableSlots = STRATEGY.MAX_OPEN_POSITIONS - openCount;
+// ---------------------------------------------------------------------------
+// Entry scanning — gated
+// ---------------------------------------------------------------------------
 
+export async function scanForEntries(): Promise<void> {
+  // Reload config here (not before manageOpenRisk) so a CB triggered by an
+  // exit above blocks entries in this same cycle.
+  const cfg = await getBotConfig();
+
+  if (cfg.reconciliationStatus !== 'ok') {
+    await logActivity({
+      type: 'scan',
+      severity: 'warn',
+      action: 'SKIP_ENTRIES',
+      detail: `Startup reconciliation not complete (${cfg.reconciliationStatus})`,
+    });
+    return;
+  }
+  if (!cfg.isRunning) return;
+  if (cfg.isPaused) {
+    await logActivity({ type: 'scan', action: 'SKIP_ENTRIES', detail: 'Bot is paused' });
+    return;
+  }
+  if (cfg.circuitBreakerUntil && cfg.circuitBreakerUntil > new Date()) {
+    await logActivity({
+      type: 'scan',
+      severity: 'warn',
+      action: 'SKIP_ENTRIES',
+      detail: `Circuit breaker active until ${cfg.circuitBreakerUntil.toISOString()}`,
+    });
+    return;
+  }
+  // Clear expired CB.
+  if (cfg.circuitBreakerUntil && cfg.circuitBreakerUntil <= new Date()) {
+    await updateBotConfig({ circuitBreakerUntil: null, consecutiveLosses: 0 });
+    await logActivity({
+      type: 'system',
+      action: 'CIRCUIT_RESET',
+      detail: 'Circuit breaker cleared',
+    });
+  }
+
+  if (!isTradeableNow()) {
+    await logActivity({
+      type: 'scan',
+      action: 'SKIP_ENTRIES',
+      detail: `Outside trading window (${getMarketWindow()})`,
+    });
+    return;
+  }
+
+  await selectAndOpenEntries();
+}
+
+async function selectAndOpenEntries(): Promise<void> {
+  const openCount = await countOpenPositions();
+  const availableSlots = STRATEGY.MAX_OPEN_POSITIONS - openCount;
   if (availableSlots <= 0) {
     await logActivity({
       type: 'scan',
@@ -101,104 +162,139 @@ export async function scanForEntries(): Promise<void> {
   const statByToken = new Map(stats.map((s) => [s.token, s]));
   const openTokens = new Set((await getOpenPositions()).map((p) => p.token));
 
-  // Prioritize tokens with high historical win rate.
-  const candidates = [...TOKEN_UNIVERSE]
-    .filter((t) => {
-      const s = statByToken.get(t);
-      // Skip deactivated tokens and tokens we already hold.
-      return (s?.isActive ?? true) && !openTokens.has(t);
-    })
-    .sort((a, b) => (Number(statByToken.get(b)?.winRate ?? 0)) - (Number(statByToken.get(a)?.winRate ?? 0)));
+  // Score EVERY eligible token first, then rank — no more "first past the post"
+  // ordering bias. Uses Bayesian-shrunk win rate so a token with a single win
+  // doesn't dominate.
+  interface Candidate {
+    token: string;
+    price: number;
+    volume24h: number;
+    changePct24h: number;
+    winRate: number | null;
+    priorityScore: number;
+    closes: number[];
+    candles: unknown[];
+  }
+  const eligible = TOKEN_UNIVERSE.filter((t) => {
+    const s = statByToken.get(t);
+    return (s?.isActive ?? true) && !openTokens.has(t);
+  });
 
+  const scanSeed = new Date().toISOString();
+  const candidates: Candidate[] = [];
   let scanned = 0;
   let passedVolume = 0;
-  let passedSignal = 0;
 
-  for (const token of candidates) {
-    if (availableSlots <= 0) break;
+  for (const token of eligible) {
     scanned++;
     try {
       const product = await getProduct(token);
       const price = Number(product.price);
-      const volume24h = Number(product.volume_24h) * price; // volume in base × price ≈ USD
+      const volume24hBase = Number(product.volume_24h);
+      const volume24h = volume24hBase * price;
       const changePct24h = Number(product.price_percentage_change_24h);
-
       if (volume24h < STRATEGY.MIN_VOLUME_24HR) continue;
       passedVolume++;
-
       const { closes, candles } = await getCandles(token, 'ONE_HOUR', 100);
-      const statRow = statByToken.get(token);
-      const winRate = statRow && statRow.totalTrades > 0 ? Number(statRow.winRate) : null;
-
-      const snapshot: MarketSnapshot = {
+      const s = statByToken.get(token);
+      const winRate = s && s.totalTrades > 0 ? shrunkWinRate(s.wins, s.losses) : null;
+      candidates.push({
         token,
         price,
         volume24h,
         changePct24h,
+        winRate,
+        priorityScore: winRate ?? 50,
         closes,
         candles,
-        winRate,
-      };
-
-      const detected = detectBestMode(snapshot);
-      if (!detected) continue;
-
-      const { evaluation, signals } = detected;
-      const modeCfg = STRATEGY.MODES[evaluation.mode];
-
-      // Claude confirmation.
-      const claude = ENV.anthropicConfigured
-        ? await evaluateSignal(evaluation.mode, signals)
-        : { confidence: 0, shouldEnter: false, reason: 'Anthropic not configured — skipped' };
-
-      if (!claude.shouldEnter || claude.confidence < modeCfg.claudeThreshold) {
-        await logActivity({
-          type: 'signal',
-          token,
-          action: 'SIGNAL_REJECTED',
-          detail: `${evaluation.mode} ${evaluation.passedSignals}/${evaluation.totalSignals} signals; Claude ${(
-            claude.confidence * 100
-          ).toFixed(0)}% < ${(modeCfg.claudeThreshold * 100).toFixed(0)}% — ${claude.reason}`,
-        });
-        continue;
-      }
-      passedSignal++;
-
-      // Win-rate based allocation adjustment.
-      let allocationPct = modeCfg.allocationPct;
-      if (winRate !== null && winRate < STRATEGY.WIN_RATE_REDUCE) {
-        allocationPct = STRATEGY.WIN_RATE_REDUCED_PCT;
-      }
-
-      await logActivity({
-        type: 'signal',
-        token,
-        action: 'SIGNAL_CONFIRMED',
-        detail: `${evaluation.mode} confirmed @ ${(claude.confidence * 100).toFixed(0)}% — ${claude.reason}`,
       });
-
-      const opened = await openPosition({
-        token,
-        mode: evaluation.mode,
-        price,
-        allocationPct,
-        claudeReason: claude.reason,
-      });
-      if (opened) availableSlots--;
     } catch (err) {
+      const msg =
+        err instanceof CoinbaseError
+          ? `${err.class}:${err.code} ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : 'unknown';
       await logActivity({
         type: 'error',
+        severity: 'warn',
         token,
-        action: 'SCAN_FAILED',
-        detail: err instanceof Error ? err.message : 'Scan error',
+        action: 'SCAN_FETCH_FAILED',
+        detail: msg,
       });
     }
+  }
+
+  // Rank by shrunk win rate, then evaluate modes.
+  candidates.sort((a, b) => b.priorityScore - a.priorityScore);
+
+  let opened = 0;
+  let passedSignal = 0;
+  for (const c of candidates) {
+    if (opened >= availableSlots) break;
+
+    const snapshot: MarketSnapshot = {
+      token: c.token,
+      price: c.price,
+      volume24h: c.volume24h,
+      changePct24h: c.changePct24h,
+      closes: c.closes,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      candles: c.candles as any,
+      winRate: c.winRate,
+    };
+    const detected = detectBestMode(snapshot);
+    if (!detected) continue;
+
+    const { evaluation, signals } = detected;
+    const modeCfg = STRATEGY.MODES[evaluation.mode];
+
+    const claude = ENV.anthropicConfigured
+      ? await evaluateSignal(evaluation.mode, signals)
+      : { confidence: 0, shouldEnter: false, reason: 'Anthropic not configured' };
+
+    if (!claude.shouldEnter || claude.confidence < modeCfg.claudeThreshold) {
+      await logActivity({
+        type: 'signal',
+        token: c.token,
+        action: 'SIGNAL_REJECTED',
+        detail: `${evaluation.mode} ${evaluation.passedSignals}/${evaluation.totalSignals}; Claude ${(claude.confidence * 100).toFixed(
+          0,
+        )}% < ${(modeCfg.claudeThreshold * 100).toFixed(0)}% — ${claude.reason}`,
+      });
+      continue;
+    }
+    passedSignal++;
+
+    let allocationPct = modeCfg.allocationPct;
+    if (c.winRate !== null && c.winRate < STRATEGY.WIN_RATE_REDUCE) {
+      allocationPct = STRATEGY.WIN_RATE_REDUCED_PCT;
+    }
+
+    await logActivity({
+      type: 'signal',
+      token: c.token,
+      action: 'SIGNAL_CONFIRMED',
+      detail: `${evaluation.mode} confirmed @ ${(claude.confidence * 100).toFixed(0)}% — ${claude.reason}`,
+    });
+
+    const result = await openPosition({
+      token: c.token,
+      mode: evaluation.mode,
+      scanPrice: c.price,
+      allocationPct,
+      claudeReason: claude.reason,
+      claudeModel: CLAUDE_MODEL,
+      claudeConfidence: claude.confidence,
+      scanSeed,
+    });
+    if (result.kind === 'opened') opened++;
   }
 
   await logActivity({
     type: 'scan',
     action: 'SCAN_COMPLETE',
-    detail: `Scanned ${scanned} tokens, ${passedVolume} passed volume, ${passedSignal} confirmed`,
+    detail: `Scanned ${scanned}, ${passedVolume} passed volume, ${passedSignal} confirmed, ${opened} opened (strategy v${STRATEGY_VERSION})`,
     tokensScanned: scanned,
     passedVolumeFilter: passedVolume,
     passedSignalThreshold: passedSignal,

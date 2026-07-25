@@ -7,6 +7,7 @@ import {
 } from '@horizon/shared';
 import {
   getBotConfig,
+  getCashBalance as ledgerCashBalance,
   getOpenPositions,
   getRecentActivity,
   logActivity,
@@ -14,8 +15,8 @@ import {
   serializePosition,
   updateBotConfig,
 } from '../db/queries';
-import { getCashBalance, getProduct } from '../trading/coinbase';
-import { closePositionAtPrice } from '../trading/executor';
+import { getCashBalance as coinbaseCashBalance, getProduct } from '../trading/coinbase';
+import { closePosition as executorClose } from '../trading/executor';
 import { scheduleRecurringScan, triggerImmediateScan } from '../jobs/queue';
 import { getBotStatusDTO } from '../lib/services';
 import { ENV } from '../env';
@@ -49,6 +50,19 @@ export const tradingRouter = router({
   status: protectedProcedure.query(async (): Promise<BotStatus> => buildBotStatus()),
 
   start: protectedProcedure.mutation(async (): Promise<BotStatus> => {
+    // Reconciliation gate: refuse to enable entries until startup reconciled.
+    const cfg = await getBotConfig();
+    if (cfg.reconciliationStatus !== 'ok') {
+      await logActivity({
+        type: 'security',
+        severity: 'high',
+        action: 'START_BLOCKED',
+        detail: `Reconciliation status is ${cfg.reconciliationStatus}; refuse to enable entries`,
+      });
+      throw new Error(
+        `Cannot start: startup reconciliation is ${cfg.reconciliationStatus}. Resolve discrepancies first.`,
+      );
+    }
     await updateBotConfig({ isRunning: true, isPaused: false });
     await scheduleRecurringScan();
     await logActivity({ type: 'system', action: 'BOT_START', detail: 'Bot started' });
@@ -69,7 +83,7 @@ export const tradingRouter = router({
     await logActivity({
       type: 'system',
       action: isPaused ? 'BOT_PAUSE' : 'BOT_RESUME',
-      detail: isPaused ? 'Bot paused' : 'Bot resumed',
+      detail: isPaused ? 'Bot paused (risk mgmt continues)' : 'Bot resumed',
     });
     return buildBotStatus();
   }),
@@ -82,6 +96,10 @@ export const tradingRouter = router({
 
   portfolio: protectedProcedure.query(async (): Promise<PortfolioSummary> => {
     const openPositions = await buildOpenPositions();
+
+    // Position value is marked at current price (or last known avg entry as
+    // fallback). Cost basis comes from actual entry quote spent so unrealized
+    // P&L is honest even if the ticker is stale.
     const positionsValue = openPositions.reduce(
       (sum, p) => sum + (p.currentPrice ?? p.entryPrice) * p.quantity,
       0,
@@ -91,12 +109,14 @@ export const tradingRouter = router({
       0,
     );
 
-    let cashBalance = 10_000; // demo bankroll fallback
+    // Cash comes from the LEDGER — decreases when we buy, increases when we
+    // sell. In live mode we also cross-check against Coinbase available cash.
+    let cashBalance = await ledgerCashBalance(ENV.dryRun);
     if (!ENV.dryRun && ENV.coinbaseConfigured) {
       try {
-        cashBalance = await getCashBalance();
+        cashBalance = await coinbaseCashBalance();
       } catch {
-        // keep fallback
+        // fall back to ledger — logged elsewhere
       }
     }
 
@@ -128,14 +148,51 @@ export const tradingRouter = router({
       return { items: rows.map(serializeActivity), nextCursor };
     }),
 
+  /**
+   * Manual close. Only returns `closed:true` after the exchange exit is
+   * accepted AND reconciled. Failed / unknown exits return closed:false with
+   * a reason.
+   */
   closePosition: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }): Promise<{ closed: boolean }> => {
-      const rows = await getOpenPositions();
-      const position = rows.find((p) => p.id === input.id);
-      if (!position) return { closed: false };
-      const product = await getProduct(position.token);
-      await closePositionAtPrice(position, Number(product.price), 'manual');
-      return { closed: true };
-    }),
+    .mutation(
+      async ({ input }): Promise<{ closed: boolean; status: 'closed' | 'failed' | 'pending'; reason?: string }> => {
+        const rows = await getOpenPositions();
+        const position = rows.find((p) => p.id === input.id);
+        if (!position) return { closed: false, status: 'failed', reason: 'not_found_or_not_open' };
+        const result = await executorClose(position, 'manual');
+        return {
+          closed: result.kind === 'closed',
+          status: result.kind,
+          reason: result.reason,
+        };
+      },
+    ),
+
+  /**
+   * Emergency kill — attempts to flatten all open exposure. Returns per-token
+   * outcomes.
+   */
+  emergencyKill: protectedProcedure.mutation(
+    async (): Promise<{ attempted: number; closed: number; failed: number; pending: number }> => {
+      await updateBotConfig({ isRunning: false, isPaused: false });
+      await logActivity({
+        type: 'security',
+        severity: 'critical',
+        action: 'EMERGENCY_KILL',
+        detail: 'Operator triggered emergency kill; attempting to flatten all positions',
+      });
+      const open = await getOpenPositions();
+      let closed = 0,
+        failed = 0,
+        pending = 0;
+      for (const p of open) {
+        const r = await executorClose(p, 'emergency');
+        if (r.kind === 'closed') closed++;
+        else if (r.kind === 'pending') pending++;
+        else failed++;
+      }
+      return { attempted: open.length, closed, failed, pending };
+    },
+  ),
 });

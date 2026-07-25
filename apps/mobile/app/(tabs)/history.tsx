@@ -3,6 +3,7 @@ import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { HistoryFilter } from '@horizon/shared';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
+import { SafetyBanner } from '../../components/trading/SafetyBanner';
 import { TradeHistoryRow } from '../../components/trading/TradeHistoryRow';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { trpc } from '../../lib/trpc';
@@ -17,6 +18,7 @@ const FILTERS: { key: HistoryFilter; label: string }[] = [
 
 export default function HistoryScreen() {
   const [filter, setFilter] = useState<HistoryFilter>('all');
+  const status = trpc.trading.status.useQuery(undefined, { refetchInterval: 15_000 });
 
   const query = trpc.history.list.useInfiniteQuery(
     { filter, limit: 20 },
@@ -32,6 +34,7 @@ export default function HistoryScreen() {
   return (
     <ErrorBoundary>
       <SafeAreaView style={styles.container} edges={['top']}>
+        <SafetyBanner status={status.data} />
         <View style={styles.summaryBar}>
           <Stat label="TRADES" value={String(summary?.totalTrades ?? 0)} />
           <Stat

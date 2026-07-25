@@ -3,15 +3,25 @@ import { ENV } from '../env';
 import { QUOTE_CURRENCY } from '@horizon/shared';
 
 /**
- * Coinbase Advanced Trade API client.
+ * Coinbase Advanced Trade API client — Phase 0 rebuild.
  *
- * Authenticates with CDP-format ES256 JWTs (per request). When credentials are
- * not configured the public market-data endpoints still work; private endpoints
- * throw a descriptive error so the rest of the system degrades gracefully.
+ * Key corrections vs. the original implementation:
+ *   • Create Order responses read `success_response.order_id` (nested), not a
+ *     nonexistent top-level field. Reading top-level silently produced null
+ *     order IDs and orphaned every live order.
+ *   • Every request has a hard timeout (default 8s), enforced via AbortSignal.
+ *   • Failure outcomes are classified so callers know whether they may retry.
+ *   • Retries never invent a new clientOrderId; the caller passes an
+ *     idempotency key and any retry re-uses it.
  */
 
 const API_HOST = 'api.coinbase.com';
 const BASE_URL = `https://${API_HOST}`;
+const DEFAULT_TIMEOUT_MS = 8_000;
+
+// ---------------------------------------------------------------------------
+// JWT signing (unchanged — CDP ES256, per-request)
+// ---------------------------------------------------------------------------
 
 function base64url(input: Buffer | string): string {
   return Buffer.from(input)
@@ -21,17 +31,16 @@ function base64url(input: Buffer | string): string {
     .replace(/\//g, '_');
 }
 
-/**
- * Builds a short-lived ES256 JWT for a single REST request, as required by the
- * Coinbase Advanced Trade (CDP) API.
- */
 export function buildJwt(method: string, requestPath: string): string {
   if (!ENV.coinbaseKeyName || !ENV.coinbasePrivateKey) {
-    throw new Error('Coinbase credentials not configured');
+    throw new CoinbaseError({
+      class: 'non_retryable_validation',
+      code: 'not_configured',
+      message: 'Coinbase credentials not configured',
+    });
   }
   const keyName = ENV.coinbaseKeyName;
   const privateKey = ENV.coinbasePrivateKey.replace(/\\n/g, '\n');
-
   const now = Math.floor(Date.now() / 1000);
   const uri = `${method.toUpperCase()} ${API_HOST}${requestPath}`;
 
@@ -41,42 +50,149 @@ export function buildJwt(method: string, requestPath: string): string {
     typ: 'JWT',
     nonce: randomBytes(16).toString('hex'),
   };
-  const payload = {
-    sub: keyName,
-    iss: 'cdp',
-    nbf: now,
-    exp: now + 120,
-    uri,
-  };
+  const payload = { sub: keyName, iss: 'cdp', nbf: now, exp: now + 120, uri };
 
   const signingInput = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(payload))}`;
   const signer = createSign('SHA256');
   signer.update(signingInput);
   signer.end();
-  // dsaEncoding 'ieee-p1363' yields the raw r||s signature ES256 expects.
   const signature = signer.sign({ key: privateKey, dsaEncoding: 'ieee-p1363' });
   return `${signingInput}.${base64url(signature)}`;
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const jwt = buildJwt(method, path);
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${jwt}`,
-      'Content-Type': 'application/json',
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Coinbase ${method} ${path} failed: ${res.status} ${text}`);
+// ---------------------------------------------------------------------------
+// Failure classification
+// ---------------------------------------------------------------------------
+
+/**
+ * How an order-related failure should be interpreted by the state machine.
+ *
+ * `definitely_rejected`        — exchange said no; safe to move on.
+ * `definitely_not_submitted`   — never left our process; safe to retry as-is.
+ * `submitted`                  — accepted (nothing to do).
+ * `unknown`                    — network timeout, 5xx, gateway error. May or
+ *                                may not have reached the exchange. NEVER retry
+ *                                with a new clientOrderId; must reconcile.
+ * `retryable_transport`        — retriable HTTP layer (rate limit, transient).
+ * `non_retryable_validation`   — bad input on our side; caller must fix.
+ */
+export type FailureClass =
+  | 'definitely_rejected'
+  | 'definitely_not_submitted'
+  | 'submitted'
+  | 'unknown'
+  | 'retryable_transport'
+  | 'non_retryable_validation';
+
+export interface CoinbaseErrorPayload {
+  class: FailureClass;
+  code: string;
+  message: string;
+  httpStatus?: number;
+  raw?: unknown;
+}
+
+export class CoinbaseError extends Error {
+  readonly class: FailureClass;
+  readonly code: string;
+  readonly httpStatus?: number;
+  readonly raw?: unknown;
+  constructor(p: CoinbaseErrorPayload) {
+    super(p.message);
+    this.name = 'CoinbaseError';
+    this.class = p.class;
+    this.code = p.code;
+    this.httpStatus = p.httpStatus;
+    this.raw = p.raw;
   }
-  return (await res.json()) as T;
 }
 
 // ---------------------------------------------------------------------------
-// Public types (subset of the Coinbase response shapes we consume)
+// Core request helper with timeout + classification
+// ---------------------------------------------------------------------------
+
+interface RequestOptions {
+  timeoutMs?: number;
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  opts: RequestOptions = {},
+): Promise<T> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const jwt = buildJwt(method, path);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        'Content-Type': 'application/json',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    const msg = err instanceof Error ? err.message : 'network error';
+    const aborted = err instanceof Error && err.name === 'AbortError';
+    // For POST calls to /orders, an aborted request is `unknown` (exchange may
+    // or may not have received it). For read calls, treat as retryable transport.
+    const isWrite = method.toUpperCase() === 'POST' && path.includes('/orders');
+    throw new CoinbaseError({
+      class: isWrite ? 'unknown' : 'retryable_transport',
+      code: aborted ? 'timeout' : 'network',
+      message: aborted ? `Request timed out after ${timeoutMs}ms` : msg,
+    });
+  }
+  clearTimeout(timer);
+
+  const text = await res.text();
+  let json: unknown = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    // fall through — some errors are HTML
+  }
+
+  if (!res.ok) {
+    // Classify by HTTP status.
+    let cls: FailureClass;
+    if (res.status === 400 || res.status === 404 || res.status === 422) {
+      cls = 'non_retryable_validation';
+    } else if (res.status === 401 || res.status === 403) {
+      cls = 'non_retryable_validation';
+    } else if (res.status === 408 || res.status === 429) {
+      cls = 'retryable_transport';
+    } else if (res.status >= 500) {
+      // For order-write endpoints a 5xx after our request left the client is
+      // genuinely ambiguous — treat as unknown so callers reconcile.
+      cls =
+        method.toUpperCase() === 'POST' && path.includes('/orders')
+          ? 'unknown'
+          : 'retryable_transport';
+    } else {
+      cls = 'non_retryable_validation';
+    }
+    throw new CoinbaseError({
+      class: cls,
+      code: `http_${res.status}`,
+      message: `Coinbase ${method} ${path} → ${res.status} ${text.slice(0, 200)}`,
+      httpStatus: res.status,
+      raw: json ?? text,
+    });
+  }
+
+  return json as T;
+}
+
+// ---------------------------------------------------------------------------
+// Response types (subset that we actually consume; nested per Coinbase spec)
 // ---------------------------------------------------------------------------
 
 export interface CoinbaseProduct {
@@ -86,11 +202,19 @@ export interface CoinbaseProduct {
   price_percentage_change_24h: string;
   base_increment: string;
   quote_increment: string;
+  base_min_size?: string;
+  base_max_size?: string;
+  quote_min_size?: string;
+  quote_max_size?: string;
   status: string;
+  trading_disabled?: boolean;
+  cancel_only?: boolean;
+  post_only?: boolean;
+  limit_only?: boolean;
 }
 
 export interface CoinbaseCandle {
-  start: string; // unix seconds
+  start: string;
   low: string;
   high: string;
   open: string;
@@ -104,19 +228,87 @@ export interface CoinbaseAccount {
   available_balance: { value: string; currency: string };
 }
 
-export interface CoinbaseOrderResponse {
+/**
+ * Create Order response. Success payload is NESTED under `success_response`,
+ * not at the top level — this was the source of the null-order-id bug.
+ */
+export interface CoinbaseCreateOrderResponse {
   success: boolean;
-  order_id?: string;
-  error_response?: { message?: string };
+  failure_reason?: string;
+  order_id?: string; // top-level; NOT always populated in success payloads
+  success_response?: {
+    order_id: string;
+    product_id: string;
+    side: 'BUY' | 'SELL';
+    client_order_id: string;
+  };
+  error_response?: {
+    error?: string;
+    message?: string;
+    error_details?: string;
+    preview_failure_reason?: string;
+    new_order_failure_reason?: string;
+  };
+  order_configuration?: unknown;
 }
+
+export interface CoinbasePreviewResponse {
+  order_total?: string;
+  commission_total?: string;
+  errs?: string[];
+  warning?: string[];
+  quote_size?: string;
+  base_size?: string;
+  best_bid?: string;
+  best_ask?: string;
+}
+
+export type CoinbaseOrderStatus =
+  | 'PENDING'
+  | 'OPEN'
+  | 'FILLED'
+  | 'CANCELLED'
+  | 'EXPIRED'
+  | 'FAILED'
+  | 'UNKNOWN_ORDER_STATUS';
+
+export interface CoinbaseOrder {
+  order_id: string;
+  client_order_id?: string;
+  product_id: string;
+  side: 'BUY' | 'SELL';
+  status: CoinbaseOrderStatus;
+  filled_size?: string;
+  average_filled_price?: string;
+  total_fees?: string;
+  completion_percentage?: string;
+  reject_reason?: string;
+  created_time?: string;
+  filled_value?: string;
+  number_of_fills?: string;
+}
+
+export interface CoinbaseFill {
+  entry_id: string;
+  trade_id: string;
+  order_id: string;
+  product_id: string;
+  price: string;
+  size: string;
+  commission: string;
+  side: 'BUY' | 'SELL';
+  liquidity_indicator?: 'MAKER' | 'TAKER' | 'UNKNOWN_LIQUIDITY_INDICATOR';
+  trade_time: string;
+  size_in_quote?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Public API — typed methods
+// ---------------------------------------------------------------------------
 
 function productId(token: string): string {
   return `${token}-${QUOTE_CURRENCY}`;
 }
-
-// ---------------------------------------------------------------------------
-// Market data
-// ---------------------------------------------------------------------------
 
 export async function getProduct(token: string): Promise<CoinbaseProduct> {
   return request<CoinbaseProduct>('GET', `/api/v3/brokerage/products/${productId(token)}`);
@@ -132,10 +324,6 @@ export interface CandleGranularity {
     | 'ONE_DAY';
 }
 
-/**
- * Fetches historical candles, returning closing prices oldest-first (ready for
- * the indicator functions).
- */
 export async function getCandles(
   token: string,
   granularity: CandleGranularity['granularity'] = 'ONE_HOUR',
@@ -155,7 +343,6 @@ export async function getCandles(
     token,
   )}/candles?start=${start}&end=${end}&granularity=${granularity}&limit=${limit}`;
   const data = await request<{ candles: CoinbaseCandle[] }>('GET', path);
-  // Coinbase returns newest-first; reverse to oldest-first.
   const candles = [...(data.candles ?? [])].reverse();
   return {
     candles,
@@ -163,10 +350,6 @@ export async function getCandles(
     volumes: candles.map((c) => Number(c.volume)),
   };
 }
-
-// ---------------------------------------------------------------------------
-// Account / portfolio
-// ---------------------------------------------------------------------------
 
 export async function getAccounts(): Promise<CoinbaseAccount[]> {
   const data = await request<{ accounts: CoinbaseAccount[] }>(
@@ -186,29 +369,161 @@ export async function getCashBalance(): Promise<number> {
 // Orders
 // ---------------------------------------------------------------------------
 
-export interface MarketOrderParams {
+export interface MarketOrderIntent {
+  clientOrderId: string; // MUST be supplied by caller (idempotency key)
   token: string;
   side: 'BUY' | 'SELL';
-  /** For BUY: quote (USD) amount to spend. For SELL: base size to sell. */
-  amount: number;
+  /** For BUY: quote (USD) to spend. For SELL: base size. Exactly one is set. */
+  quoteSize?: string;
+  baseSize?: string;
 }
 
-export async function placeMarketOrder(params: MarketOrderParams): Promise<CoinbaseOrderResponse> {
-  const clientOrderId = randomBytes(16).toString('hex');
-  const config =
-    params.side === 'BUY'
-      ? { market_market_ioc: { quote_size: params.amount.toString() } }
-      : { market_market_ioc: { base_size: params.amount.toString() } };
-
-  return request<CoinbaseOrderResponse>('POST', '/api/v3/brokerage/orders', {
-    client_order_id: clientOrderId,
-    product_id: productId(params.token),
-    side: params.side,
-    order_configuration: config,
-  });
+function orderConfiguration(intent: MarketOrderIntent): unknown {
+  if (intent.side === 'BUY') {
+    if (!intent.quoteSize) {
+      throw new CoinbaseError({
+        class: 'non_retryable_validation',
+        code: 'missing_quote_size',
+        message: 'BUY market IOC requires quoteSize',
+      });
+    }
+    return { market_market_ioc: { quote_size: intent.quoteSize } };
+  }
+  if (!intent.baseSize) {
+    throw new CoinbaseError({
+      class: 'non_retryable_validation',
+      code: 'missing_base_size',
+      message: 'SELL market IOC requires baseSize',
+    });
+  }
+  return { market_market_ioc: { base_size: intent.baseSize } };
 }
 
-/** Lightweight connectivity probe used by Settings → Test Connection. */
+/**
+ * Previews a market order without submitting it. Callers should invoke this
+ * before `createOrder` to catch increment/min-size violations and to surface
+ * expected fees + slippage.
+ */
+export async function previewOrder(intent: MarketOrderIntent): Promise<CoinbasePreviewResponse> {
+  return request<CoinbasePreviewResponse>(
+    'POST',
+    '/api/v3/brokerage/orders/preview',
+    {
+      product_id: productId(intent.token),
+      side: intent.side,
+      order_configuration: orderConfiguration(intent),
+    },
+    { timeoutMs: 6_000 },
+  );
+}
+
+export interface CreateOrderResult {
+  success: boolean;
+  exchangeOrderId?: string;
+  clientOrderId: string;
+  failureReason?: string;
+  raw: CoinbaseCreateOrderResponse;
+}
+
+/**
+ * Submits a market order. NEVER generates its own idempotency key — the caller
+ * passes the pre-persisted `clientOrderId`, so any retry after an `unknown`
+ * outcome reuses the same identity and Coinbase deduplicates.
+ *
+ * Reads the order id from the CORRECT nested location (`success_response.order_id`).
+ */
+export async function createOrder(intent: MarketOrderIntent): Promise<CreateOrderResult> {
+  const raw = await request<CoinbaseCreateOrderResponse>(
+    'POST',
+    '/api/v3/brokerage/orders',
+    {
+      client_order_id: intent.clientOrderId,
+      product_id: productId(intent.token),
+      side: intent.side,
+      order_configuration: orderConfiguration(intent),
+    },
+    { timeoutMs: 10_000 },
+  );
+
+  if (raw.success) {
+    const exchangeOrderId = raw.success_response?.order_id ?? raw.order_id;
+    if (!exchangeOrderId) {
+      // Coinbase said success but gave us no order id — treat as unknown.
+      throw new CoinbaseError({
+        class: 'unknown',
+        code: 'missing_order_id',
+        message: 'Coinbase reported success without an order_id',
+        raw,
+      });
+    }
+    return {
+      success: true,
+      exchangeOrderId,
+      clientOrderId: intent.clientOrderId,
+      raw,
+    };
+  }
+
+  // Explicit failure payload.
+  const reason =
+    raw.error_response?.new_order_failure_reason ??
+    raw.error_response?.preview_failure_reason ??
+    raw.error_response?.message ??
+    raw.failure_reason ??
+    'unknown_failure';
+  return {
+    success: false,
+    clientOrderId: intent.clientOrderId,
+    failureReason: reason,
+    raw,
+  };
+}
+
+export async function getOrder(exchangeOrderId: string): Promise<CoinbaseOrder> {
+  const data = await request<{ order: CoinbaseOrder }>(
+    'GET',
+    `/api/v3/brokerage/orders/historical/${exchangeOrderId}`,
+  );
+  return data.order;
+}
+
+/**
+ * Looks up an order by our clientOrderId — used during reconciliation when we
+ * lost the response but still have the idempotency key.
+ */
+export async function findOrderByClientId(clientOrderId: string): Promise<CoinbaseOrder | null> {
+  const data = await request<{ orders: CoinbaseOrder[] }>(
+    'GET',
+    `/api/v3/brokerage/orders/historical/batch?limit=100&order_status=OPEN,FILLED,CANCELLED,EXPIRED,FAILED`,
+  );
+  const orders = data.orders ?? [];
+  return orders.find((o) => o.client_order_id === clientOrderId) ?? null;
+}
+
+export async function listFillsForOrder(exchangeOrderId: string): Promise<CoinbaseFill[]> {
+  const data = await request<{ fills: CoinbaseFill[] }>(
+    'GET',
+    `/api/v3/brokerage/orders/historical/fills?order_id=${encodeURIComponent(
+      exchangeOrderId,
+    )}&limit=250`,
+  );
+  return data.fills ?? [];
+}
+
+export async function cancelOrder(exchangeOrderId: string): Promise<boolean> {
+  const data = await request<{ results?: { success: boolean; order_id: string }[] }>(
+    'POST',
+    '/api/v3/brokerage/orders/batch_cancel',
+    { order_ids: [exchangeOrderId] },
+    { timeoutMs: 6_000 },
+  );
+  return (data.results ?? []).some((r) => r.order_id === exchangeOrderId && r.success);
+}
+
+// ---------------------------------------------------------------------------
+// Health probe
+// ---------------------------------------------------------------------------
+
 export async function testConnection(): Promise<{ connected: boolean; message: string }> {
   if (!ENV.coinbaseConfigured) {
     return { connected: false, message: 'Coinbase credentials not configured' };
@@ -217,8 +532,98 @@ export async function testConnection(): Promise<{ connected: boolean; message: s
     const accounts = await getAccounts();
     return { connected: true, message: `Connected — ${accounts.length} accounts` };
   } catch (err) {
-    return { connected: false, message: err instanceof Error ? err.message : 'Unknown error' };
+    return {
+      connected: false,
+      message: err instanceof Error ? err.message : 'Unknown error',
+    };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Product validation + increment rounding (used before every entry)
+// ---------------------------------------------------------------------------
+
+/**
+ * Rounds a numeric value DOWN to the nearest multiple of `increment`. Handles
+ * decimal-place accounting so we don't accidentally submit e.g. 0.10000001.
+ */
+export function roundToIncrement(value: number, incrementStr: string): number {
+  const increment = Number(incrementStr);
+  if (!Number.isFinite(increment) || increment <= 0) return value;
+  const dp = Math.max(0, -Math.floor(Math.log10(increment)));
+  const rounded = Math.floor(value / increment) * increment;
+  return Number(rounded.toFixed(dp));
+}
+
+export function validateProductForTrading(product: CoinbaseProduct): void {
+  if (product.trading_disabled) {
+    throw new CoinbaseError({
+      class: 'non_retryable_validation',
+      code: 'trading_disabled',
+      message: `${product.product_id} trading is disabled`,
+    });
+  }
+  if (product.cancel_only) {
+    throw new CoinbaseError({
+      class: 'non_retryable_validation',
+      code: 'cancel_only',
+      message: `${product.product_id} is cancel-only`,
+    });
+  }
+  if (product.status && product.status !== 'online') {
+    throw new CoinbaseError({
+      class: 'non_retryable_validation',
+      code: `status_${product.status}`,
+      message: `${product.product_id} status is ${product.status}`,
+    });
+  }
+}
+
+/**
+ * For a BUY, validates the intended quote size against min/max quote limits
+ * (Coinbase). For a SELL, validates base size against base limits. Also rounds
+ * to the appropriate increment.
+ */
+export function normalizeBuyQuoteSize(product: CoinbaseProduct, quoteSize: number): string {
+  const rounded = roundToIncrement(quoteSize, product.quote_increment);
+  const min = product.quote_min_size ? Number(product.quote_min_size) : 0;
+  const max = product.quote_max_size ? Number(product.quote_max_size) : Infinity;
+  if (rounded < min) {
+    throw new CoinbaseError({
+      class: 'non_retryable_validation',
+      code: 'below_min_quote_size',
+      message: `${product.product_id} BUY quote_size ${rounded} below min ${min}`,
+    });
+  }
+  if (rounded > max) {
+    throw new CoinbaseError({
+      class: 'non_retryable_validation',
+      code: 'above_max_quote_size',
+      message: `${product.product_id} BUY quote_size ${rounded} above max ${max}`,
+    });
+  }
+  return rounded.toString();
+}
+
+export function normalizeSellBaseSize(product: CoinbaseProduct, baseSize: number): string {
+  const rounded = roundToIncrement(baseSize, product.base_increment);
+  const min = product.base_min_size ? Number(product.base_min_size) : 0;
+  const max = product.base_max_size ? Number(product.base_max_size) : Infinity;
+  if (rounded < min) {
+    throw new CoinbaseError({
+      class: 'non_retryable_validation',
+      code: 'below_min_base_size',
+      message: `${product.product_id} SELL base_size ${rounded} below min ${min}`,
+    });
+  }
+  if (rounded > max) {
+    throw new CoinbaseError({
+      class: 'non_retryable_validation',
+      code: 'above_max_base_size',
+      message: `${product.product_id} SELL base_size ${rounded} above max ${max}`,
+    });
+  }
+  return rounded.toString();
 }
 
 // Exported for potential webhook signature verification (not used yet).

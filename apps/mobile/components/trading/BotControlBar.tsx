@@ -1,24 +1,29 @@
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ConfirmButton } from '../ui/ConfirmButton';
 import { theme } from '../../theme';
 
 interface Props {
   isRunning: boolean;
   isPaused: boolean;
   isScanning: boolean;
+  isLive: boolean;
   onStart: () => void;
   onStop: () => void;
   onPause: () => void;
   onScanNow: () => void;
+  onEmergencyKill: () => void;
 }
 
 export function BotControlBar({
   isRunning,
   isPaused,
   isScanning,
+  isLive,
   onStart,
   onStop,
   onPause,
   onScanNow,
+  onEmergencyKill,
 }: Props) {
   return (
     <View style={styles.container}>
@@ -42,52 +47,65 @@ export function BotControlBar({
 
       <View style={styles.buttons}>
         {!isRunning ? (
-          <ControlButton label="START" color={theme.colors.green} onPress={onStart} />
+          <ConfirmButton
+            label="START"
+            color={isLive ? theme.colors.red : theme.colors.green}
+            onConfirm={onStart}
+            confirmTitle={isLive ? 'Start LIVE trading?' : 'Start bot?'}
+            confirmMessage={
+              isLive
+                ? 'This will begin placing REAL orders on Coinbase against your account.'
+                : 'This will begin scanning and (simulated) trading in DRY RUN mode.'
+            }
+            destructive={isLive}
+          />
         ) : (
           <>
-            <ControlButton
+            <ConfirmButton
               label={isPaused ? 'RESUME' : 'PAUSE'}
               color={theme.colors.amber}
-              onPress={onPause}
+              onConfirm={onPause}
+              confirmTitle={isPaused ? 'Resume entries?' : 'Pause new entries?'}
+              confirmMessage={
+                isPaused
+                  ? 'The bot will begin evaluating new entries again.'
+                  : 'The bot will stop opening new positions. Risk management continues.'
+              }
             />
-            <ControlButton label="STOP" color={theme.colors.red} onPress={onStop} />
+            <ConfirmButton
+              label="STOP"
+              color={theme.colors.red}
+              onConfirm={onStop}
+              confirmTitle="Stop bot?"
+              confirmMessage="The recurring scan will stop. Open positions remain and continue to be managed on the server side."
+              destructive
+            />
           </>
         )}
-        <ControlButton
-          label={isScanning ? '…' : 'SCAN'}
-          color={theme.colors.secondary}
+        {isRunning ? (
+          <ConfirmButton
+            label="KILL"
+            color={theme.colors.red}
+            onConfirm={onEmergencyKill}
+            confirmTitle="Emergency kill?"
+            confirmMessage="Attempts to flatten ALL open positions immediately. Any failed exits will be reported."
+            destructive
+          />
+        ) : null}
+        <TouchableOpacity
+          style={[styles.button, { borderColor: theme.colors.secondary }]}
           onPress={onScanNow}
-          loading={isScanning}
-        />
+          disabled={isScanning}
+          activeOpacity={0.7}
+        >
+          {isScanning ? (
+            <ActivityIndicator color={theme.colors.secondary} size="small" />
+          ) : (
+            <Text style={[styles.buttonText, { color: theme.colors.secondary }]}>SCAN</Text>
+          )}
+        </TouchableOpacity>
       </View>
     </View>
-  );
-}
-
-function ControlButton({
-  label,
-  color,
-  onPress,
-  loading,
-}: {
-  label: string;
-  color: string;
-  onPress: () => void;
-  loading?: boolean;
-}) {
-  return (
-    <TouchableOpacity
-      style={[styles.button, { borderColor: color }]}
-      onPress={onPress}
-      disabled={loading}
-      activeOpacity={0.7}
-    >
-      {loading ? (
-        <ActivityIndicator color={color} size="small" />
-      ) : (
-        <Text style={[styles.buttonText, { color }]}>{label}</Text>
-      )}
-    </TouchableOpacity>
   );
 }
 
@@ -101,11 +119,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: theme.spacing.sm,
   },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm },
   statusDot: { width: 10, height: 10, borderRadius: 5 },
   statusText: { color: theme.colors.white, fontFamily: theme.fonts.monoBold, letterSpacing: 1 },
-  buttons: { flexDirection: 'row', gap: theme.spacing.sm },
+  buttons: { flexDirection: 'row', gap: theme.spacing.sm, flexWrap: 'wrap' },
   button: {
     borderWidth: 1,
     borderRadius: theme.radius.md,

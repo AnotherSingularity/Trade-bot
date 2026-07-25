@@ -7,26 +7,42 @@ import { appRouter } from './routers';
 import { createContext } from './lib/trpc';
 import { createScanWorker } from './jobs/scanJob';
 import { scheduleRecurringScan } from './jobs/queue';
-import { getBotConfig } from './db/queries';
-import { authenticate, getBotStatusDTO } from './lib/services';
+import { getBotConfig, logActivity, updateBotConfig } from './db/queries';
+import { authenticate, checkLoginRate, getBotStatusDTO } from './lib/services';
 import { requireAuth } from './middleware/auth';
 import { closeDb } from './db';
+import { reconcileOnStartup } from './trading/reconciler';
+import { withLease, RECONCILE_LEASE_KEY } from './jobs/lease';
 
 /**
- * Express server entry point.
+ * Express server entry point — Phase 0.
  *
- * Mounts the type-safe tRPC API under /trpc, a REST compatibility layer under
- * /api (health, auth, bot status — for curl/integrations), starts the BullMQ
- * scan worker, and re-arms the recurring scan if the bot was running before a
- * restart (durability requirement).
+ * Boot sequence:
+ *   1. HTTP/tRPC/REST surfaces come up (so /health responds immediately).
+ *   2. Startup reconciler runs under a Redis lease (only one replica).
+ *      Entries stay disabled until reconciliation succeeds.
+ *   3. If the bot was `isRunning` before restart, the recurring scan is
+ *      re-armed (risk management + entries as per the reconciled state).
  */
 async function main() {
   const app = express();
 
-  app.use(cors());
+  // ── CORS: explicit allowlist. Dev falls back to '*'; prod refuses unknown.
+  app.use(
+    cors({
+      origin: (origin, cb) => {
+        if (!origin) return cb(null, true); // non-browser callers
+        if (ENV.corsOrigins.includes('*') || ENV.corsOrigins.includes(origin)) return cb(null, true);
+        return cb(new Error(`CORS: origin ${origin} not allowed`));
+      },
+      credentials: true,
+    }),
+  );
   app.use(express.json({ limit: '1mb' }));
 
-  // --- Health (both bare and /api-prefixed) ---
+  // Never log the raw Authorization header or JSON bodies in production.
+
+  // ── Health
   const healthHandler = (_req: Request, res: Response) => {
     res.json({
       status: 'ok',
@@ -38,8 +54,19 @@ async function main() {
   app.get('/health', healthHandler);
   app.get('/api/health', healthHandler);
 
-  // --- REST compatibility layer (mirrors core tRPC procedures) ---
+  // ── REST compatibility layer (rate-limited login)
   app.post('/api/auth/login', async (req: Request, res: Response) => {
+    const ip = String(req.ip ?? req.socket.remoteAddress ?? 'unknown');
+    const rate = checkLoginRate(ip);
+    if (!rate.allowed) {
+      res.status(429).json({
+        error:
+          rate.lockedUntil !== undefined
+            ? 'IP temporarily locked'
+            : 'Too many login attempts',
+      });
+      return;
+    }
     const password = req.body?.password as string | undefined;
     if (!password) {
       res.status(400).json({ error: 'password is required' });
@@ -61,7 +88,7 @@ async function main() {
     res.json(await getBotStatusDTO());
   });
 
-  // --- tRPC API (primary surface, consumed by the mobile app) ---
+  // ── tRPC
   app.use(
     '/trpc',
     createExpressMiddleware({
@@ -70,28 +97,55 @@ async function main() {
     }),
   );
 
-  // Start the scan worker (processes the BullMQ queue).
+  // ── Scan worker
   const worker = createScanWorker();
   worker.on('ready', () => {
     console.log('[server] BullMQ scan worker ready (connected to Redis)');
   });
 
-  // If the bot was running before a restart, re-register the recurring scan.
+  // ── Server listen (before reconciliation so /health responds fast)
+  const server = app.listen(ENV.port, () => {
+    console.log(`[server] Horizon Trade v${STRATEGY_VERSION} listening on :${ENV.port}`);
+    console.log(
+      `[server] dry-run: ${ENV.dryRun} | coinbase: ${ENV.coinbaseConfigured} | anthropic: ${ENV.anthropicConfigured} | reconciliation: pending`,
+    );
+  });
+
+  // ── Startup reconciliation under a lease (single-writer).
+  const leased = await withLease(RECONCILE_LEASE_KEY, 5 * 60 * 1000, async () => {
+    try {
+      await reconcileOnStartup();
+    } catch (err) {
+      await updateBotConfig({
+        reconciliationStatus: 'failed',
+        reconciliationDetail: err instanceof Error ? err.message : 'reconciliation exception',
+      });
+      await logActivity({
+        type: 'reconciliation',
+        severity: 'critical',
+        action: 'RECONCILE_EXCEPTION',
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return true;
+  });
+  if (!leased.ran) {
+    console.log('[server] reconciliation held by another replica; will pick up its status');
+  }
+
+  // ── Re-arm recurring scan if bot was running before restart.
   try {
     const cfg = await getBotConfig();
     if (cfg.isRunning) {
       await scheduleRecurringScan();
       console.log('[server] bot was running — recurring scan re-armed');
     }
+    console.log(`[server] reconciliation status: ${cfg.reconciliationStatus}`);
   } catch (err) {
     console.error('[server] could not check bot config on boot:', err);
   }
 
-  const server = app.listen(ENV.port, () => {
-    console.log(`[server] Horizon Trade v${STRATEGY_VERSION} listening on :${ENV.port}`);
-    console.log(`[server] dry-run: ${ENV.dryRun} | coinbase: ${ENV.coinbaseConfigured} | anthropic: ${ENV.anthropicConfigured}`);
-  });
-
+  // ── Shutdown
   const shutdown = async (signal: string) => {
     console.log(`[server] received ${signal}, shutting down…`);
     server.close();

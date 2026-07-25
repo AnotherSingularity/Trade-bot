@@ -26,6 +26,11 @@ export interface BotStatus {
   maxPositions: number;
   marketWindow: import('./constants').MarketWindow;
   updatedAt: string;
+  // Phase 0 additions surfaced to the mobile app.
+  dryRun: boolean;
+  reconciliationStatus: 'pending' | 'in_progress' | 'ok' | 'failed';
+  protectionMode: 'exchange_bracket' | 'polling_fallback' | 'unprotected';
+  strategyVersion: string;
 }
 
 export interface Position {

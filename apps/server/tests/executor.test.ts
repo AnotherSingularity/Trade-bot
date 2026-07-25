@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldExit } from '../src/trading/executor';
+import { deriveClientOrderId, shouldExit } from '../src/trading/executor';
 import type { PositionRow } from '../src/db/schema';
 
 function makePosition(overrides: Partial<PositionRow> = {}): PositionRow {
@@ -7,16 +7,26 @@ function makePosition(overrides: Partial<PositionRow> = {}): PositionRow {
     id: 1,
     token: 'AAVE',
     mode: 'macro',
-    entryPrice: '100',
-    quantity: '1',
+    avgEntryPrice: '100',
+    filledQuantity: '1',
+    entryFees: '0',
+    entryQuoteSpent: '100',
     allocationPct: '10',
     takeProfitPrice: '108',
     stopLossPrice: '97',
     takeProfitPct: '8',
     stopLossPct: '3',
+    entryOrderIntentId: 1,
+    protectiveTpIntentId: null,
+    protectiveSlIntentId: null,
+    protectionMode: 'polling_fallback',
     claudeReason: null,
-    coinbaseOrderId: null,
+    claudeModel: null,
+    claudeConfidence: null,
+    strategyVersion: null,
+    lifecycleState: 'open',
     status: 'open',
+    version: 0,
     openedAt: new Date(),
     closedAt: null,
     ...overrides,
@@ -44,13 +54,12 @@ describe('shouldExit', () => {
   it('applies reversion early-exit at the configured gain', () => {
     const pos = makePosition({
       mode: 'reversion',
-      entryPrice: '100',
+      avgEntryPrice: '100',
       takeProfitPrice: '103',
       stopLossPrice: '98',
       takeProfitPct: '3',
       stopLossPct: '2',
     });
-    // 1.6% gain exceeds the 1.5% early-exit threshold but is below take-profit.
     const result = shouldExit(pos, 101.6);
     expect(result.exit).toBe(true);
     expect(result.reason).toBe('early_exit');
@@ -59,5 +68,59 @@ describe('shouldExit', () => {
   it('does not early-exit non-reversion modes below take-profit', () => {
     const result = shouldExit(makePosition({ mode: 'macro' }), 101.6);
     expect(result.exit).toBe(false);
+  });
+});
+
+describe('deriveClientOrderId', () => {
+  it('is deterministic for identical inputs', () => {
+    const a = deriveClientOrderId({
+      purpose: 'entry',
+      token: 'AAVE',
+      mode: 'macro',
+      seed: '2026-06-19T21:00:00Z',
+    });
+    const b = deriveClientOrderId({
+      purpose: 'entry',
+      token: 'AAVE',
+      mode: 'macro',
+      seed: '2026-06-19T21:00:00Z',
+    });
+    expect(a).toBe(b);
+    expect(a.startsWith('hzn-')).toBe(true);
+    expect(a.length).toBeLessThanOrEqual(64);
+  });
+
+  it('produces different IDs for different seeds', () => {
+    const a = deriveClientOrderId({
+      purpose: 'entry',
+      token: 'AAVE',
+      mode: 'macro',
+      seed: 'A',
+    });
+    const b = deriveClientOrderId({
+      purpose: 'entry',
+      token: 'AAVE',
+      mode: 'macro',
+      seed: 'B',
+    });
+    expect(a).not.toBe(b);
+  });
+
+  it('separates entry from exit for the same position', () => {
+    const entry = deriveClientOrderId({
+      purpose: 'entry',
+      token: 'AAVE',
+      mode: 'macro',
+      positionId: 42,
+      seed: 't',
+    });
+    const exit = deriveClientOrderId({
+      purpose: 'manual_exit',
+      token: 'AAVE',
+      mode: 'macro',
+      positionId: 42,
+      seed: 't',
+    });
+    expect(entry).not.toBe(exit);
   });
 });

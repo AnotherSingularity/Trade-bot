@@ -1,9 +1,13 @@
 import { z } from 'zod';
 import type { PaginatedTrades, TradeHistorySummary } from '@horizon/shared';
-import { getTradeSummary, getTrades, serializeTrade } from '../db/queries';
+import { getRoundTrips, getRoundTripSummary, roundTripToTradeDTO } from '../db/queries';
 import { protectedProcedure, router } from '../lib/trpc';
 
-/** Trade history with infinite-scroll pagination + filter tabs + summary. */
+/**
+ * Trade history — Phase 0 sources counts, win rate, and P&L from `round_trips`.
+ * Each round-trip is ONE completed position; entry+exit are not double-counted.
+ * Flats (zero P&L) are counted as neither wins nor losses in `winRate`.
+ */
 export const historyRouter = router({
   list: protectedProcedure
     .input(
@@ -14,29 +18,31 @@ export const historyRouter = router({
       }),
     )
     .query(async ({ input }): Promise<PaginatedTrades> => {
-      const { rows, nextCursor } = await getTrades({
+      const { rows, nextCursor } = await getRoundTrips({
         filter: input.filter,
         cursor: input.cursor ?? null,
         limit: input.limit,
       });
-      const s = await getTradeSummary();
+      const s = await getRoundTripSummary();
+      const denom = s.wins + s.losses;
       const summary: TradeHistorySummary = {
         totalTrades: s.totalTrades,
         wins: s.wins,
         losses: s.losses,
-        winRate: s.totalTrades > 0 ? (s.wins / (s.wins + s.losses || 1)) * 100 : 0,
+        winRate: denom > 0 ? (s.wins / denom) * 100 : 0,
         totalPnlDollars: s.totalPnlDollars,
       };
-      return { trades: rows.map(serializeTrade), nextCursor, summary };
+      return { trades: rows.map(roundTripToTradeDTO), nextCursor, summary };
     }),
 
   summary: protectedProcedure.query(async (): Promise<TradeHistorySummary> => {
-    const s = await getTradeSummary();
+    const s = await getRoundTripSummary();
+    const denom = s.wins + s.losses;
     return {
       totalTrades: s.totalTrades,
       wins: s.wins,
       losses: s.losses,
-      winRate: s.totalTrades > 0 ? (s.wins / (s.wins + s.losses || 1)) * 100 : 0,
+      winRate: denom > 0 ? (s.wins / denom) * 100 : 0,
       totalPnlDollars: s.totalPnlDollars,
     };
   }),

@@ -6,6 +6,7 @@ import { PositionCard } from '../../components/trading/PositionCard';
 import { ActivityFeedItem } from '../../components/trading/ActivityFeedItem';
 import { MarketWindowBadge } from '../../components/trading/MarketWindowBadge';
 import { BotControlBar } from '../../components/trading/BotControlBar';
+import { SafetyBanner } from '../../components/trading/SafetyBanner';
 import { SectionHeader } from '../../components/ui/SectionHeader';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { useBotStatus } from '../../hooks/useBotStatus';
@@ -24,6 +25,7 @@ export default function DashboardScreen() {
   return (
     <ErrorBoundary>
       <SafeAreaView style={styles.container} edges={['top']}>
+        <SafetyBanner status={bot.status} />
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.topRow}>
             <MarketWindowBadge window={bot.status?.marketWindow} />
@@ -39,10 +41,12 @@ export default function DashboardScreen() {
               isRunning={bot.isRunning}
               isPaused={bot.isPaused}
               isScanning={bot.isScanning}
+              isLive={bot.isLive}
               onStart={bot.start}
               onStop={bot.stop}
               onPause={bot.pause}
               onScanNow={bot.scanNow}
+              onEmergencyKill={bot.emergencyKill}
             />
           </View>
 

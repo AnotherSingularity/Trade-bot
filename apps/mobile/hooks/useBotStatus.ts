@@ -1,3 +1,4 @@
+import { Alert } from 'react-native';
 import { trpc } from '../lib/trpc';
 import { useBotStore } from '../store/botStore';
 
@@ -24,6 +25,7 @@ export function useBotStatus() {
 
   const start = trpc.trading.start.useMutation({
     onMutate: () => setOptimisticRunning(true),
+    onError: (err) => Alert.alert('Start blocked', err.message),
     onSettled,
   });
   const stop = trpc.trading.stop.useMutation({
@@ -37,19 +39,30 @@ export function useBotStatus() {
   const scanNow = trpc.trading.scanNow.useMutation({
     onSettled: () => utils.trading.activity.invalidate(),
   });
+  const emergencyKill = trpc.trading.emergencyKill.useMutation({
+    onSuccess: (r) =>
+      Alert.alert(
+        'Emergency kill result',
+        `Attempted ${r.attempted} · closed ${r.closed} · pending ${r.pending} · failed ${r.failed}`,
+      ),
+    onSettled,
+  });
 
   const isRunning = optimisticRunning ?? status.data?.isRunning ?? false;
   const isPaused = optimisticPaused ?? status.data?.isPaused ?? false;
+  const isLive = !(status.data?.dryRun ?? true);
 
   return {
     status: status.data,
     isLoading: status.isLoading,
     isRunning,
     isPaused,
+    isLive,
     start: () => start.mutate(),
     stop: () => stop.mutate(),
     pause: () => pause.mutate(),
     scanNow: () => scanNow.mutate(),
+    emergencyKill: () => emergencyKill.mutate(),
     isScanning: scanNow.isPending,
   };
 }

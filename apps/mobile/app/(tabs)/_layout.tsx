@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Redirect, Tabs } from 'expo-router';
 import { Text, View } from 'react-native';
 import { getToken } from '../../lib/api';
+import { subscribeToUnauthorized } from '../../lib/trpc';
 import { theme } from '../../theme';
 
 /** Simple icon — a label glyph keeps the bundle lean (no icon font dependency). */
@@ -17,6 +18,9 @@ export default function TabsLayout() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   useEffect(() => {
     getToken().then((t) => setAuthed(Boolean(t)));
+    // Any 401/403 from the tRPC client clears the token and boots the user
+    // back to the login screen (Phase 0 auto-reauth requirement).
+    return subscribeToUnauthorized(() => setAuthed(false));
   }, []);
 
   if (authed === null) return null; // still resolving token

@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { ConnectionTestResult } from '@horizon/shared';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
+import { SafetyBanner } from '../../components/trading/SafetyBanner';
 import { SectionHeader } from '../../components/ui/SectionHeader';
 import { trpc } from '../../lib/trpc';
 import { useAuth } from '../../hooks/useAuth';
@@ -18,6 +19,7 @@ import { theme } from '../../theme';
 export default function SettingsScreen() {
   const { logout } = useAuth();
   const info = trpc.settings.info.useQuery();
+  const status = trpc.trading.status.useQuery(undefined, { refetchInterval: 15_000 });
   const [result, setResult] = useState<ConnectionTestResult | null>(null);
   const test = trpc.settings.testConnection.useMutation({
     onSuccess: (data) => setResult(data),
@@ -26,6 +28,7 @@ export default function SettingsScreen() {
   return (
     <ErrorBoundary>
       <SafeAreaView style={styles.container} edges={['top']}>
+        <SafetyBanner status={status.data} />
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.title}>SETTINGS</Text>
 

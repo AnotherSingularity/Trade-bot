@@ -1,6 +1,7 @@
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
+import { SafetyBanner } from '../../components/trading/SafetyBanner';
 import { TokenRow } from '../../components/trading/TokenRow';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { trpc } from '../../lib/trpc';
@@ -9,6 +10,7 @@ import { theme } from '../../theme';
 
 export default function TokensScreen() {
   const utils = trpc.useUtils();
+  const status = trpc.trading.status.useQuery(undefined, { refetchInterval: 15_000 });
   const tokens = trpc.tokens.list.useQuery(undefined, { refetchInterval: 15_000 });
   const volumeFilter = trpc.tokens.volumeFilter.useQuery();
   const setActive = trpc.tokens.setActive.useMutation({
@@ -18,6 +20,7 @@ export default function TokensScreen() {
   return (
     <ErrorBoundary>
       <SafeAreaView style={styles.container} edges={['top']}>
+        <SafetyBanner status={status.data} />
         <View style={styles.header}>
           <Text style={styles.title}>TOKEN UNIVERSE</Text>
           <View style={styles.filterBadge}>

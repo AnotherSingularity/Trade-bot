@@ -3,33 +3,70 @@ import { parseSignal } from '../src/trading/claude';
 
 describe('parseSignal', () => {
   it('parses a clean JSON response', () => {
-    const result = parseSignal('{"confidence": 0.81, "shouldEnter": true, "reason": "Strong setup"}');
-    expect(result.confidence).toBeCloseTo(0.81);
-    expect(result.shouldEnter).toBe(true);
-    expect(result.reason).toBe('Strong setup');
+    const r = parseSignal('{"confidence": 0.81, "shouldEnter": true, "reason": "Strong setup"}');
+    expect(r.confidence).toBeCloseTo(0.81);
+    expect(r.shouldEnter).toBe(true);
+    expect(r.reason).toBe('Strong setup');
   });
 
-  it('extracts JSON wrapped in prose', () => {
-    const result = parseSignal(
-      'Here is my assessment: {"confidence": 0.4, "shouldEnter": false, "reason": "Weak volume"} hope that helps',
+  it('extracts the FIRST JSON object when wrapped in prose', () => {
+    const r = parseSignal(
+      'Assessment: {"confidence": 0.4, "shouldEnter": false, "reason": "Weak volume"} extra {ignored:1}',
     );
-    expect(result.shouldEnter).toBe(false);
-    expect(result.confidence).toBeCloseTo(0.4);
+    expect(r.shouldEnter).toBe(false);
+    expect(r.confidence).toBeCloseTo(0.4);
+    expect(r.reason).toBe('Weak volume');
   });
 
-  it('clamps confidence to 0..1', () => {
-    expect(parseSignal('{"confidence": 1.5, "shouldEnter": true, "reason": "x"}').confidence).toBe(1);
-    expect(parseSignal('{"confidence": -2, "shouldEnter": false, "reason": "x"}').confidence).toBe(0);
+  it('REJECTS the string "false" as shouldEnter (Phase-0 hardened parser)', () => {
+    // The old Boolean("false") coerced this to true and would have entered the
+    // trade. The strict schema now refuses it and fails closed.
+    const r = parseSignal(
+      '{"confidence": 0.9, "shouldEnter": "false", "reason": "coerced string"}',
+    );
+    expect(r.shouldEnter).toBe(false);
+    expect(r.confidence).toBe(0);
+    expect(r.reason).toMatch(/schema violation/i);
   });
 
-  it('falls back safely on unparseable input', () => {
-    const result = parseSignal('no json here');
-    expect(result.shouldEnter).toBe(false);
-    expect(result.confidence).toBe(0);
+  it('REJECTS the string "true" as shouldEnter', () => {
+    const r = parseSignal(
+      '{"confidence": 0.9, "shouldEnter": "true", "reason": "coerced string"}',
+    );
+    expect(r.shouldEnter).toBe(false);
+    expect(r.reason).toMatch(/schema violation/i);
   });
 
-  it('falls back safely on malformed json', () => {
-    const result = parseSignal('{confidence: broken,,}');
-    expect(result.shouldEnter).toBe(false);
+  it('rejects confidence outside 0..1', () => {
+    expect(parseSignal('{"confidence": 1.5, "shouldEnter": true, "reason": "x"}').shouldEnter).toBe(
+      false,
+    );
+    expect(
+      parseSignal('{"confidence": -0.1, "shouldEnter": true, "reason": "x"}').shouldEnter,
+    ).toBe(false);
+  });
+
+  it('rejects non-finite confidence', () => {
+    expect(parseSignal('{"confidence": null, "shouldEnter": true, "reason": "x"}').shouldEnter).toBe(
+      false,
+    );
+  });
+
+  it('rejects empty reason', () => {
+    expect(parseSignal('{"confidence": 0.5, "shouldEnter": true, "reason": ""}').shouldEnter).toBe(
+      false,
+    );
+  });
+
+  it('fails closed on missing JSON', () => {
+    expect(parseSignal('no json here').shouldEnter).toBe(false);
+  });
+
+  it('fails closed on malformed JSON', () => {
+    expect(parseSignal('{confidence: broken,,}').shouldEnter).toBe(false);
+  });
+
+  it('fails closed on missing shouldEnter field', () => {
+    expect(parseSignal('{"confidence": 0.9, "reason": "x"}').shouldEnter).toBe(false);
   });
 });

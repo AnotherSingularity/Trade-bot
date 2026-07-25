@@ -1,14 +1,22 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { CLAUDE_MODEL, type ClaudeSignal, type TradingMode } from '@horizon/shared';
+import { z } from 'zod';
+import { CLAUDE_MODEL, STRATEGY_VERSION, type ClaudeSignal, type TradingMode } from '@horizon/shared';
 import { ENV } from '../env';
 import type { TokenSignals } from './modes';
 
 /**
- * Anthropic Claude signal evaluation.
+ * Anthropic Claude signal evaluation — Phase 0 hardened parser.
  *
- * Claude acts as a final confirmation layer: given the technical signals that
- * already passed the mode's threshold, it returns a confidence score (0..1) and
- * a short human-readable rationale that is stored alongside each trade.
+ * Changes vs. the original implementation:
+ *   • Response schema validated with zod. `shouldEnter` must be a JSON boolean;
+ *     the string "false" is REJECTED (previous Boolean() coerced it to true).
+ *   • Confidence must be a finite number in [0..1].
+ *   • Reason must be a bounded non-empty string.
+ *   • Any schema violation, timeout, or malformed response fails CLOSED
+ *     (`shouldEnter=false, confidence=0`) with a diagnostic reason.
+ *   • JSON extraction uses a non-greedy regex so trailing prose doesn't
+ *     accidentally swallow an unrelated brace pair.
+ *   • Records the exact model id + strategy version alongside each decision.
  */
 
 let client: Anthropic | null = null;
@@ -32,6 +40,7 @@ Confidence is your probability that this trade reaches its take-profit before it
 function buildUserPrompt(mode: TradingMode, signals: TokenSignals): string {
   return [
     `Mode: ${mode}`,
+    `Strategy version: ${STRATEGY_VERSION}`,
     `Token: ${signals.token}`,
     `Price: ${signals.price}`,
     `24h volume (USD): ${signals.volume24h}`,
@@ -47,43 +56,92 @@ function buildUserPrompt(mode: TradingMode, signals: TokenSignals): string {
   ].join('\n');
 }
 
+const CLAUDE_TIMEOUT_MS = 15_000;
+
+export interface ClaudeDecision extends ClaudeSignal {
+  model: string;
+  strategyVersion: string;
+}
+
 export async function evaluateSignal(
   mode: TradingMode,
   signals: TokenSignals,
-): Promise<ClaudeSignal> {
-  const msg = await getClient().messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 256,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: buildUserPrompt(mode, signals) }],
-  });
+): Promise<ClaudeDecision> {
+  try {
+    const msg = await getClient().messages.create(
+      {
+        model: CLAUDE_MODEL,
+        max_tokens: 256,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: buildUserPrompt(mode, signals) }],
+      },
+      { timeout: CLAUDE_TIMEOUT_MS },
+    );
 
-  const text = msg.content
-    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-    .map((b) => b.text)
-    .join('')
-    .trim();
+    const text = msg.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('')
+      .trim();
 
-  return parseSignal(text);
+    const parsed = parseSignal(text);
+    return { ...parsed, model: CLAUDE_MODEL, strategyVersion: STRATEGY_VERSION };
+  } catch (err) {
+    // Fail closed on any transport/timeout/rate-limit issue.
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      confidence: 0,
+      shouldEnter: false,
+      reason: `claude call failed: ${msg}`,
+      model: CLAUDE_MODEL,
+      strategyVersion: STRATEGY_VERSION,
+    };
+  }
 }
 
-/** Tolerant JSON extraction so a stray prose wrapper doesn't break parsing. */
+// ---------------------------------------------------------------------------
+// Strict schema — the critical correctness fix.
+// ---------------------------------------------------------------------------
+
+const SignalSchema = z.object({
+  confidence: z
+    .number()
+    .finite()
+    .min(0)
+    .max(1),
+  // MUST be a JSON boolean. The string "false" was previously coerced to true
+  // by `Boolean(...)` — that bug is why this uses `z.boolean()` (strict) with
+  // no coercion.
+  shouldEnter: z.boolean(),
+  reason: z.string().min(1).max(500),
+});
+
+/**
+ * Extracts and validates the first plausible JSON object in `text`.
+ * Fails closed on ANY problem.
+ */
 export function parseSignal(text: string): ClaudeSignal {
-  const match = text.match(/\{[\s\S]*\}/);
+  // Non-greedy match so `{"a":1} extra {other:2}` returns the first object.
+  const match = text.match(/\{[\s\S]*?\}/);
   if (!match) {
-    return { confidence: 0, shouldEnter: false, reason: 'Unparseable model response' };
+    return { confidence: 0, shouldEnter: false, reason: 'no json in response' };
   }
+  let raw: unknown;
   try {
-    const parsed = JSON.parse(match[0]) as Partial<ClaudeSignal>;
-    const confidence = Math.max(0, Math.min(1, Number(parsed.confidence ?? 0)));
-    return {
-      confidence,
-      shouldEnter: Boolean(parsed.shouldEnter),
-      reason: typeof parsed.reason === 'string' ? parsed.reason : 'No reason provided',
-    };
+    raw = JSON.parse(match[0]);
   } catch {
-    return { confidence: 0, shouldEnter: false, reason: 'Invalid JSON in model response' };
+    return { confidence: 0, shouldEnter: false, reason: 'invalid json' };
   }
+  const parsed = SignalSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return {
+      confidence: 0,
+      shouldEnter: false,
+      reason: `schema violation: ${issue?.path.join('.') ?? '?'} ${issue?.message ?? ''}`,
+    };
+  }
+  return parsed.data;
 }
 
 export async function testConnection(): Promise<{ connected: boolean; message: string }> {
@@ -91,11 +149,10 @@ export async function testConnection(): Promise<{ connected: boolean; message: s
     return { connected: false, message: 'Anthropic API key not configured' };
   }
   try {
-    await getClient().messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: 8,
-      messages: [{ role: 'user', content: 'ping' }],
-    });
+    await getClient().messages.create(
+      { model: CLAUDE_MODEL, max_tokens: 8, messages: [{ role: 'user', content: 'ping' }] },
+      { timeout: 5_000 },
+    );
     return { connected: true, message: `Connected — model ${CLAUDE_MODEL}` };
   } catch (err) {
     return { connected: false, message: err instanceof Error ? err.message : 'Unknown error' };
