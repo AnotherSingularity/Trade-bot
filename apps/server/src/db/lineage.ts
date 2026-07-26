@@ -4,6 +4,10 @@ import { db } from './index';
 import {
   candidateContextDecisions,
   candidateRiskDecisions,
+  championChallengerOutcomeComparisons,
+  observerIncrementalAttribution,
+  unifiedChallengerDecisions,
+  unifiedChallengerEvidence,
   challengerRoutingDecisions,
   championChallengerRoutingComparisons,
   championContextComparisons,
@@ -68,8 +72,44 @@ import {
   tradeFlowWindows,
   universeSnapshots,
   type CandidateContextDecisionRow,
+  type ChallengerEvaluationRow,
+  type ChallengerVersionRow,
+  type ChampionChallengerOutcomeComparisonRow,
   type ChampionContextComparisonRow,
   type ChampionMicrostructureComparisonRow,
+  type ClaudeAttributionSnapshotRow,
+  type CpcvDefinitionRow,
+  type CpcvPathFoldRow,
+  type CpcvPathResultRow,
+  type CpcvPathRow,
+  type DatasetDefinitionRow,
+  type DatasetIntegrityCheckRow,
+  type DatasetVersionRow,
+  type DeflatedSharpeEvaluationRow,
+  type ExperimentRunRow,
+  type KellyActivationEvaluationRow,
+  type ModelPromotionDecisionRow,
+  type ObserverIncrementalAttributionRow,
+  type PboCandidateRankingRow,
+  type PboEvaluationRow,
+  type PboPartitionResultRow,
+  type PromotionCriteriaRow,
+  type PromotionEvidenceBundleRow,
+  type ResearchExperimentRow,
+  type RollbackRecordRow,
+  type StatisticalAuditResultRow,
+  type StatisticalAuditRow,
+  type StatisticalReferenceVectorRow,
+  type UnifiedChallengerDecisionRow,
+  type UnifiedChallengerEvidenceRow,
+  type ValidationEmbargoRow,
+  type ValidationFoldMembershipRow,
+  type ValidationFoldRow,
+  type ValidationIncidentRow,
+  type ValidationMetricRow,
+  type ValidationMetricSliceRow,
+  type ValidationSliceFailureRow,
+  type ValidationSplitPolicyRow,
   type ContextEnsembleEvidenceRow,
   type ContextIncidentRow,
   type ContextObservationRow,
@@ -841,6 +881,51 @@ export interface ResearchObserverAggregate {
   };
   microstructure: MicrostructureAggregate;
   context: ContextAggregate;
+  validation: ValidationAggregate;
+}
+
+/**
+ * Phase 2F §S — Validation aggregate for the audit route. Loads
+ * INDEPENDENTLY of Phase 2A/2B/2C/2D/2E records where foreign keys
+ * permit.
+ */
+export interface ValidationAggregate {
+  datasetDefinition: DatasetDefinitionRow | null;
+  datasetVersion: DatasetVersionRow | null;
+  datasetIntegrityChecks: DatasetIntegrityCheckRow[];
+  experiment: ResearchExperimentRow | null;
+  experimentRun: ExperimentRunRow | null;
+  validationSplitPolicies: ValidationSplitPolicyRow[];
+  validationFolds: ValidationFoldRow[];
+  validationFoldMemberships: ValidationFoldMembershipRow[];
+  validationEmbargoes: ValidationEmbargoRow[];
+  cpcvDefinition: CpcvDefinitionRow | null;
+  cpcvPaths: CpcvPathRow[];
+  cpcvPathFolds: CpcvPathFoldRow[];
+  cpcvPathResults: CpcvPathResultRow[];
+  validationMetrics: ValidationMetricRow[];
+  validationMetricSlices: ValidationMetricSliceRow[];
+  validationSliceFailures: ValidationSliceFailureRow[];
+  pboEvaluation: PboEvaluationRow | null;
+  pboCandidateRankings: PboCandidateRankingRow[];
+  pboPartitionResults: PboPartitionResultRow[];
+  dsrEvaluation: DeflatedSharpeEvaluationRow | null;
+  statisticalAudits: StatisticalAuditRow[];
+  statisticalReferenceVectors: StatisticalReferenceVectorRow[];
+  statisticalAuditResults: StatisticalAuditResultRow[];
+  unifiedChallengerDecision: UnifiedChallengerDecisionRow | null;
+  unifiedChallengerEvidence: UnifiedChallengerEvidenceRow[];
+  observerIncrementalAttribution: ObserverIncrementalAttributionRow[];
+  championChallengerOutcomeComparison: ChampionChallengerOutcomeComparisonRow | null;
+  claudeAttributionSnapshots: ClaudeAttributionSnapshotRow[];
+  challengerVersion: ChallengerVersionRow | null;
+  challengerEvaluation: ChallengerEvaluationRow | null;
+  promotionCriteria: PromotionCriteriaRow | null;
+  promotionEvidenceBundle: PromotionEvidenceBundleRow | null;
+  modelPromotionDecision: ModelPromotionDecisionRow | null;
+  rollbackRecords: RollbackRecordRow[];
+  kellyActivationEvaluations: KellyActivationEvaluationRow[];
+  validationIncidents: ValidationIncidentRow[];
 }
 
 /**
@@ -899,11 +984,12 @@ async function loadResearchObserverChain(
     .orderBy(desc(universeSnapshots.observedAt))
     .limit(1);
   if (!snapshot) {
-    // No Phase 2A universe snapshot exists, but Phase 2C/2D/2E data may still
+    // No Phase 2A universe snapshot exists, but Phase 2C/2D/2E/2F data may still
     // be present. Load them independently.
     const portfolioRisk = await loadPortfolioRiskForChain(chain.id);
     const microstructure = await loadMicrostructureForChain(chain.id);
     const context = await loadContextForChain(chain.id);
+    const validation = await loadValidationForChain(chain.id);
     return {
       snapshot: null,
       hygiene: null,
@@ -924,6 +1010,7 @@ async function loadResearchObserverChain(
       portfolioRisk,
       microstructure,
       context,
+      validation,
     };
   }
   const [hygiene] = await db
@@ -1064,6 +1151,7 @@ async function loadResearchObserverChain(
   const portfolioRisk = await loadPortfolioRiskForChain(chain.id);
   const microstructure = await loadMicrostructureForChain(chain.id);
   const context = await loadContextForChain(chain.id);
+  const validation = await loadValidationForChain(chain.id);
 
   return {
     snapshot,
@@ -1085,6 +1173,82 @@ async function loadResearchObserverChain(
     portfolioRisk,
     microstructure,
     context,
+    validation,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2F §S — Validation aggregate loader.
+// Loads independently of Phase 2A/2B/2C/2D/2E records where FKs permit.
+// ---------------------------------------------------------------------------
+
+async function loadValidationForChain(chainId: number): Promise<ValidationAggregate> {
+  const empty: ValidationAggregate = {
+    datasetDefinition: null,
+    datasetVersion: null,
+    datasetIntegrityChecks: [],
+    experiment: null,
+    experimentRun: null,
+    validationSplitPolicies: [],
+    validationFolds: [],
+    validationFoldMemberships: [],
+    validationEmbargoes: [],
+    cpcvDefinition: null,
+    cpcvPaths: [],
+    cpcvPathFolds: [],
+    cpcvPathResults: [],
+    validationMetrics: [],
+    validationMetricSlices: [],
+    validationSliceFailures: [],
+    pboEvaluation: null,
+    pboCandidateRankings: [],
+    pboPartitionResults: [],
+    dsrEvaluation: null,
+    statisticalAudits: [],
+    statisticalReferenceVectors: [],
+    statisticalAuditResults: [],
+    unifiedChallengerDecision: null,
+    unifiedChallengerEvidence: [],
+    observerIncrementalAttribution: [],
+    championChallengerOutcomeComparison: null,
+    claudeAttributionSnapshots: [],
+    challengerVersion: null,
+    challengerEvaluation: null,
+    promotionCriteria: null,
+    promotionEvidenceBundle: null,
+    modelPromotionDecision: null,
+    rollbackRecords: [],
+    kellyActivationEvaluations: [],
+    validationIncidents: [],
+  };
+  const [unified] = await db
+    .select()
+    .from(unifiedChallengerDecisions)
+    .where(eq(unifiedChallengerDecisions.decisionChainId, chainId))
+    .limit(1);
+  const attribution = await db
+    .select()
+    .from(observerIncrementalAttribution)
+    .where(eq(observerIncrementalAttribution.decisionChainId, chainId));
+  const [comparison] = await db
+    .select()
+    .from(championChallengerOutcomeComparisons)
+    .where(eq(championChallengerOutcomeComparisons.decisionChainId, chainId))
+    .limit(1);
+  if (!unified && attribution.length === 0 && !comparison) return empty;
+  let unifiedEvidence: UnifiedChallengerEvidenceRow[] = [];
+  if (unified) {
+    unifiedEvidence = await db
+      .select()
+      .from(unifiedChallengerEvidence)
+      .where(eq(unifiedChallengerEvidence.unifiedChallengerDecisionId, unified.id));
+  }
+  return {
+    ...empty,
+    unifiedChallengerDecision: unified ?? null,
+    unifiedChallengerEvidence: unifiedEvidence,
+    observerIncrementalAttribution: attribution,
+    championChallengerOutcomeComparison: comparison ?? null,
   };
 }
 

@@ -4906,6 +4906,1109 @@ export const contextIncidents = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Phase 2F — validation, anti-overfitting, attribution + promotion
+// ---------------------------------------------------------------------------
+
+const DATASET_SOURCE_CATEGORY = [
+  'synthetic_fixture', 'deterministic_replay', 'historical_replay',
+  'captured_live_shadow', 'prospective_shadow',
+] as const;
+
+const VALIDATION_STATUS_VALUES = ['draft', 'observer', 'validated_for_research', 'deprecated', 'disabled'] as const;
+
+const EXPERIMENT_STATUS_VALUES = ['registered', 'running', 'completed', 'failed', 'invalidated', 'superseded'] as const;
+
+const VALIDATION_SPLIT_KIND_VALUES = [
+  'expanding_walk_forward','rolling_walk_forward','anchored_walk_forward',
+  'purged_k_fold','combinatorial_purged_cross_validation','final_holdout',
+] as const;
+
+const VALIDATION_FOLD_STATUS = ['pending', 'completed', 'empty', 'failed', 'invalidated'] as const;
+
+const CPCV_PATH_STATUS = ['pending', 'completed', 'empty', 'failed'] as const;
+
+const CPCV_PATH_RESULT_STATUS = ['valid', 'insufficient_samples', 'failed', 'invalid'] as const;
+
+const METRIC_SCOPE_VALUES = ['aggregate', 'per_fold', 'per_path', 'per_product', 'per_regime'] as const;
+
+const METRIC_STATUS_VALUES = ['valid', 'insufficient_samples', 'failed', 'invalid'] as const;
+
+const SLICE_STATUS_VALUES = ['valid', 'insufficient_samples', 'catastrophic', 'failed'] as const;
+
+const SLICE_FAILURE_SEVERITY = ['warning', 'high', 'catastrophic'] as const;
+
+const PBO_CONFIDENCE_STATUS = ['valid', 'insufficient_candidates', 'insufficient_partitions', 'failed'] as const;
+
+const DSR_STATUS_VALUES = ['valid', 'insufficient_samples', 'invalid_variance', 'failed'] as const;
+
+const STATISTICAL_AUDIT_STATUS = [
+  'canonical','audited_approximation','research_heuristic',
+  'known_deviation','failed_audit','deferred',
+] as const;
+
+const UNIFIED_CHALLENGER_DECISION = [
+  'agree_with_champion', 'reduce', 'reject', 'abstain', 'conflict', 'data_failure',
+] as const;
+
+const ATTRIBUTION_MODE_VALUES = [
+  'construction_only','deterministic_replay','historical_replay',
+  'captured_live_shadow','prospective_shadow',
+] as const;
+
+const CLAUDE_ATTRIBUTION_STATUS = [
+  'prospective_evidence_unavailable', 'insufficient_samples', 'pending', 'ready',
+] as const;
+
+const PROMOTION_DECISION_VALUES = ['approved', 'rejected', 'blocked', 'pending'] as const;
+
+const KELLY_ACTIVATION_OUTCOME = ['rejected_not_calibrated', 'disabled', 'deferred'] as const;
+
+const VALIDATION_INCIDENT_TYPES = [
+  'future_observation','future_label','revised_data_leak',
+  'overlapping_label_horizon','train_test_overlap','embargo_violation',
+  'final_holdout_contamination','product_survivorship','future_universe_selection',
+  'outcome_informed_exclusion','cost_model_version_leak','feature_version_mismatch',
+  'champion_challenger_version_mismatch','statistical_audit_failure','other',
+] as const;
+
+const VALIDATION_INCIDENT_SEVERITY = ['warning', 'high', 'blocking'] as const;
+
+export const datasetDefinitions = mysqlTable(
+  'dataset_definitions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    datasetKey: varchar('datasetKey', { length: 64 }).notNull(),
+    description: text('description').notNull(),
+    sourceCategory: mysqlEnum('sourceCategory', DATASET_SOURCE_CATEGORY).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyUq: uniqueIndex('ds_def_key_uq').on(t.datasetKey),
+  }),
+);
+
+export const datasetVersions = mysqlTable(
+  'dataset_versions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    datasetDefinitionId: int('datasetDefinitionId').notNull(),
+    datasetVersion: varchar('datasetVersion', { length: 32 }).notNull(),
+    sourceCategory: mysqlEnum('sourceCategory', DATASET_SOURCE_CATEGORY).notNull(),
+    sourceIdentity: varchar('sourceIdentity', { length: 255 }).notNull(),
+    productUniverseHash: varchar('productUniverseHash', { length: 64 }).notNull(),
+    startTime: timestamp('startTime', { fsp: 3 }).notNull(),
+    endTime: timestamp('endTime', { fsp: 3 }).notNull(),
+    dataAvailabilityCutoff: timestamp('dataAvailabilityCutoff', { fsp: 3 }).notNull(),
+    featureVersions: varchar('featureVersions', { length: 500 }).notNull(),
+    fingerprintVersion: varchar('fingerprintVersion', { length: 32 }).notNull(),
+    regimeVersion: varchar('regimeVersion', { length: 32 }).notNull(),
+    riskPolicyVersion: varchar('riskPolicyVersion', { length: 32 }).notNull(),
+    microstructurePolicyVersion: varchar('microstructurePolicyVersion', { length: 32 }).notNull(),
+    contextPolicyVersion: varchar('contextPolicyVersion', { length: 32 }).notNull(),
+    costModelVersion: varchar('costModelVersion', { length: 32 }).notNull(),
+    fillModelVersion: varchar('fillModelVersion', { length: 32 }).notNull(),
+    labelVersion: varchar('labelVersion', { length: 32 }).notNull(),
+    exclusionPolicyVersion: varchar('exclusionPolicyVersion', { length: 32 }).notNull(),
+    codeCommit: varchar('codeCommit', { length: 64 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    verUq: uniqueIndex('ds_ver_uq').on(t.datasetDefinitionId, t.datasetVersion),
+    sourceIdx: index('ds_ver_source_idx').on(t.sourceCategory),
+    defFk: foreignKey({
+      name: 'ds_ver_def_fk',
+      columns: [t.datasetDefinitionId],
+      foreignColumns: [datasetDefinitions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const datasetMemberships = mysqlTable(
+  'dataset_memberships',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    datasetVersionId: int('datasetVersionId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    included: boolean('included').notNull().default(true),
+    reasonCode: varchar('reasonCode', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    memUq: uniqueIndex('ds_mem_uq').on(t.datasetVersionId, t.productId),
+    verFk: foreignKey({
+      name: 'ds_mem_ver_fk',
+      columns: [t.datasetVersionId],
+      foreignColumns: [datasetVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const datasetExclusions = mysqlTable(
+  'dataset_exclusions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    datasetVersionId: int('datasetVersionId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    exclusionReason: varchar('exclusionReason', { length: 255 }).notNull(),
+    exclusionKind: mysqlEnum('exclusionKind', ['a_priori', 'structural', 'operator_manual']).notNull(),
+    excludedAt: timestamp('excludedAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    verIdx: index('ds_exc_ver_idx').on(t.datasetVersionId),
+    verFk: foreignKey({
+      name: 'ds_exc_ver_fk',
+      columns: [t.datasetVersionId],
+      foreignColumns: [datasetVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const datasetIntegrityChecks = mysqlTable(
+  'dataset_integrity_checks',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    datasetVersionId: int('datasetVersionId').notNull(),
+    checkName: varchar('checkName', { length: 64 }).notNull(),
+    passed: boolean('passed').notNull(),
+    details: text('details'),
+    checkedAt: timestamp('checkedAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    verIdx: index('ds_ic_ver_idx').on(t.datasetVersionId, t.checkName),
+    verFk: foreignKey({
+      name: 'ds_ic_ver_fk',
+      columns: [t.datasetVersionId],
+      foreignColumns: [datasetVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const researchExperiments = mysqlTable(
+  'research_experiments',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    experimentKey: varchar('experimentKey', { length: 64 }).notNull(),
+    experimentVersion: varchar('experimentVersion', { length: 32 }).notNull(),
+    hypothesis: text('hypothesis').notNull(),
+    championVersion: varchar('championVersion', { length: 32 }).notNull(),
+    challengerVersion: varchar('challengerVersion', { length: 32 }).notNull(),
+    datasetVersionId: int('datasetVersionId').notNull(),
+    primaryMetric: varchar('primaryMetric', { length: 64 }).notNull(),
+    secondaryMetrics: varchar('secondaryMetrics', { length: 500 }).notNull(),
+    parameterSearchSpace: text('parameterSearchSpace').notNull(),
+    multipleTestingFamily: varchar('multipleTestingFamily', { length: 64 }).notNull(),
+    validationPolicyVersion: varchar('validationPolicyVersion', { length: 32 }).notNull(),
+    registeredAt: timestamp('registeredAt', { fsp: 3 }).notNull(),
+    registeredBy: varchar('registeredBy', { length: 64 }).notNull(),
+    codeCommit: varchar('codeCommit', { length: 64 }).notNull(),
+    randomSeed: bigint('randomSeed', { mode: 'number' }).notNull(),
+    status: mysqlEnum('status', EXPERIMENT_STATUS_VALUES).notNull().default('registered'),
+    failureReason: varchar('failureReason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('exp_key_ver_uq').on(t.experimentKey, t.experimentVersion),
+    statusIdx: index('exp_status_idx').on(t.status),
+    dsFk: foreignKey({
+      name: 'exp_ds_fk',
+      columns: [t.datasetVersionId],
+      foreignColumns: [datasetVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const experimentRuns = mysqlTable(
+  'experiment_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    experimentId: int('experimentId').notNull(),
+    startedAt: timestamp('startedAt', { fsp: 3 }).notNull(),
+    completedAt: timestamp('completedAt', { fsp: 3 }),
+    status: mysqlEnum('status', ['running', 'completed', 'failed', 'invalidated']).notNull().default('running'),
+    failureReason: varchar('failureReason', { length: 255 }),
+    foldsExecuted: int('foldsExecuted').notNull().default(0),
+    pathsExecuted: int('pathsExecuted').notNull().default(0),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    expIdx: index('exp_run_exp_idx').on(t.experimentId, t.startedAt),
+    expFk: foreignKey({
+      name: 'exp_run_exp_fk',
+      columns: [t.experimentId],
+      foreignColumns: [researchExperiments.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const experimentParameters = mysqlTable(
+  'experiment_parameters',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    experimentId: int('experimentId').notNull(),
+    parameterKey: varchar('parameterKey', { length: 64 }).notNull(),
+    parameterType: mysqlEnum('parameterType', ['scalar', 'categorical', 'vector', 'ordinal']).notNull(),
+    parameterSpace: text('parameterSpace').notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('exp_param_uq').on(t.experimentId, t.parameterKey),
+    expFk: foreignKey({
+      name: 'exp_param_exp_fk',
+      columns: [t.experimentId],
+      foreignColumns: [researchExperiments.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const experimentCandidateVersions = mysqlTable(
+  'experiment_candidate_versions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    experimentId: int('experimentId').notNull(),
+    candidateKey: varchar('candidateKey', { length: 64 }).notNull(),
+    candidateVersion: varchar('candidateVersion', { length: 32 }).notNull(),
+    parameterAssignment: text('parameterAssignment').notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('exp_cand_uq').on(t.experimentId, t.candidateKey, t.candidateVersion),
+    expFk: foreignKey({
+      name: 'exp_cand_exp_fk',
+      columns: [t.experimentId],
+      foreignColumns: [researchExperiments.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const validationSplitPolicies = mysqlTable(
+  'validation_split_policies',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyKey: varchar('policyKey', { length: 64 }).notNull(),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    splitKind: mysqlEnum('splitKind', VALIDATION_SPLIT_KIND_VALUES).notNull(),
+    description: text('description').notNull(),
+    purgeWindowMs: int('purgeWindowMs').notNull(),
+    embargoWindowMs: int('embargoWindowMs').notNull(),
+    labelHorizonMs: int('labelHorizonMs').notNull(),
+    configuration: text('configuration').notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', VALIDATION_STATUS_VALUES).notNull().default('observer'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('vsp_key_ver_uq').on(t.policyKey, t.policyVersion),
+  }),
+);
+
+export const validationFolds = mysqlTable(
+  'validation_folds',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    experimentRunId: int('experimentRunId').notNull(),
+    splitPolicyId: int('splitPolicyId').notNull(),
+    foldIndex: int('foldIndex').notNull(),
+    trainingStart: timestamp('trainingStart', { fsp: 3 }).notNull(),
+    trainingEnd: timestamp('trainingEnd', { fsp: 3 }).notNull(),
+    purgeStart: timestamp('purgeStart', { fsp: 3 }).notNull(),
+    purgeEnd: timestamp('purgeEnd', { fsp: 3 }).notNull(),
+    embargoStart: timestamp('embargoStart', { fsp: 3 }).notNull(),
+    embargoEnd: timestamp('embargoEnd', { fsp: 3 }).notNull(),
+    validationStart: timestamp('validationStart', { fsp: 3 }).notNull(),
+    validationEnd: timestamp('validationEnd', { fsp: 3 }).notNull(),
+    holdout: boolean('holdout').notNull().default(false),
+    status: mysqlEnum('status', VALIDATION_FOLD_STATUS).notNull().default('pending'),
+    sampleCount: int('sampleCount').notNull().default(0),
+    failureReason: varchar('failureReason', { length: 255 }),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdxUq: uniqueIndex('vf_run_idx_uq').on(t.experimentRunId, t.foldIndex),
+    statusIdx: index('vf_status_idx').on(t.status),
+    runFk: foreignKey({
+      name: 'vf_run_fk',
+      columns: [t.experimentRunId],
+      foreignColumns: [experimentRuns.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    polFk: foreignKey({
+      name: 'vf_pol_fk',
+      columns: [t.splitPolicyId],
+      foreignColumns: [validationSplitPolicies.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const validationFoldMemberships = mysqlTable(
+  'validation_fold_memberships',
+  {
+    id: bigint('id', { mode: 'number' }).autoincrement().primaryKey(),
+    foldId: int('foldId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    observationTimestamp: timestamp('observationTimestamp', { fsp: 3 }).notNull(),
+    roleInFold: mysqlEnum('roleInFold', ['training', 'validation', 'purged', 'embargoed']).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    foldIdx: index('vfm_fold_idx').on(t.foldId, t.roleInFold),
+    foldFk: foreignKey({
+      name: 'vfm_fold_fk',
+      columns: [t.foldId],
+      foreignColumns: [validationFolds.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const validationEmbargoes = mysqlTable(
+  'validation_embargoes',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    splitPolicyId: int('splitPolicyId').notNull(),
+    embargoKind: mysqlEnum('embargoKind', ['leading', 'trailing', 'both']).notNull(),
+    embargoWindowMs: int('embargoWindowMs').notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    polFk: foreignKey({
+      name: 've_pol_fk',
+      columns: [t.splitPolicyId],
+      foreignColumns: [validationSplitPolicies.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const cpcvDefinitions = mysqlTable(
+  'cpcv_definitions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    experimentId: int('experimentId').notNull(),
+    numberOfGroups: int('numberOfGroups').notNull(),
+    numberOfTestGroups: int('numberOfTestGroups').notNull(),
+    purgeWindowMs: int('purgeWindowMs').notNull(),
+    embargoWindowMs: int('embargoWindowMs').notNull(),
+    labelHorizonMs: int('labelHorizonMs').notNull(),
+    pathConstructionPolicy: varchar('pathConstructionPolicy', { length: 64 }).notNull(),
+    maximumPathCount: int('maximumPathCount').notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    expUq: uniqueIndex('cpcv_def_exp_uq').on(t.experimentId),
+    expFk: foreignKey({
+      name: 'cpcv_def_exp_fk',
+      columns: [t.experimentId],
+      foreignColumns: [researchExperiments.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const cpcvPaths = mysqlTable(
+  'cpcv_paths',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    cpcvDefinitionId: int('cpcvDefinitionId').notNull(),
+    pathIndex: int('pathIndex').notNull(),
+    testGroups: varchar('testGroups', { length: 255 }).notNull(),
+    trainingGroups: varchar('trainingGroups', { length: 255 }).notNull(),
+    pathHash: varchar('pathHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', CPCV_PATH_STATUS).notNull().default('pending'),
+    failureReason: varchar('failureReason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('cpcv_path_uq').on(t.cpcvDefinitionId, t.pathIndex),
+    statusIdx: index('cpcv_path_status_idx').on(t.status),
+    defFk: foreignKey({
+      name: 'cpcv_path_def_fk',
+      columns: [t.cpcvDefinitionId],
+      foreignColumns: [cpcvDefinitions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const cpcvPathFolds = mysqlTable(
+  'cpcv_path_folds',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    cpcvPathId: int('cpcvPathId').notNull(),
+    foldId: int('foldId').notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('cpcv_path_fold_uq').on(t.cpcvPathId, t.foldId),
+    pathFk: foreignKey({
+      name: 'cpcv_path_fold_path_fk',
+      columns: [t.cpcvPathId],
+      foreignColumns: [cpcvPaths.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    foldFk: foreignKey({
+      name: 'cpcv_path_fold_fold_fk',
+      columns: [t.foldId],
+      foreignColumns: [validationFolds.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const cpcvPathResults = mysqlTable(
+  'cpcv_path_results',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    cpcvPathId: int('cpcvPathId').notNull(),
+    netReturn: decimal('netReturn', { precision: 20, scale: 10 }),
+    netSharpe: decimal('netSharpe', { precision: 20, scale: 10 }),
+    maximumDrawdown: decimal('maximumDrawdown', { precision: 20, scale: 10 }),
+    sampleCount: int('sampleCount').notNull().default(0),
+    status: mysqlEnum('status', CPCV_PATH_RESULT_STATUS).notNull(),
+    failureReason: varchar('failureReason', { length: 255 }),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('cpcv_res_path_uq').on(t.cpcvPathId),
+    pathFk: foreignKey({
+      name: 'cpcv_res_path_fk',
+      columns: [t.cpcvPathId],
+      foreignColumns: [cpcvPaths.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const validationMetrics = mysqlTable(
+  'validation_metrics',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    experimentRunId: int('experimentRunId').notNull(),
+    metricKey: varchar('metricKey', { length: 64 }).notNull(),
+    metricScope: mysqlEnum('metricScope', METRIC_SCOPE_VALUES).notNull(),
+    value: decimal('value', { precision: 30, scale: 12 }),
+    unit: varchar('unit', { length: 32 }).notNull(),
+    netOfCosts: boolean('netOfCosts').notNull().default(true),
+    status: mysqlEnum('status', METRIC_STATUS_VALUES).notNull(),
+    sampleCount: int('sampleCount').notNull().default(0),
+    failureReason: varchar('failureReason', { length: 255 }),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('vm_run_key_uq').on(t.experimentRunId, t.metricKey, t.metricScope),
+    keyIdx: index('vm_key_idx').on(t.metricKey),
+    runFk: foreignKey({
+      name: 'vm_run_fk',
+      columns: [t.experimentRunId],
+      foreignColumns: [experimentRuns.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const validationMetricSlices = mysqlTable(
+  'validation_metric_slices',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    experimentRunId: int('experimentRunId').notNull(),
+    sliceKey: varchar('sliceKey', { length: 64 }).notNull(),
+    sliceValue: varchar('sliceValue', { length: 128 }).notNull(),
+    metricKey: varchar('metricKey', { length: 64 }).notNull(),
+    value: decimal('value', { precision: 30, scale: 12 }),
+    sampleCount: int('sampleCount').notNull().default(0),
+    status: mysqlEnum('status', SLICE_STATUS_VALUES).notNull(),
+    failureReason: varchar('failureReason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('vms_uq').on(t.experimentRunId, t.sliceKey, t.sliceValue, t.metricKey),
+    statusIdx: index('vms_status_idx').on(t.status),
+    runFk: foreignKey({
+      name: 'vms_run_fk',
+      columns: [t.experimentRunId],
+      foreignColumns: [experimentRuns.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const validationSliceFailures = mysqlTable(
+  'validation_slice_failures',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    experimentRunId: int('experimentRunId').notNull(),
+    sliceKey: varchar('sliceKey', { length: 64 }).notNull(),
+    sliceValue: varchar('sliceValue', { length: 128 }).notNull(),
+    failureReason: varchar('failureReason', { length: 255 }).notNull(),
+    severity: mysqlEnum('severity', SLICE_FAILURE_SEVERITY).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx: index('vsf_run_idx').on(t.experimentRunId, t.severity),
+    runFk: foreignKey({
+      name: 'vsf_run_fk',
+      columns: [t.experimentRunId],
+      foreignColumns: [experimentRuns.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const pboEvaluations = mysqlTable(
+  'pbo_evaluations',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    experimentId: int('experimentId').notNull(),
+    candidateCount: int('candidateCount').notNull(),
+    partitionCount: int('partitionCount').notNull(),
+    pboEstimate: decimal('pboEstimate', { precision: 10, scale: 8 }),
+    logitRank: decimal('logitRank', { precision: 20, scale: 10 }),
+    sampleCount: int('sampleCount').notNull(),
+    confidenceStatus: mysqlEnum('confidenceStatus', PBO_CONFIDENCE_STATUS).notNull(),
+    failureReason: varchar('failureReason', { length: 255 }),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('pbo_exp_uq').on(t.experimentId),
+    expFk: foreignKey({
+      name: 'pbo_exp_fk',
+      columns: [t.experimentId],
+      foreignColumns: [researchExperiments.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const pboCandidateRankings = mysqlTable(
+  'pbo_candidate_rankings',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    pboEvaluationId: int('pboEvaluationId').notNull(),
+    candidateKey: varchar('candidateKey', { length: 64 }).notNull(),
+    inSampleRank: int('inSampleRank').notNull(),
+    outOfSampleRank: int('outOfSampleRank').notNull(),
+    relativeRank: decimal('relativeRank', { precision: 10, scale: 8 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('pbo_rank_uq').on(t.pboEvaluationId, t.candidateKey),
+    evFk: foreignKey({
+      name: 'pbo_rank_ev_fk',
+      columns: [t.pboEvaluationId],
+      foreignColumns: [pboEvaluations.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const pboPartitionResults = mysqlTable(
+  'pbo_partition_results',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    pboEvaluationId: int('pboEvaluationId').notNull(),
+    partitionIndex: int('partitionIndex').notNull(),
+    bestInSampleCandidate: varchar('bestInSampleCandidate', { length: 64 }).notNull(),
+    bestInSampleValue: decimal('bestInSampleValue', { precision: 20, scale: 10 }),
+    outOfSampleValue: decimal('outOfSampleValue', { precision: 20, scale: 10 }),
+    medianOutOfSample: decimal('medianOutOfSample', { precision: 20, scale: 10 }),
+    logitScore: decimal('logitScore', { precision: 20, scale: 10 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('pbo_part_uq').on(t.pboEvaluationId, t.partitionIndex),
+    evFk: foreignKey({
+      name: 'pbo_part_ev_fk',
+      columns: [t.pboEvaluationId],
+      foreignColumns: [pboEvaluations.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const deflatedSharpeEvaluations = mysqlTable(
+  'deflated_sharpe_evaluations',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    experimentId: int('experimentId').notNull(),
+    observedSharpe: decimal('observedSharpe', { precision: 20, scale: 10 }),
+    deflatedSharpe: decimal('deflatedSharpe', { precision: 20, scale: 10 }),
+    numberOfTrials: int('numberOfTrials').notNull(),
+    sampleCount: int('sampleCount').notNull(),
+    returnInterval: varchar('returnInterval', { length: 32 }).notNull(),
+    annualizationFactor: decimal('annualizationFactor', { precision: 20, scale: 10 }).notNull(),
+    returnSkewness: decimal('returnSkewness', { precision: 20, scale: 10 }),
+    returnKurtosis: decimal('returnKurtosis', { precision: 20, scale: 10 }),
+    expectedMaximumSharpe: decimal('expectedMaximumSharpe', { precision: 20, scale: 10 }),
+    benchmarkSharpe: decimal('benchmarkSharpe', { precision: 20, scale: 10 }),
+    netOfCosts: boolean('netOfCosts').notNull().default(true),
+    status: mysqlEnum('status', DSR_STATUS_VALUES).notNull(),
+    failureReason: varchar('failureReason', { length: 255 }),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('dsr_exp_uq').on(t.experimentId),
+    expFk: foreignKey({
+      name: 'dsr_exp_fk',
+      columns: [t.experimentId],
+      foreignColumns: [researchExperiments.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const statisticalAudits = mysqlTable(
+  'statistical_audits',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    implementationKey: varchar('implementationKey', { length: 64 }).notNull(),
+    implementationVersion: varchar('implementationVersion', { length: 32 }).notNull(),
+    referenceDefinition: text('referenceDefinition').notNull(),
+    implementationStatus: mysqlEnum('implementationStatus', STATISTICAL_AUDIT_STATUS).notNull(),
+    knownDeviation: text('knownDeviation'),
+    minimumSamples: int('minimumSamples'),
+    numericalLimitations: text('numericalLimitations'),
+    failurePolicy: varchar('failurePolicy', { length: 64 }).notNull(),
+    referenceSourceIdentity: varchar('referenceSourceIdentity', { length: 255 }).notNull(),
+    auditVersion: varchar('auditVersion', { length: 32 }).notNull(),
+    auditedAt: timestamp('auditedAt', { fsp: 3 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('sa_key_ver_uq').on(t.implementationKey, t.implementationVersion),
+  }),
+);
+
+export const statisticalReferenceVectors = mysqlTable(
+  'statistical_reference_vectors',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    statisticalAuditId: int('statisticalAuditId').notNull(),
+    vectorKey: varchar('vectorKey', { length: 64 }).notNull(),
+    inputVector: text('inputVector').notNull(),
+    expectedOutput: text('expectedOutput').notNull(),
+    tolerance: decimal('tolerance', { precision: 20, scale: 10 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('srv_uq').on(t.statisticalAuditId, t.vectorKey),
+    auditFk: foreignKey({
+      name: 'srv_audit_fk',
+      columns: [t.statisticalAuditId],
+      foreignColumns: [statisticalAudits.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const statisticalAuditResults = mysqlTable(
+  'statistical_audit_results',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    statisticalAuditId: int('statisticalAuditId').notNull(),
+    referenceVectorId: int('referenceVectorId'),
+    observedOutput: text('observedOutput'),
+    deviation: decimal('deviation', { precision: 20, scale: 10 }),
+    passed: boolean('passed').notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    auditIdx: index('sar_audit_idx').on(t.statisticalAuditId, t.passed),
+    auditFk: foreignKey({
+      name: 'sar_audit_fk',
+      columns: [t.statisticalAuditId],
+      foreignColumns: [statisticalAudits.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    refFk: foreignKey({
+      name: 'sar_ref_fk',
+      columns: [t.referenceVectorId],
+      foreignColumns: [statisticalReferenceVectors.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const unifiedChallengerDecisions = mysqlTable(
+  'unified_challenger_decisions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    fingerprintSnapshotId: int('fingerprintSnapshotId'),
+    productRegimeSnapshotId: int('productRegimeSnapshotId'),
+    challengerRoutingDecisionId: int('challengerRoutingDecisionId'),
+    candidateRiskDecisionId: int('candidateRiskDecisionId'),
+    microstructureExecutionDecisionId: int('microstructureExecutionDecisionId'),
+    candidateContextDecisionId: int('candidateContextDecisionId'),
+    championDecisionId: int('championDecisionId'),
+    routeRecommendation: varchar('routeRecommendation', { length: 64 }).notNull(),
+    riskMultiplier: decimal('riskMultiplier', { precision: 6, scale: 4 }).notNull(),
+    microstructureMultiplier: decimal('microstructureMultiplier', { precision: 6, scale: 4 }).notNull(),
+    contextMultiplier: decimal('contextMultiplier', { precision: 6, scale: 4 }).notNull(),
+    finalObserverMultiplier: decimal('finalObserverMultiplier', { precision: 6, scale: 4 }).notNull(),
+    executionPreference: varchar('executionPreference', { length: 64 }),
+    decision: mysqlEnum('decision', UNIFIED_CHALLENGER_DECISION).notNull(),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }).notNull(),
+    hardRejections: varchar('hardRejections', { length: 500 }).notNull(),
+    conflicts: varchar('conflicts', { length: 500 }).notNull(),
+    missingEvidence: varchar('missingEvidence', { length: 500 }).notNull(),
+    reasonCodes: varchar('reasonCodes', { length: 500 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    expiresAt: timestamp('expiresAt', { fsp: 3 }),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainUq: uniqueIndex('ucd_chain_uq').on(t.decisionChainId),
+    decIdx: index('ucd_decision_idx').on(t.decision),
+    chainFk: foreignKey({
+      name: 'ucd_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const unifiedChallengerEvidence = mysqlTable(
+  'unified_challenger_evidence',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    unifiedChallengerDecisionId: int('unifiedChallengerDecisionId').notNull(),
+    evidenceKey: varchar('evidenceKey', { length: 64 }).notNull(),
+    evidenceKind: varchar('evidenceKind', { length: 64 }).notNull(),
+    contributionMultiplier: decimal('contributionMultiplier', { precision: 6, scale: 4 }),
+    reasonCode: varchar('reasonCode', { length: 64 }).notNull(),
+    details: text('details'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    ucdIdx: index('uce_ucd_idx').on(t.unifiedChallengerDecisionId),
+    ucdFk: foreignKey({
+      name: 'uce_ucd_fk',
+      columns: [t.unifiedChallengerDecisionId],
+      foreignColumns: [unifiedChallengerDecisions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const observerIncrementalAttribution = mysqlTable(
+  'observer_incremental_attribution',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    observerKey: varchar('observerKey', { length: 64 }).notNull(),
+    wouldHaveDecision: varchar('wouldHaveDecision', { length: 64 }).notNull(),
+    wouldHaveMultiplier: decimal('wouldHaveMultiplier', { precision: 6, scale: 4 }).notNull(),
+    informationCutoff: timestamp('informationCutoff', { fsp: 3 }).notNull(),
+    sourceCategory: mysqlEnum('sourceCategory', DATASET_SOURCE_CATEGORY).notNull(),
+    reasonCode: varchar('reasonCode', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('oia_chain_obs_uq').on(t.decisionChainId, t.observerKey),
+    chainFk: foreignKey({
+      name: 'oia_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const championChallengerOutcomeComparisons = mysqlTable(
+  'champion_challenger_outcome_comparisons',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    championOutcome: varchar('championOutcome', { length: 64 }).notNull(),
+    challengerOutcome: varchar('challengerOutcome', { length: 64 }).notNull(),
+    championNetPnl: decimal('championNetPnl', { precision: 30, scale: 10 }),
+    challengerNetPnl: decimal('challengerNetPnl', { precision: 30, scale: 10 }),
+    attributionMode: mysqlEnum('attributionMode', ATTRIBUTION_MODE_VALUES).notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainUq: uniqueIndex('ccoc_chain_uq').on(t.decisionChainId),
+    chainFk: foreignKey({
+      name: 'ccoc_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const claudeAttributionSnapshots = mysqlTable(
+  'claude_attribution_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    snapshotAt: timestamp('snapshotAt', { fsp: 3 }).notNull(),
+    datasetVersionId: int('datasetVersionId'),
+    approvalRate: decimal('approvalRate', { precision: 10, scale: 6 }),
+    rejectionRate: decimal('rejectionRate', { precision: 10, scale: 6 }),
+    abstentionRate: decimal('abstentionRate', { precision: 10, scale: 6 }),
+    netOutcomeConditional: decimal('netOutcomeConditional', { precision: 30, scale: 10 }),
+    falseApprovalRate: decimal('falseApprovalRate', { precision: 10, scale: 6 }),
+    falseRejectionRate: decimal('falseRejectionRate', { precision: 10, scale: 6 }),
+    incrementalNetContribution: decimal('incrementalNetContribution', { precision: 30, scale: 10 }),
+    status: mysqlEnum('status', CLAUDE_ATTRIBUTION_STATUS).notNull().default('prospective_evidence_unavailable'),
+    notes: text('notes'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index('cas_status_idx').on(t.status, t.snapshotAt),
+    dsFk: foreignKey({
+      name: 'cas_ds_fk',
+      columns: [t.datasetVersionId],
+      foreignColumns: [datasetVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const challengerVersions = mysqlTable(
+  'challenger_versions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    challengerKey: varchar('challengerKey', { length: 64 }).notNull(),
+    challengerVersion: varchar('challengerVersion', { length: 32 }).notNull(),
+    description: text('description').notNull(),
+    codeCommit: varchar('codeCommit', { length: 64 }).notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', VALIDATION_STATUS_VALUES).notNull().default('observer'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('cv_key_ver_uq').on(t.challengerKey, t.challengerVersion),
+  }),
+);
+
+export const challengerEvaluations = mysqlTable(
+  'challenger_evaluations',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    challengerVersionId: int('challengerVersionId').notNull(),
+    experimentId: int('experimentId').notNull(),
+    pboEvaluationId: int('pboEvaluationId'),
+    dsrEvaluationId: int('dsrEvaluationId'),
+    netResult: decimal('netResult', { precision: 30, scale: 10 }),
+    subgroupStability: mysqlEnum('subgroupStability', ['stable', 'unstable', 'catastrophic', 'insufficient']).notNull(),
+    leakageIncidentsCount: int('leakageIncidentsCount').notNull().default(0),
+    notes: text('notes'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('ce_cv_exp_uq').on(t.challengerVersionId, t.experimentId),
+    cvFk: foreignKey({
+      name: 'ce_cv_fk',
+      columns: [t.challengerVersionId],
+      foreignColumns: [challengerVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    expFk: foreignKey({
+      name: 'ce_exp_fk',
+      columns: [t.experimentId],
+      foreignColumns: [researchExperiments.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    pboFk: foreignKey({
+      name: 'ce_pbo_fk',
+      columns: [t.pboEvaluationId],
+      foreignColumns: [pboEvaluations.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    dsrFk: foreignKey({
+      name: 'ce_dsr_fk',
+      columns: [t.dsrEvaluationId],
+      foreignColumns: [deflatedSharpeEvaluations.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const promotionCriteria = mysqlTable(
+  'promotion_criteria',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    criteriaKey: varchar('criteriaKey', { length: 64 }).notNull(),
+    criteriaVersion: varchar('criteriaVersion', { length: 32 }).notNull(),
+    description: text('description').notNull(),
+    requirements: text('requirements').notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', VALIDATION_STATUS_VALUES).notNull().default('observer'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('pc_key_ver_uq').on(t.criteriaKey, t.criteriaVersion),
+  }),
+);
+
+export const promotionEvidenceBundles = mysqlTable(
+  'promotion_evidence_bundles',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    bundleKey: varchar('bundleKey', { length: 64 }).notNull(),
+    bundleHash: varchar('bundleHash', { length: 64 }).notNull(),
+    experimentId: int('experimentId'),
+    challengerEvaluationId: int('challengerEvaluationId'),
+    pboEvaluationId: int('pboEvaluationId'),
+    dsrEvaluationId: int('dsrEvaluationId'),
+    prospectiveEvidenceAvailable: boolean('prospectiveEvidenceAvailable').notNull().default(false),
+    contents: text('contents').notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    hashUq: uniqueIndex('peb_hash_uq').on(t.bundleHash),
+    expFk: foreignKey({
+      name: 'peb_exp_fk',
+      columns: [t.experimentId],
+      foreignColumns: [researchExperiments.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    ceFk: foreignKey({
+      name: 'peb_ce_fk',
+      columns: [t.challengerEvaluationId],
+      foreignColumns: [challengerEvaluations.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const modelPromotionDecisions = mysqlTable(
+  'model_promotion_decisions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    challengerVersionId: int('challengerVersionId').notNull(),
+    registeredExperimentId: int('registeredExperimentId').notNull(),
+    promotionCriteriaId: int('promotionCriteriaId').notNull(),
+    evidenceBundleId: int('evidenceBundleId').notNull(),
+    previousChampionVersion: varchar('previousChampionVersion', { length: 32 }).notNull(),
+    newChampionVersion: varchar('newChampionVersion', { length: 32 }),
+    rollbackVersion: varchar('rollbackVersion', { length: 32 }).notNull(),
+    humanApprovalActor: varchar('humanApprovalActor', { length: 128 }),
+    humanApprovalAt: timestamp('humanApprovalAt', { fsp: 3 }),
+    decision: mysqlEnum('decision', PROMOTION_DECISION_VALUES).notNull().default('blocked'),
+    blockReasons: varchar('blockReasons', { length: 1000 }).notNull(),
+    deploymentPlan: text('deploymentPlan'),
+    evidenceBundleHash: varchar('evidenceBundleHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index('mpd_status_idx').on(t.decision),
+    cvFk: foreignKey({
+      name: 'mpd_cv_fk',
+      columns: [t.challengerVersionId],
+      foreignColumns: [challengerVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    expFk: foreignKey({
+      name: 'mpd_exp_fk',
+      columns: [t.registeredExperimentId],
+      foreignColumns: [researchExperiments.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    criteriaFk: foreignKey({
+      name: 'mpd_criteria_fk',
+      columns: [t.promotionCriteriaId],
+      foreignColumns: [promotionCriteria.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    bundleFk: foreignKey({
+      name: 'mpd_bundle_fk',
+      columns: [t.evidenceBundleId],
+      foreignColumns: [promotionEvidenceBundles.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const rollbackRecords = mysqlTable(
+  'rollback_records',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    modelPromotionDecisionId: int('modelPromotionDecisionId').notNull(),
+    rollbackVersion: varchar('rollbackVersion', { length: 32 }).notNull(),
+    rollbackConditions: text('rollbackConditions').notNull(),
+    executed: boolean('executed').notNull().default(false),
+    executedAt: timestamp('executedAt', { fsp: 3 }),
+    executorActor: varchar('executorActor', { length: 128 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    mpdIdx: index('rr_mpd_idx').on(t.modelPromotionDecisionId),
+    mpdFk: foreignKey({
+      name: 'rr_mpd_fk',
+      columns: [t.modelPromotionDecisionId],
+      foreignColumns: [modelPromotionDecisions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const kellyActivationEvaluations = mysqlTable(
+  'kelly_activation_evaluations',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    challengerVersionId: int('challengerVersionId'),
+    experimentId: int('experimentId'),
+    sampleCount: int('sampleCount').notNull(),
+    netOutcomeMean: decimal('netOutcomeMean', { precision: 30, scale: 10 }),
+    posteriorLowerBound: decimal('posteriorLowerBound', { precision: 30, scale: 10 }),
+    bayesianShrinkageApplied: boolean('bayesianShrinkageApplied').notNull().default(false),
+    calibrationStable: boolean('calibrationStable').notNull().default(false),
+    regimeStable: boolean('regimeStable').notNull().default(false),
+    productStable: boolean('productStable').notNull().default(false),
+    quarterKellyCapEnforced: boolean('quarterKellyCapEnforced').notNull().default(true),
+    minimumFloorEnforced: boolean('minimumFloorEnforced').notNull().default(false),
+    humanApprovalActor: varchar('humanApprovalActor', { length: 128 }),
+    outcome: mysqlEnum('outcome', KELLY_ACTIVATION_OUTCOME).notNull().default('rejected_not_calibrated'),
+    reasonCodes: varchar('reasonCodes', { length: 500 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    outcomeIdx: index('kae_outcome_idx').on(t.outcome),
+    cvFk: foreignKey({
+      name: 'kae_cv_fk',
+      columns: [t.challengerVersionId],
+      foreignColumns: [challengerVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    expFk: foreignKey({
+      name: 'kae_exp_fk',
+      columns: [t.experimentId],
+      foreignColumns: [researchExperiments.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const validationIncidents = mysqlTable(
+  'validation_incidents',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    experimentId: int('experimentId'),
+    experimentRunId: int('experimentRunId'),
+    foldId: int('foldId'),
+    cpcvPathId: int('cpcvPathId'),
+    datasetVersionId: int('datasetVersionId'),
+    incidentType: mysqlEnum('incidentType', VALIDATION_INCIDENT_TYPES).notNull(),
+    severity: mysqlEnum('severity', VALIDATION_INCIDENT_SEVERITY).notNull(),
+    reasonCode: varchar('reasonCode', { length: 64 }).notNull(),
+    details: text('details'),
+    detectedAt: timestamp('detectedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    typeIdx: index('vi_type_idx').on(t.incidentType, t.severity),
+    runIdx: index('vi_run_idx').on(t.experimentRunId),
+    expFk: foreignKey({
+      name: 'vi_exp_fk',
+      columns: [t.experimentId],
+      foreignColumns: [researchExperiments.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    runFk: foreignKey({
+      name: 'vi_run_fk',
+      columns: [t.experimentRunId],
+      foreignColumns: [experimentRuns.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    foldFk: foreignKey({
+      name: 'vi_fold_fk',
+      columns: [t.foldId],
+      foreignColumns: [validationFolds.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    pathFk: foreignKey({
+      name: 'vi_path_fk',
+      columns: [t.cpcvPathId],
+      foreignColumns: [cpcvPaths.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    dsFk: foreignKey({
+      name: 'vi_ds_fk',
+      columns: [t.datasetVersionId],
+      foreignColumns: [datasetVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -5165,3 +6268,83 @@ export type ChampionContextComparisonRow = typeof championContextComparisons.$in
 export type ChampionContextComparisonInsert = typeof championContextComparisons.$inferInsert;
 export type ContextIncidentRow = typeof contextIncidents.$inferSelect;
 export type ContextIncidentInsert = typeof contextIncidents.$inferInsert;
+export type DatasetDefinitionRow = typeof datasetDefinitions.$inferSelect;
+export type DatasetDefinitionInsert = typeof datasetDefinitions.$inferInsert;
+export type DatasetVersionRow = typeof datasetVersions.$inferSelect;
+export type DatasetVersionInsert = typeof datasetVersions.$inferInsert;
+export type DatasetMembershipRow = typeof datasetMemberships.$inferSelect;
+export type DatasetMembershipInsert = typeof datasetMemberships.$inferInsert;
+export type DatasetExclusionRow = typeof datasetExclusions.$inferSelect;
+export type DatasetExclusionInsert = typeof datasetExclusions.$inferInsert;
+export type DatasetIntegrityCheckRow = typeof datasetIntegrityChecks.$inferSelect;
+export type DatasetIntegrityCheckInsert = typeof datasetIntegrityChecks.$inferInsert;
+export type ResearchExperimentRow = typeof researchExperiments.$inferSelect;
+export type ResearchExperimentInsert = typeof researchExperiments.$inferInsert;
+export type ExperimentRunRow = typeof experimentRuns.$inferSelect;
+export type ExperimentRunInsert = typeof experimentRuns.$inferInsert;
+export type ExperimentParameterRow = typeof experimentParameters.$inferSelect;
+export type ExperimentParameterInsert = typeof experimentParameters.$inferInsert;
+export type ExperimentCandidateVersionRow = typeof experimentCandidateVersions.$inferSelect;
+export type ExperimentCandidateVersionInsert = typeof experimentCandidateVersions.$inferInsert;
+export type ValidationSplitPolicyRow = typeof validationSplitPolicies.$inferSelect;
+export type ValidationSplitPolicyInsert = typeof validationSplitPolicies.$inferInsert;
+export type ValidationFoldRow = typeof validationFolds.$inferSelect;
+export type ValidationFoldInsert = typeof validationFolds.$inferInsert;
+export type ValidationFoldMembershipRow = typeof validationFoldMemberships.$inferSelect;
+export type ValidationFoldMembershipInsert = typeof validationFoldMemberships.$inferInsert;
+export type ValidationEmbargoRow = typeof validationEmbargoes.$inferSelect;
+export type ValidationEmbargoInsert = typeof validationEmbargoes.$inferInsert;
+export type CpcvDefinitionRow = typeof cpcvDefinitions.$inferSelect;
+export type CpcvDefinitionInsert = typeof cpcvDefinitions.$inferInsert;
+export type CpcvPathRow = typeof cpcvPaths.$inferSelect;
+export type CpcvPathInsert = typeof cpcvPaths.$inferInsert;
+export type CpcvPathFoldRow = typeof cpcvPathFolds.$inferSelect;
+export type CpcvPathFoldInsert = typeof cpcvPathFolds.$inferInsert;
+export type CpcvPathResultRow = typeof cpcvPathResults.$inferSelect;
+export type CpcvPathResultInsert = typeof cpcvPathResults.$inferInsert;
+export type ValidationMetricRow = typeof validationMetrics.$inferSelect;
+export type ValidationMetricInsert = typeof validationMetrics.$inferInsert;
+export type ValidationMetricSliceRow = typeof validationMetricSlices.$inferSelect;
+export type ValidationMetricSliceInsert = typeof validationMetricSlices.$inferInsert;
+export type ValidationSliceFailureRow = typeof validationSliceFailures.$inferSelect;
+export type ValidationSliceFailureInsert = typeof validationSliceFailures.$inferInsert;
+export type PboEvaluationRow = typeof pboEvaluations.$inferSelect;
+export type PboEvaluationInsert = typeof pboEvaluations.$inferInsert;
+export type PboCandidateRankingRow = typeof pboCandidateRankings.$inferSelect;
+export type PboCandidateRankingInsert = typeof pboCandidateRankings.$inferInsert;
+export type PboPartitionResultRow = typeof pboPartitionResults.$inferSelect;
+export type PboPartitionResultInsert = typeof pboPartitionResults.$inferInsert;
+export type DeflatedSharpeEvaluationRow = typeof deflatedSharpeEvaluations.$inferSelect;
+export type DeflatedSharpeEvaluationInsert = typeof deflatedSharpeEvaluations.$inferInsert;
+export type StatisticalAuditRow = typeof statisticalAudits.$inferSelect;
+export type StatisticalAuditInsert = typeof statisticalAudits.$inferInsert;
+export type StatisticalReferenceVectorRow = typeof statisticalReferenceVectors.$inferSelect;
+export type StatisticalReferenceVectorInsert = typeof statisticalReferenceVectors.$inferInsert;
+export type StatisticalAuditResultRow = typeof statisticalAuditResults.$inferSelect;
+export type StatisticalAuditResultInsert = typeof statisticalAuditResults.$inferInsert;
+export type UnifiedChallengerDecisionRow = typeof unifiedChallengerDecisions.$inferSelect;
+export type UnifiedChallengerDecisionInsert = typeof unifiedChallengerDecisions.$inferInsert;
+export type UnifiedChallengerEvidenceRow = typeof unifiedChallengerEvidence.$inferSelect;
+export type UnifiedChallengerEvidenceInsert = typeof unifiedChallengerEvidence.$inferInsert;
+export type ObserverIncrementalAttributionRow = typeof observerIncrementalAttribution.$inferSelect;
+export type ObserverIncrementalAttributionInsert = typeof observerIncrementalAttribution.$inferInsert;
+export type ChampionChallengerOutcomeComparisonRow = typeof championChallengerOutcomeComparisons.$inferSelect;
+export type ChampionChallengerOutcomeComparisonInsert = typeof championChallengerOutcomeComparisons.$inferInsert;
+export type ClaudeAttributionSnapshotRow = typeof claudeAttributionSnapshots.$inferSelect;
+export type ClaudeAttributionSnapshotInsert = typeof claudeAttributionSnapshots.$inferInsert;
+export type ChallengerVersionRow = typeof challengerVersions.$inferSelect;
+export type ChallengerVersionInsert = typeof challengerVersions.$inferInsert;
+export type ChallengerEvaluationRow = typeof challengerEvaluations.$inferSelect;
+export type ChallengerEvaluationInsert = typeof challengerEvaluations.$inferInsert;
+export type PromotionCriteriaRow = typeof promotionCriteria.$inferSelect;
+export type PromotionCriteriaInsert = typeof promotionCriteria.$inferInsert;
+export type PromotionEvidenceBundleRow = typeof promotionEvidenceBundles.$inferSelect;
+export type PromotionEvidenceBundleInsert = typeof promotionEvidenceBundles.$inferInsert;
+export type ModelPromotionDecisionRow = typeof modelPromotionDecisions.$inferSelect;
+export type ModelPromotionDecisionInsert = typeof modelPromotionDecisions.$inferInsert;
+export type RollbackRecordRow = typeof rollbackRecords.$inferSelect;
+export type RollbackRecordInsert = typeof rollbackRecords.$inferInsert;
+export type KellyActivationEvaluationRow = typeof kellyActivationEvaluations.$inferSelect;
+export type KellyActivationEvaluationInsert = typeof kellyActivationEvaluations.$inferInsert;
+export type ValidationIncidentRow = typeof validationIncidents.$inferSelect;
+export type ValidationIncidentInsert = typeof validationIncidents.$inferInsert;

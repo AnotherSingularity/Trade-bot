@@ -134,6 +134,13 @@
       "when": 1787000000000,
       "tag": "0018_phase2e_context_observer",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1787100000000,
+      "tag": "0019_phase2f_validation_framework",
+      "breakpoints": true
     }
   ]
 }

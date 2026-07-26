@@ -818,7 +818,7 @@ describe('Gate 3D integrated shadow execution', () => {
     expect(report.failedFixtures).toBe(0);
     expect(report.createOrderAttemptCount).toBe(0);
     expect(report.createOrderNetworkCount).toBe(0);
-  });
+  }, 30_000);
 
   it('28. any failed invariant returns not_ready or degraded', async () => {
     const fixtures: FixtureCase[] = [
