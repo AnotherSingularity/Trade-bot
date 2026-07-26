@@ -13170,7 +13170,7 @@
         },
         "occurredAt": {
           "autoincrement": false,
-          "default": "'current_timestamp(3)'",
+          "default": "CURRENT_TIMESTAMP(3)",
           "name": "occurredAt",
           "notNull": true,
           "primaryKey": false,
@@ -13282,7 +13282,7 @@
         },
         "createdAt": {
           "autoincrement": false,
-          "default": "'current_timestamp(3)'",
+          "default": "CURRENT_TIMESTAMP(3)",
           "name": "createdAt",
           "notNull": true,
           "primaryKey": false,
@@ -13543,7 +13543,7 @@
         },
         "requestedAt": {
           "autoincrement": false,
-          "default": "'current_timestamp(3)'",
+          "default": "CURRENT_TIMESTAMP(3)",
           "name": "requestedAt",
           "notNull": true,
           "primaryKey": false,

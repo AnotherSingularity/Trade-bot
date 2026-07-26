@@ -3,6 +3,7 @@ import {
   mysqlTable,
   int,
   varchar,
+  char,
   text,
   boolean,
   timestamp,
@@ -6338,7 +6339,9 @@ export const operatorAuthSessions = mysqlTable(
     id: int('id').autoincrement().primaryKey(),
     accountId: int('accountId').notNull(),
     installationId: int('installationId'),
-    sessionFamilyId: varchar('sessionFamilyId', { length: 36 }).notNull(),
+    // char(36) matches the applied migration exactly — session-family
+    // ids are always full-length UUIDs.
+    sessionFamilyId: char('sessionFamilyId', { length: 36 }).notNull(),
     accessTokenHash: varchar('accessTokenHash', { length: 128 }).notNull(),
     refreshTokenHash: varchar('refreshTokenHash', { length: 128 }).notNull(),
     accessExpiresAt: timestamp('accessExpiresAt', { fsp: 3 }).notNull(),

@@ -175,5 +175,9 @@ export async function getFenceGeneration(key: string): Promise<number> {
   return readExecutionFenceGeneration(key);
 }
 
-export const SCAN_LEASE_KEY = 'horizon:lease:scan';
-export const RECONCILE_LEASE_KEY = 'horizon:lease:reconcile';
+// Stage 2-FIX §1: lease keys respect the optional test namespace so a
+// spawned integration-test server never contends for a developer's or
+// another run's leases.
+const LEASE_PREFIX = ENV.redisNamespace ? `${ENV.redisNamespace}:horizon` : 'horizon';
+export const SCAN_LEASE_KEY = `${LEASE_PREFIX}:lease:scan`;
+export const RECONCILE_LEASE_KEY = `${LEASE_PREFIX}:lease:reconcile`;

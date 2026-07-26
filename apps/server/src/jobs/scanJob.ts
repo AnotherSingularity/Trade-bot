@@ -1,7 +1,7 @@
 import { Worker } from 'bullmq';
 import { runScanCycle } from '../trading/scanner';
 import { logActivity } from '../db/queries';
-import { SCAN_QUEUE_NAME, connectionOptions } from './queue';
+import { BULLMQ_PREFIX, SCAN_QUEUE_NAME, connectionOptions } from './queue';
 
 /**
  * BullMQ worker that executes the scan cycle. Running the bot loop through a
@@ -17,6 +17,7 @@ export function createScanWorker(): Worker {
     {
       connection: connectionOptions,
       concurrency: 1,
+      prefix: BULLMQ_PREFIX,
     },
   );
 

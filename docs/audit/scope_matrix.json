@@ -39,6 +39,17 @@
       { "capabilityId": "desktop.authenticationGate", "before": "absent", "after": "integration_verified", "evidence": "AuthGate.tsx renders correct screen per phase; protected screens only mount when phase=authenticated; every business IPC channel with requiresAuthenticatedSession=true is blocked when not authenticated." }
     ]
   },
+  "stage2FixCorrections": {
+    "note": "Stage 2-FIX corrections applied against the Stage 2 review — test isolation, tRPC authorization proof, privileged IPC enforcement matrix, bootstrap narrowness proof, migration integrity rerun. No new migration; snapshot chain reconciled from schema.ts (sessionFamilyId varchar→char(36) to match applied SQL).",
+    "corrections": [
+      { "issue": "Stage 2 integration tests required manually recreating horizon_trade_test", "correction": "tests/globalSetup.ts idempotently rebuilds the *_test DB from a clean checkout; individual tests no longer DROP/CREATE the shared DB; desktop tests use uniquely-named scratch DBs via the guarded scratchDb helper; new stage2fix_db_isolation.test.ts proves the harness structurally refuses to target protected databases." },
+      { "issue": "Complete server suite not confirmed green during Stage 2", "correction": "Re-run against a clean horizon_trade_test with all fixes applied. See stage2_fix_report.md §8." },
+      { "issue": "tRPC authorization coverage not proven", "correction": "src/lib/trpc.ts context creator reads Authorization header server-side (no client-controlled fields); every procedure carries authScope meta; trpcInventory.auditTrpcInventory fails closed on unclassified procedures; stage2fix-trpc-authorization.test.ts (14 assertions) proves inventory + identity-enforcement matrix." },
+      { "issue": "Privileged desktop IPC actions not proven session-enforced across every phase", "correction": "ipc handler fails closed when authManager missing/throws; stage2fix_privileged_ipc.test.ts covers 11 privileged channels × 8 non-authenticated phases + manager-missing + manager-throwing (103 assertions)." },
+      { "issue": "Bootstrap scope narrowness not proven", "correction": "stage2fix_bootstrap_scope.test.ts spawns real server and proves BS1-BS10: response key allowlist, no token substring in bootstrap responses, bootstrap token rejected on refresh/change-password/operator routes, no token in DB (exhaustive information_schema sweep), no token in keytar, no token in server stdio/incidents/events, mismatched token yields specific error." },
+      { "issue": "0021 snapshot initially generated as 0022 then reconciled — chain integrity uncertain", "correction": "0021_snapshot.json regenerated fresh from current schema.ts; sessionFamilyId Drizzle type aligned to char(36) matching the applied SQL; fingerprint regenerated from a clean scratch DB; gate1-migration-integrity 7/7 green; drizzle-kit generate returns empty diff; migrations 0000-0020 confirmed byte-identical to pre-Stage-2 tree via git diff." }
+    ]
+  },
   "stage1FixCorrections": {
     "note": "Stage 1-FIX corrections applied against the Stage 1 review",
     "corrections": [

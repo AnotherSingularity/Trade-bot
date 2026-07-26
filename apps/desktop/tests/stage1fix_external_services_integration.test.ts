@@ -27,6 +27,7 @@ import { join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createScratchDb, dropScratchDb, makeScratchDbName, scratchDbUrl } from './lib/scratchDb';
 
 const BOOTSTRAP = randomBytes(32).toString('hex');
 const bootstrapHeader = { 'x-horizon-bootstrap-token': BOOTSTRAP } as const;
@@ -53,8 +54,10 @@ function healthUrl(): string { return `http://127.0.0.1:${CHOSEN_PORT}/api/syste
 function healthLegacyUrl(): string { return `http://127.0.0.1:${CHOSEN_PORT}/health`; }
 function baseUrl(): string { return `http://127.0.0.1:${CHOSEN_PORT}`; }
 const READINESS_TIMEOUT_MS = 45_000;
-const TEST_DB = 'horizon_stage1_fix_ext';
-const TEST_DB_URL = `mysql://root:password@127.0.0.1:3306/${TEST_DB}`;
+// Stage 2-FIX §1: uniquely-named scratch DB per run via the guarded
+// helper — never the shared suite DB, never a fixed name.
+const TEST_DB = makeScratchDbName('s1fix_ext');
+const TEST_DB_URL = scratchDbUrl(TEST_DB);
 const REDIS_URL = 'redis://127.0.0.1:6379';
 
 async function localServicesAvailable(): Promise<boolean> {
@@ -70,10 +73,7 @@ async function localServicesAvailable(): Promise<boolean> {
 }
 
 async function ensureDb(): Promise<void> {
-  const c = await createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: 'password', multipleStatements: true });
-  try {
-    await c.query(`DROP DATABASE IF EXISTS \`${TEST_DB}\`; CREATE DATABASE \`${TEST_DB}\`;`);
-  } finally { await c.end(); }
+  await createScratchDb(TEST_DB);
 }
 
 async function migrate(): Promise<void> {
@@ -106,6 +106,10 @@ async function migrate(): Promise<void> {
 
 interface Spawned { proc: ReturnType<typeof spawn>; kill: () => Promise<void> }
 
+// Track every spawned child so afterAll can force-terminate any that
+// slipped past an assertion failure.
+const spawnedProcs: ReturnType<typeof spawn>[] = [];
+
 async function spawnServer(): Promise<Spawned> {
   const proc = spawn('npx', ['tsx', 'src/index.ts'], {
     cwd: SERVER_CWD,
@@ -124,9 +128,11 @@ async function spawnServer(): Promise<Spawned> {
       ORDER_SUBMISSION_ENABLED: 'false',
       CORS_ORIGINS: '*',
       HORIZON_BOOTSTRAP_TOKEN: BOOTSTRAP,
+      HORIZON_REDIS_NAMESPACE: TEST_DB,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  spawnedProcs.push(proc);
   proc.stderr?.on('data', (d) => { if (process.env.STAGE1FIX_VERBOSE) process.stderr.write(d); });
   return {
     proc,
@@ -186,6 +192,22 @@ describe.sequential('stage1-fix §D — external-services real integration', () 
 
   afterAll(async () => {
     if (server) await server.kill();
+    for (const proc of spawnedProcs) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if ((proc as any).exitCode == null) proc.kill('SIGKILL');
+    }
+    if (available) {
+      await dropScratchDb(TEST_DB);
+      // Flush the per-run Redis namespace.
+      const r = new IORedis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 0, retryStrategy: () => null });
+      try {
+        await r.connect();
+        const keys = await r.keys(`${TEST_DB}:*`);
+        if (keys.length > 0) await r.del(...keys);
+      } catch { /* ignore */ } finally {
+        try { await r.quit(); } catch { /* already closed */ }
+      }
+    }
   });
 
   it('FIX-D1..D10: full sequence — spawn, ready, counters, reconciliation, restart, reconciliation-first', async () => {

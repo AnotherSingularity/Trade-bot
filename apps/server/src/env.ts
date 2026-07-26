@@ -77,6 +77,11 @@ const schema = z.object({
   // passes it via env; production boot rejects any request to bootstrap
   // endpoints without it (loopback binding alone is insufficient).
   HORIZON_BOOTSTRAP_TOKEN: z.string().optional(),
+
+  // Stage 2-FIX §1 — Redis key namespace. Prefixes every BullMQ queue
+  // and lease key so integration tests spawning a real server cannot
+  // collide with a developer's local instance or another test run.
+  HORIZON_REDIS_NAMESPACE: z.string().regex(/^[A-Za-z0-9_-]+$/).optional(),
 });
 
 const KNOWN_WEAK_SECRETS = new Set([
@@ -164,6 +169,7 @@ function loadEnv() {
     anthropicConfigured,
     simulationMode: e.SIMULATION_MODE,
     bootstrapToken: e.HORIZON_BOOTSTRAP_TOKEN,
+    redisNamespace: e.HORIZON_REDIS_NAMESPACE,
   };
 }
 

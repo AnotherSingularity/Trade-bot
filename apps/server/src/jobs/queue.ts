@@ -21,8 +21,14 @@ export const SCAN_QUEUE_NAME = 'scan';
 export const SCAN_JOB_NAME = 'scan-cycle';
 export const SCAN_REPEAT_KEY = 'horizon-scan-repeat';
 
+// Stage 2-FIX §1: BullMQ key prefix. Defaults to BullMQ's own 'bull';
+// integration tests set HORIZON_REDIS_NAMESPACE so their keys live under
+// a disposable namespace instead of colliding with any other instance.
+export const BULLMQ_PREFIX = ENV.redisNamespace ? `${ENV.redisNamespace}:bull` : 'bull';
+
 export const scanQueue = new Queue(SCAN_QUEUE_NAME, {
   connection: connectionOptions,
+  prefix: BULLMQ_PREFIX,
 });
 
 /** Registers the recurring scan job (idempotent via a fixed repeat key). */

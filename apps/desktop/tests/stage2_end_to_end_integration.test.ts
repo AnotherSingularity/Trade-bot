@@ -22,19 +22,24 @@
  * unreachable.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createConnection } from 'mysql2/promise';
 import IORedis from 'ioredis';
 import { createServer } from 'node:net';
 import { randomBytes } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { readdirSync, readFileSync } from 'node:fs';
+import { createScratchDb, dropScratchDb, makeScratchDbName, scratchDbUrl } from './lib/scratchDb';
 
 const REPO = resolve(__dirname, '..', '..', '..');
 const SERVER_CWD = join(REPO, 'apps/server');
 const migrationsDir = join(SERVER_CWD, 'drizzle/migrations');
-const TEST_DB = 'horizon_stage2_e2e';
-const TEST_DB_URL = `mysql://root:password@127.0.0.1:3306/${TEST_DB}`;
+// Stage 2-FIX §1: uniquely-named scratch DB per run — never the shared
+// suite database, never a fixed name two runs could collide on. The
+// Redis namespace mirrors the DB name so BullMQ/lease keys are equally
+// disposable.
+const TEST_DB = makeScratchDbName('s2e2e');
+const TEST_DB_URL = scratchDbUrl(TEST_DB);
 const REDIS_URL = 'redis://127.0.0.1:6379';
 const BOOTSTRAP = randomBytes(32).toString('hex');
 const READINESS_TIMEOUT_MS = 30_000;
@@ -73,9 +78,9 @@ function splitStatements(sql: string): string[] {
 }
 
 async function ensureDb(): Promise<void> {
-  const c = await createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: 'password', multipleStatements: true });
-  await c.query(`DROP DATABASE IF EXISTS \`${TEST_DB}\`; CREATE DATABASE \`${TEST_DB}\`;`);
-  await c.end();
+  // Unique scratch name per run — plain CREATE, and only via the guarded
+  // helper (assertScratchDb refuses protected databases).
+  await createScratchDb(TEST_DB);
 }
 
 async function migrate(): Promise<void> {
@@ -99,6 +104,11 @@ async function migrate(): Promise<void> {
 
 interface Spawned { proc: ReturnType<typeof spawn>; kill: () => Promise<void> }
 
+// Every spawned server is tracked so afterAll can guarantee termination
+// even when an assertion fails mid-flow or a restart leaves a stale
+// handle behind.
+const spawnedServers: ReturnType<typeof spawn>[] = [];
+
 async function spawnServer(): Promise<Spawned> {
   const proc = spawn('npx', ['tsx', 'src/index.ts'], {
     cwd: SERVER_CWD,
@@ -113,9 +123,13 @@ async function spawnServer(): Promise<Spawned> {
       ORDER_SUBMISSION_ENABLED: 'false',
       CORS_ORIGINS: '*',
       HORIZON_BOOTSTRAP_TOKEN: BOOTSTRAP,
+      // Stage 2-FIX §1: BullMQ + lease keys live under a disposable
+      // per-run namespace instead of the global 'bull'/'horizon' keys.
+      HORIZON_REDIS_NAMESPACE: TEST_DB,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  spawnedServers.push(proc);
   if (process.env.STAGE2_VERBOSE) {
     proc.stderr?.on('data', (d) => process.stderr.write(d));
     proc.stdout?.on('data', (d) => process.stdout.write(d));
@@ -180,10 +194,24 @@ describe.sequential('stage2 §22 end-to-end integration', () => {
 
   afterAll(async () => {
     if (server) await server.kill();
+    // Belt-and-braces: terminate every spawned child even if a mid-test
+    // failure left one untracked by `server`.
+    for (const proc of spawnedServers) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if ((proc as any).exitCode == null) proc.kill('SIGKILL');
+    }
     if (available) {
-      const c = await createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: 'password' });
-      await c.query(`DROP DATABASE IF EXISTS \`${TEST_DB}\``);
-      await c.end();
+      await dropScratchDb(TEST_DB);
+      // Flush the per-run Redis namespace so lockout/session/queue keys
+      // never leak between runs.
+      const r = new IORedis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 0, retryStrategy: () => null });
+      try {
+        await r.connect();
+        const keys = await r.keys(`${TEST_DB}:*`);
+        if (keys.length > 0) await r.del(...keys);
+      } catch { /* redis gone — nothing to clean */ } finally {
+        try { await r.quit(); } catch { /* already closed */ }
+      }
     }
   });
 
@@ -336,6 +364,3 @@ describe.sequential('stage2 §22 end-to-end integration', () => {
     expect(relogin.status).toBe(200);
   }, 180_000);
 });
-
-// Prevent an "unused import" lint failure if the test is skipped.
-void spawnSync;

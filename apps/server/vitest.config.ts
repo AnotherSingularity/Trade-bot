@@ -5,6 +5,10 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts', 'src/**/*.test.ts'],
+    // Stage 2-FIX §1: deterministic bootstrap of the dedicated test DB.
+    // Creates + migrates horizon_trade_test from a clean checkout; never
+    // touches any non-*_test database.
+    globalSetup: ['tests/globalSetup.ts'],
     // Sequential execution for DB-touching suites so they share the test DB
     // without collisions.
     pool: 'forks',

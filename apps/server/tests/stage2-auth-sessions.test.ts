@@ -6,8 +6,6 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import mysql from 'mysql2/promise';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import { eq } from 'drizzle-orm';
 import * as schema from '../src/db/schema';
 import { db } from '../src/db';
@@ -21,24 +19,11 @@ import {
   ABSOLUTE_TTL_MS,
 } from '../src/auth/sessions';
 
-// Use the vitest-configured DATABASE_URL — the test DB is
-// `horizon_trade_test`. We bootstrap it with the migrations once and
-// then clear operator tables between tests.
+// Uses the vitest-configured DATABASE_URL (the dedicated
+// `horizon_trade_test` DB). Schema is provisioned by tests/globalSetup.ts;
+// this suite only clears the operator rows it owns between tests.
 const TEST_URI = process.env.DATABASE_URL ?? 'mysql://root:password@127.0.0.1:3306/horizon_trade_test';
-const ROOT_URI = TEST_URI.replace(/\/[^/]+$/, '');
 const TEST_DB = TEST_URI.split('/').pop()!;
-const migrationsDir = resolve(__dirname, '..', 'drizzle', 'migrations');
-
-function splitStatements(sql: string): string[] {
-  return sql
-    .replace(/-->\s*statement-breakpoint/g, '')
-    .split('\n')
-    .filter((l) => !/^\s*--/.test(l))
-    .join('\n')
-    .split(';')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
 
 let seededAccountId: number;
 
@@ -58,35 +43,25 @@ async function seedAccount(): Promise<number> {
 // Suite-scoped setup: create the DB + apply migrations once.
 let available = false;
 beforeAll(async () => {
+  // Stage 2-FIX §1: schema is provisioned by tests/globalSetup.ts. This
+  // suite only verifies availability and cleans the rows it owns — it
+  // NEVER creates, drops, or migrates the shared test database.
   try {
-    // Idempotent bootstrap: CREATE DATABASE IF NOT EXISTS, then apply
-    // migrations only if the operator tables aren't present. This
-    // preserves the shared `horizon_trade_test` DB for other suites.
-    const root = await mysql.createConnection({ uri: ROOT_URI, multipleStatements: true });
-    await root.query(`CREATE DATABASE IF NOT EXISTS \`${TEST_DB}\``);
-    await root.end();
-    const conn = await mysql.createConnection({ uri: TEST_URI });
+    const conn = await mysql.createConnection({ uri: TEST_URI, connectTimeout: 3_000 });
     const [tables] = await conn.query<mysql.RowDataPacket[]>(
       "SELECT table_name AS n FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'local_operator_accounts'",
     );
-    if (tables.length === 0) {
-      const files = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
-      for (const f of files) {
-        for (const stmt of splitStatements(readFileSync(join(migrationsDir, f), 'utf-8'))) {
-          try { await conn.query(stmt); } catch { /* ignore existing-table errors */ }
-        }
-      }
-    }
     await conn.end();
-    available = true;
+    available = tables.length > 0;
+    if (!available) console.warn('[stage2 sessions] operator tables absent — globalSetup did not run?');
   } catch (e) {
     console.warn('[stage2 sessions] MariaDB unavailable — skipping', String(e).slice(0, 120));
     available = false;
   }
-}, 90_000);
+}, 30_000);
 
 afterAll(async () => {
-  // Do NOT drop the shared test DB — other suites rely on it.
+  // Leave the shared test DB in place; only our rows were touched.
   void TEST_DB;
 });
 

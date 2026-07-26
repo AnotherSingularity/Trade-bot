@@ -65,6 +65,21 @@ are in `revised_roadmap.md`.
 14. ✅ **Bootstrap channel secured.** 256-bit
     `X-Horizon-Bootstrap-Token` header + constant-time verify.
     Loopback binding is a secondary control only.
+15. ✅ **tRPC authorization coverage proven (Stage 2-FIX §3).** Every
+    procedure carries `authScope` meta; unclassified procedures fail
+    closed; anonymous callers rejected on protected procedures;
+    bootstrap tokens cannot mint identity; renderer-controlled fields
+    cannot forge identity.
+16. ✅ **Privileged desktop IPC enforcement matrix (Stage 2-FIX §4).**
+    103 assertions cover every enumerated action × every non-authenticated
+    phase; handler fails closed when the auth manager is missing.
+17. ✅ **Bootstrap scope narrowness (Stage 2-FIX §5).** 10 assertions
+    prove response allowlist, token absence in DB / keytar / logs /
+    events, and refusal of operator paths.
+18. ✅ **Test-database isolation (Stage 2-FIX §1).** Server tests never
+    drop the shared DB; desktop scratch DBs use unique names with
+    hard-refusal for protected names; per-run Redis namespace; all
+    spawned children terminated on afterAll.
 
 ## Category D — Real safety values (blocks Overview + Safety + Configuration)
 

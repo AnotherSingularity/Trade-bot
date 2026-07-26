@@ -5,46 +5,28 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import mysql from 'mysql2/promise';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import { checkRate, normalizeUsername, recordFailure, recordSuccess, _internalConstants } from '../src/auth/loginLimits';
 
+// Schema is provisioned by tests/globalSetup.ts. This suite only clears
+// the operator_login_limits rows it owns — it never creates, drops, or
+// migrates the shared test database.
 const TEST_URI = process.env.DATABASE_URL ?? 'mysql://root:password@127.0.0.1:3306/horizon_trade_test';
-const ROOT_URI = TEST_URI.replace(/\/[^/]+$/, '');
 const TEST_DB = TEST_URI.split('/').pop()!;
-const migrationsDir = resolve(__dirname, '..', 'drizzle', 'migrations');
-
-function splitStatements(sql: string): string[] {
-  return sql.replace(/-->\s*statement-breakpoint/g, '')
-    .split('\n').filter((l) => !/^\s*--/.test(l)).join('\n')
-    .split(';').map((s) => s.trim()).filter((s) => s.length > 0);
-}
 
 let available = false;
 
 beforeAll(async () => {
   try {
-    const root = await mysql.createConnection({ uri: ROOT_URI, multipleStatements: true });
-    await root.query(`CREATE DATABASE IF NOT EXISTS \`${TEST_DB}\``);
-    await root.end();
-    const conn = await mysql.createConnection({ uri: TEST_URI });
+    const conn = await mysql.createConnection({ uri: TEST_URI, connectTimeout: 3_000 });
     const [tables] = await conn.query<mysql.RowDataPacket[]>(
       "SELECT table_name AS n FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'operator_login_limits'",
     );
-    if (tables.length === 0) {
-      const files = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
-      for (const f of files) {
-        for (const stmt of splitStatements(readFileSync(join(migrationsDir, f), 'utf-8'))) {
-          try { await conn.query(stmt); } catch { /* ignore */ }
-        }
-      }
-    }
     await conn.end();
-    available = true;
+    available = tables.length > 0;
   } catch {
     available = false;
   }
-}, 90_000);
+}, 30_000);
 
 afterAll(async () => {
   // Shared test DB — do not drop.

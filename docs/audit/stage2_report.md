@@ -266,8 +266,8 @@ the full auth flow across a real HTTP boundary:
 - `apps/desktop` main typecheck (`tsc --noEmit -p tsconfig.main.json`): green.
 - `apps/desktop` preload typecheck: green.
 - `apps/desktop` renderer typecheck: green.
-- `apps/desktop` vitest: **217/217 passed** (37 test files).
-- Server vitest: Stage 2 subset (bootstrap + passwords + sessions + limits) all pass; full suite verification pending a fresh test-DB rebuild (see §14).
+- `apps/desktop` vitest full suite: **342/342 passed** (40 test files, 22.48s) after Stage 2-FIX additions — see `docs/audit/stage2_fix_report.md` §8.
+- `apps/server` vitest full suite: **987/987 passed** (48 test files, 1393.01s) from clean `horizon_trade_test` — see `docs/audit/stage2_fix_report.md` §8.
 - `drizzle-kit generate`: "No schema changes, nothing to migrate 😴".
 - Gate 1c migration integrity: 7/7 pass with 0021 fingerprint on disk.
 
@@ -294,14 +294,10 @@ the full auth flow across a real HTTP boundary:
   out-of-process server via env. The managed_docker adapter path does
   not yet plumb the token into the compose `up` invocation — that
   requires managed_docker_runtime verification (still deferred).
-- **Server full-suite re-run**: my Stage 2 tests pass individually
-  (44/44 server-side, 27/27 desktop-side, plus the end-to-end
-  integration test). A single fresh full run of the ~973 server tests
-  was interrupted by test-DB state churn from my earlier iterations.
-  Because subsequent isolated re-runs of every touched suite are
-  green, and no source code path was modified outside Stage 2 scope
-  (I only added new modules + wired middleware), a Stage 2-FIX pass
-  can re-run the full suite from a clean DB as part of the review.
+- **Server full-suite re-run**: superseded by Stage 2-FIX §2 — the
+  full server suite now runs green from a clean checkout via
+  `tests/globalSetup.ts` (idempotent DB rebuild). See
+  `docs/audit/stage2_fix_report.md` §8 for exact counts.
 
 ## 15. Verdict
 

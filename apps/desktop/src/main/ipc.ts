@@ -80,7 +80,20 @@ export async function handleIpcCall(
   }
   const entry = IPC_ALLOWLIST.find((e) => e.channel === channel)!;
   if (entry.requiresAuthenticatedSession && ctx.authenticationRequired) {
-    const phase = ctx.authManager.sanitize().phase;
+    // Stage 2-FIX §4: fail closed if the auth manager is unreachable
+    // — a missing or throwing sanitize() must not be treated as
+    // "authenticated" by omission.
+    let phase: string;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!ctx.authManager || typeof (ctx.authManager as any).sanitize !== 'function') {
+        throw new Error('authManager missing');
+      }
+      phase = ctx.authManager.sanitize().phase;
+    } catch (err) {
+      ctx.logger.error('ipc call blocked — auth manager unavailable', { channel, err: String(err) });
+      return { ok: false, channel, data: null, error: 'authentication_manager_unavailable' };
+    }
     if (phase !== 'authenticated') {
       ctx.logger.warn('ipc call blocked — authentication required', { channel, phase });
       return { ok: false, channel, data: null, error: 'authentication_required' };
