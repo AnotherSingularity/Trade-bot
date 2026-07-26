@@ -2021,6 +2021,195 @@ export const forwardOutcomeLabels = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Phase 1.2-OPS — seven-day live-deployment soak
+// ---------------------------------------------------------------------------
+export const soakRuns = mysqlTable(
+  'soak_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    soakRunId: varchar('soakRunId', { length: 64 }).notNull(),
+    commitHash: varchar('commitHash', { length: 40 }).notNull(),
+    deploymentId: varchar('deploymentId', { length: 64 }).notNull(),
+    startedAt: timestamp('startedAt').notNull(),
+    requiredEndAt: timestamp('requiredEndAt').notNull(),
+    completedAt: timestamp('completedAt'),
+    strategyVersion: varchar('strategyVersion', { length: 32 }).notNull(),
+    marketDataVersion: varchar('marketDataVersion', { length: 32 }).notNull(),
+    fillModelVersion: varchar('fillModelVersion', { length: 32 }).notNull(),
+    costModelVersion: varchar('costModelVersion', { length: 32 }).notNull(),
+    protectionPolicyVersion: varchar('protectionPolicyVersion', { length: 32 }).notNull(),
+    schemaFingerprint: varchar('schemaFingerprint', { length: 64 }).notNull(),
+    safeFlagsSnapshot: text('safeFlagsSnapshot').notNull(),
+    productUniverseHash: varchar('productUniverseHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', ['preflight', 'running', 'failed', 'reset_required', 'completed'])
+      .notNull()
+      .default('preflight'),
+    verdict: mysqlEnum('verdict', ['pending', 'soak_failed', 'soak_degraded', 'phase1_2_pass'])
+      .notNull()
+      .default('pending'),
+    verdictReason: varchar('verdictReason', { length: 255 }),
+    preflightRunId: int('preflightRunId'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdUq: uniqueIndex('soak_runs_soakRunId_uq').on(t.soakRunId),
+    statusIdx: index('soak_runs_status_idx').on(t.status),
+    verdictIdx: index('soak_runs_verdict_idx').on(t.verdict),
+  }),
+);
+
+export const soakDailyReports = mysqlTable(
+  'soak_daily_reports',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    soakRunId: varchar('soakRunId', { length: 64 }).notNull(),
+    reportDate: timestamp('reportDate').notNull(),
+    windowStart: timestamp('windowStart').notNull(),
+    windowEnd: timestamp('windowEnd').notNull(),
+    uptimeSeconds: int('uptimeSeconds').notNull().default(0),
+    webSocketSessions: int('webSocketSessions').notNull().default(0),
+    reconnectCount: int('reconnectCount').notNull().default(0),
+    heartbeatGaps: int('heartbeatGaps').notNull().default(0),
+    dataGapsByProduct: text('dataGapsByProduct'),
+    healthyProductCount: int('healthyProductCount').notNull().default(0),
+    staleProductCount: int('staleProductCount').notNull().default(0),
+    scannerRuns: int('scannerRuns').notNull().default(0),
+    scannerFailures: int('scannerFailures').notNull().default(0),
+    productsEvaluated: int('productsEvaluated').notNull().default(0),
+    ineligibleChains: int('ineligibleChains').notNull().default(0),
+    noSetupChains: int('noSetupChains').notNull().default(0),
+    candidatesReversion: int('candidatesReversion').notNull().default(0),
+    candidatesBreakout: int('candidatesBreakout').notNull().default(0),
+    candidatesMacro: int('candidatesMacro').notNull().default(0),
+    plansApproved: int('plansApproved').notNull().default(0),
+    simulatedOrders: int('simulatedOrders').notNull().default(0),
+    fullFills: int('fullFills').notNull().default(0),
+    partialFills: int('partialFills').notNull().default(0),
+    openPositions: int('openPositions').notNull().default(0),
+    completedRoundTrips: int('completedRoundTrips').notNull().default(0),
+    grossPnl: decimal('grossPnl', { precision: 20, scale: 8 }).notNull().default('0'),
+    simulatedFees: decimal('simulatedFees', { precision: 20, scale: 8 }).notNull().default('0'),
+    simulatedSpread: decimal('simulatedSpread', { precision: 20, scale: 8 }).notNull().default('0'),
+    simulatedSlippage: decimal('simulatedSlippage', { precision: 20, scale: 8 }).notNull().default('0'),
+    netPnl: decimal('netPnl', { precision: 20, scale: 8 }).notNull().default('0'),
+    forecastCostError: decimal('forecastCostError', { precision: 20, scale: 8 }).notNull().default('0'),
+    accountingDifference: decimal('accountingDifference', { precision: 20, scale: 8 }).notNull().default('0'),
+    reconciliationStatus: varchar('reconciliationStatus', { length: 32 }).notNull(),
+    protectionStatus: varchar('protectionStatus', { length: 32 }).notNull(),
+    brokenLineageCount: int('brokenLineageCount').notNull().default(0),
+    createOrderFunctionInvocations: int('createOrderFunctionInvocations').notNull().default(0),
+    createOrderAttemptCount: int('createOrderAttemptCount').notNull().default(0),
+    createOrderNetworkCount: int('createOrderNetworkCount').notNull().default(0),
+    incidentIds: text('incidentIds'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runDateUq: uniqueIndex('soak_daily_run_date_uq').on(t.soakRunId, t.reportDate),
+  }),
+);
+
+export const soakIncidents = mysqlTable(
+  'soak_incidents',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    soakRunId: varchar('soakRunId', { length: 64 }),
+    incidentKind: mysqlEnum('incidentKind', [
+      'websocket_outage',
+      'reconnect_storm',
+      'heartbeat_loss',
+      'candle_gap',
+      'rest_bootstrap_failure',
+      'preview_outage',
+      'fee_tier_outage',
+      'credential_failure',
+      'database_restart',
+      'redis_restart',
+      'process_restart',
+      'stale_data_rejection',
+      'protection_degradation',
+      'accounting_discrepancy',
+      'lineage_discrepancy',
+      'create_order_barrier_event',
+      'safe_flag_change',
+      'mock_provider_active',
+      'undocumented_deployment',
+    ]).notNull(),
+    classification: mysqlEnum('classification', [
+      'informational',
+      'product_degraded',
+      'system_degraded',
+      'soak_invalidating',
+    ]).notNull(),
+    detectedAt: timestamp('detectedAt').notNull(),
+    resolvedAt: timestamp('resolvedAt'),
+    productId: varchar('productId', { length: 30 }),
+    detail: text('detail'),
+    metadata: text('metadata'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx: index('soak_incidents_run_idx').on(t.soakRunId),
+    classIdx: index('soak_incidents_class_idx').on(t.classification),
+    kindIdx: index('soak_incidents_kind_idx').on(t.incidentKind),
+  }),
+);
+
+export const adapterSelections = mysqlTable(
+  'adapter_selections',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    soakRunId: varchar('soakRunId', { length: 64 }),
+    boundAt: timestamp('boundAt').notNull(),
+    webSocketProvider: varchar('webSocketProvider', { length: 128 }).notNull(),
+    restClient: varchar('restClient', { length: 128 }).notNull(),
+    authClient: varchar('authClient', { length: 128 }).notNull(),
+    redisClient: varchar('redisClient', { length: 128 }).notNull(),
+    dbDriver: varchar('dbDriver', { length: 128 }).notNull(),
+    isProduction: boolean('isProduction').notNull().default(false),
+    refusedReason: varchar('refusedReason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx: index('adapter_selections_run_idx').on(t.soakRunId),
+    prodIdx: index('adapter_selections_prod_idx').on(t.isProduction),
+  }),
+);
+
+export const soakPreflightRuns = mysqlTable(
+  'soak_preflight_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    soakRunId: varchar('soakRunId', { length: 64 }),
+    startedAt: timestamp('startedAt').notNull(),
+    completedAt: timestamp('completedAt'),
+    durationSeconds: int('durationSeconds').notNull().default(0),
+    connectionHealthy: boolean('connectionHealthy').notNull().default(false),
+    heartbeatsContinuous: boolean('heartbeatsContinuous').notNull().default(false),
+    productsBootstrapped: int('productsBootstrapped').notNull().default(0),
+    productsFailed: int('productsFailed').notNull().default(0),
+    candleHistoryOrdered: boolean('candleHistoryOrdered').notNull().default(false),
+    scannerReadsLiveState: boolean('scannerReadsLiveState').notNull().default(false),
+    scheduledManualSameSource: boolean('scheduledManualSameSource').notNull().default(false),
+    feeTierRetrievalOk: boolean('feeTierRetrievalOk').notNull().default(false),
+    previewSucceededOrFailedClosed: boolean('previewSucceededOrFailedClosed').notNull().default(false),
+    productMetadataFresh: boolean('productMetadataFresh').notNull().default(false),
+    dataGapsPersisted: boolean('dataGapsPersisted').notNull().default(false),
+    reconnectWorks: boolean('reconnectWorks').notNull().default(false),
+    restartRestoresState: boolean('restartRestoresState').notNull().default(false),
+    createOrderFunctionInvocations: int('createOrderFunctionInvocations').notNull().default(0),
+    createOrderAttemptCount: int('createOrderAttemptCount').notNull().default(0),
+    createOrderNetworkCount: int('createOrderNetworkCount').notNull().default(0),
+    passed: boolean('passed').notNull().default(false),
+    failureReasons: text('failureReasons'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx: index('soak_preflight_run_idx').on(t.soakRunId),
+    passedIdx: index('soak_preflight_passed_idx').on(t.passed),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -2087,6 +2276,16 @@ export type ShadowDailyReportRow = typeof shadowDailyReports.$inferSelect;
 export type ShadowDailyReportInsert = typeof shadowDailyReports.$inferInsert;
 export type ForwardOutcomeLabelRow = typeof forwardOutcomeLabels.$inferSelect;
 export type ForwardOutcomeLabelInsert = typeof forwardOutcomeLabels.$inferInsert;
+export type SoakRunRow = typeof soakRuns.$inferSelect;
+export type SoakRunInsert = typeof soakRuns.$inferInsert;
+export type SoakDailyReportRow = typeof soakDailyReports.$inferSelect;
+export type SoakDailyReportInsert = typeof soakDailyReports.$inferInsert;
+export type SoakIncidentRow = typeof soakIncidents.$inferSelect;
+export type SoakIncidentInsert = typeof soakIncidents.$inferInsert;
+export type AdapterSelectionRow = typeof adapterSelections.$inferSelect;
+export type AdapterSelectionInsert = typeof adapterSelections.$inferInsert;
+export type SoakPreflightRunRow = typeof soakPreflightRuns.$inferSelect;
+export type SoakPreflightRunInsert = typeof soakPreflightRuns.$inferInsert;
 export type FillRow = typeof fills.$inferSelect;
 export type FillInsert = typeof fills.$inferInsert;
 export type PositionRow = typeof positions.$inferSelect;

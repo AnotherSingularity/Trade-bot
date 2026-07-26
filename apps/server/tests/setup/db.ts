@@ -39,6 +39,12 @@ export async function resetDatabase(): Promise<void> {
       'shadow_certification_runs',
       'post_fill_revalidations',
       'shadow_execution_plans',
+      // Phase 1.2-OPS additions — child first.
+      'soak_preflight_runs',
+      'adapter_selections',
+      'soak_incidents',
+      'soak_daily_reports',
+      'soak_runs',
       // Phase 1.2 additions — child first.
       'shadow_daily_reports',
       'shadow_operation_runs',

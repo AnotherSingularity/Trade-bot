@@ -92,6 +92,13 @@
       "when": 1786400000000,
       "tag": "0012_phase1_2_live_data_plane",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1786500000000,
+      "tag": "0013_phase1_2_ops_soak",
+      "breakpoints": true
     }
   ]
 }
