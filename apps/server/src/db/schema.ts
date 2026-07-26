@@ -6009,6 +6009,283 @@ export const validationIncidents = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Phase 3A — desktop operator console persistence
+// ---------------------------------------------------------------------------
+
+const DESKTOP_PLATFORM_VALUES = ['win32', 'darwin', 'linux'] as const;
+const DESKTOP_SERVICE_KINDS = [
+  'desktop_shell', 'server', 'scanner_worker', 'reconciliation_worker',
+  'mariadb', 'redis', 'market_data', 'reporting',
+] as const;
+const DESKTOP_SERVICE_STATES = [
+  'not_configured', 'checking_dependencies', 'starting', 'migrating',
+  'synchronizing', 'healthy', 'degraded', 'stopping', 'stopped',
+  'failed', 'recovery_required',
+] as const;
+const DESKTOP_OPERATOR_ACTIONS = [
+  'login', 'logout', 'session_expiry', 'session_revoke', 'service_start',
+  'service_stop', 'service_restart', 'config_change_request', 'export_request',
+  'incident_acknowledge', 'password_change', 'admin_setup',
+] as const;
+const DESKTOP_ACTION_OUTCOMES = ['success', 'failure', 'rejected', 'pending'] as const;
+const DESKTOP_EXPORT_REPORT_KINDS = [
+  'decision_chain', 'daily_shadow', 'portfolio_risk', 'universe_and_hygiene',
+  'fingerprints', 'regimes', 'microstructure', 'context', 'cost_attribution',
+  'validation', 'incidents', 'safety_status', 'system_manifest',
+] as const;
+const DESKTOP_EXPORT_FORMATS = ['json', 'csv', 'html'] as const;
+const DESKTOP_EXPORT_STATUS = ['queued', 'running', 'completed', 'failed'] as const;
+const DESKTOP_INCIDENT_TYPES = [
+  'startup_failure', 'service_crash_loop', 'dependency_missing',
+  'schema_mismatch', 'safe_flag_violation', 'ipc_validation_failure',
+  'authentication_failure', 'session_revoked', 'export_failure',
+  'controlled_change_blocked', 'packaging_verification_missing',
+] as const;
+const DESKTOP_INCIDENT_SEVERITY = ['informational', 'degraded', 'high', 'blocking'] as const;
+const DESKTOP_INCIDENT_STATES = ['open', 'acknowledged', 'resolved'] as const;
+const DESKTOP_BUILD_ARTIFACT_STATUS = ['pending', 'built', 'verified', 'absent'] as const;
+const DESKTOP_BUILD_SIGNING_STATUS = ['unsigned', 'signed_self', 'signed_certificate', 'pending_signing'] as const;
+
+export const desktopInstallations = mysqlTable(
+  'desktop_installations',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    installationKey: varchar('installationKey', { length: 64 }).notNull(),
+    desktopVersion: varchar('desktopVersion', { length: 32 }).notNull(),
+    buildCommit: varchar('buildCommit', { length: 64 }).notNull(),
+    platform: mysqlEnum('platform', DESKTOP_PLATFORM_VALUES).notNull(),
+    firstInstalledAt: timestamp('firstInstalledAt', { fsp: 3 }).notNull(),
+    lastLaunchAt: timestamp('lastLaunchAt', { fsp: 3 }),
+    machineFingerprint: varchar('machineFingerprint', { length: 128 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyUq: uniqueIndex('desk_inst_key_uq').on(t.installationKey),
+  }),
+);
+
+export const desktopSessions = mysqlTable(
+  'desktop_sessions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    installationId: int('installationId').notNull(),
+    sessionTokenHash: varchar('sessionTokenHash', { length: 128 }).notNull(),
+    actor: varchar('actor', { length: 128 }).notNull(),
+    createdAt: timestamp('createdAt', { fsp: 3 }).notNull(),
+    expiresAt: timestamp('expiresAt', { fsp: 3 }).notNull(),
+    revokedAt: timestamp('revokedAt', { fsp: 3 }),
+    revokeReason: varchar('revokeReason', { length: 255 }),
+    createdRow: timestamp('createdRow').notNull().defaultNow(),
+  },
+  (t) => ({
+    tokenUq: uniqueIndex('desk_sess_token_uq').on(t.sessionTokenHash),
+    instIdx: index('desk_sess_inst_idx').on(t.installationId, t.createdAt),
+    instFk: foreignKey({
+      name: 'desk_sess_inst_fk',
+      columns: [t.installationId],
+      foreignColumns: [desktopInstallations.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const desktopServiceStates = mysqlTable(
+  'desktop_service_states',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    installationId: int('installationId').notNull(),
+    serviceKind: mysqlEnum('serviceKind', DESKTOP_SERVICE_KINDS).notNull(),
+    state: mysqlEnum('state', DESKTOP_SERVICE_STATES).notNull(),
+    restartCount: int('restartCount').notNull().default(0),
+    crashLoopDetected: boolean('crashLoopDetected').notNull().default(false),
+    detail: varchar('detail', { length: 500 }),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('desk_svc_state_uq').on(t.installationId, t.serviceKind),
+    stateIdx: index('desk_svc_state_state_idx').on(t.state),
+    instFk: foreignKey({
+      name: 'desk_svc_state_inst_fk',
+      columns: [t.installationId],
+      foreignColumns: [desktopInstallations.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const desktopServiceEvents = mysqlTable(
+  'desktop_service_events',
+  {
+    id: bigint('id', { mode: 'number' }).autoincrement().primaryKey(),
+    installationId: int('installationId').notNull(),
+    serviceKind: mysqlEnum('serviceKind', DESKTOP_SERVICE_KINDS).notNull(),
+    previousState: varchar('previousState', { length: 32 }).notNull(),
+    newState: varchar('newState', { length: 32 }).notNull(),
+    reasonCode: varchar('reasonCode', { length: 64 }).notNull(),
+    detail: varchar('detail', { length: 500 }),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    instIdx: index('desk_svc_evt_inst_idx').on(t.installationId, t.observedAt),
+    svcIdx: index('desk_svc_evt_svc_idx').on(t.serviceKind, t.observedAt),
+    instFk: foreignKey({
+      name: 'desk_svc_evt_inst_fk',
+      columns: [t.installationId],
+      foreignColumns: [desktopInstallations.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const desktopConfigurationVersions = mysqlTable(
+  'desktop_configuration_versions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    installationId: int('installationId').notNull(),
+    configKey: varchar('configKey', { length: 64 }).notNull(),
+    configVersion: int('configVersion').notNull(),
+    previousValue: text('previousValue'),
+    newValue: text('newValue').notNull(),
+    changedBy: varchar('changedBy', { length: 128 }).notNull(),
+    confirmationText: varchar('confirmationText', { length: 255 }).notNull(),
+    changedAt: timestamp('changedAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('desk_cfg_ver_uq').on(t.installationId, t.configKey, t.configVersion),
+    instFk: foreignKey({
+      name: 'desk_cfg_ver_inst_fk',
+      columns: [t.installationId],
+      foreignColumns: [desktopInstallations.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const desktopOperatorActions = mysqlTable(
+  'desktop_operator_actions',
+  {
+    id: bigint('id', { mode: 'number' }).autoincrement().primaryKey(),
+    installationId: int('installationId').notNull(),
+    actor: varchar('actor', { length: 128 }).notNull(),
+    actionKind: mysqlEnum('actionKind', DESKTOP_OPERATOR_ACTIONS).notNull(),
+    outcome: mysqlEnum('outcome', DESKTOP_ACTION_OUTCOMES).notNull(),
+    details: text('details'),
+    occurredAt: timestamp('occurredAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    instIdx: index('desk_op_act_inst_idx').on(t.installationId, t.occurredAt),
+    kindIdx: index('desk_op_act_kind_idx').on(t.actionKind, t.outcome),
+    instFk: foreignKey({
+      name: 'desk_op_act_inst_fk',
+      columns: [t.installationId],
+      foreignColumns: [desktopInstallations.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const desktopExportJobs = mysqlTable(
+  'desktop_export_jobs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    installationId: int('installationId').notNull(),
+    reportKind: mysqlEnum('reportKind', DESKTOP_EXPORT_REPORT_KINDS).notNull(),
+    format: mysqlEnum('format', DESKTOP_EXPORT_FORMATS).notNull(),
+    referenceId: varchar('referenceId', { length: 128 }),
+    targetFolder: varchar('targetFolder', { length: 500 }).notNull(),
+    requestedBy: varchar('requestedBy', { length: 128 }).notNull(),
+    requestedAt: timestamp('requestedAt', { fsp: 3 }).notNull(),
+    completedAt: timestamp('completedAt', { fsp: 3 }),
+    status: mysqlEnum('status', DESKTOP_EXPORT_STATUS).notNull().default('queued'),
+    failureReason: varchar('failureReason', { length: 500 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index('desk_exp_job_status_idx').on(t.status, t.requestedAt),
+    instFk: foreignKey({
+      name: 'desk_exp_job_inst_fk',
+      columns: [t.installationId],
+      foreignColumns: [desktopInstallations.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const desktopExportArtifacts = mysqlTable(
+  'desktop_export_artifacts',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    exportJobId: int('exportJobId').notNull(),
+    artifactPath: varchar('artifactPath', { length: 500 }).notNull(),
+    checksumSha256: varchar('checksumSha256', { length: 64 }).notNull(),
+    sizeBytes: bigint('sizeBytes', { mode: 'number' }).notNull(),
+    reportVersion: varchar('reportVersion', { length: 32 }).notNull(),
+    redactionsApplied: varchar('redactionsApplied', { length: 500 }).notNull(),
+    generatedAt: timestamp('generatedAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('desk_exp_art_job_uq').on(t.exportJobId),
+    hashIdx: index('desk_exp_art_hash_idx').on(t.checksumSha256),
+    jobFk: foreignKey({
+      name: 'desk_exp_art_job_fk',
+      columns: [t.exportJobId],
+      foreignColumns: [desktopExportJobs.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const desktopIncidents = mysqlTable(
+  'desktop_incidents',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    installationId: int('installationId').notNull(),
+    incidentType: mysqlEnum('incidentType', DESKTOP_INCIDENT_TYPES).notNull(),
+    severity: mysqlEnum('severity', DESKTOP_INCIDENT_SEVERITY).notNull(),
+    reasonCode: varchar('reasonCode', { length: 64 }).notNull(),
+    details: text('details'),
+    startedAt: timestamp('startedAt', { fsp: 3 }).notNull(),
+    resolvedAt: timestamp('resolvedAt', { fsp: 3 }),
+    acknowledgedAt: timestamp('acknowledgedAt', { fsp: 3 }),
+    acknowledgedBy: varchar('acknowledgedBy', { length: 128 }),
+    currentState: mysqlEnum('currentState', DESKTOP_INCIDENT_STATES).notNull().default('open'),
+    runbookUrl: varchar('runbookUrl', { length: 500 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    typeIdx: index('desk_inc_type_idx').on(t.incidentType, t.severity),
+    stateIdx: index('desk_inc_state_idx').on(t.currentState, t.startedAt),
+    instFk: foreignKey({
+      name: 'desk_inc_inst_fk',
+      columns: [t.installationId],
+      foreignColumns: [desktopInstallations.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const desktopBuildManifests = mysqlTable(
+  'desktop_build_manifests',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    desktopVersion: varchar('desktopVersion', { length: 32 }).notNull(),
+    buildCommit: varchar('buildCommit', { length: 64 }).notNull(),
+    buildTimestamp: timestamp('buildTimestamp', { fsp: 3 }).notNull(),
+    platform: mysqlEnum('platform', DESKTOP_PLATFORM_VALUES).notNull(),
+    installerFilename: varchar('installerFilename', { length: 255 }),
+    installerSizeBytes: bigint('installerSizeBytes', { mode: 'number' }),
+    installerSha256: varchar('installerSha256', { length: 64 }),
+    artifactStatus: mysqlEnum('artifactStatus', DESKTOP_BUILD_ARTIFACT_STATUS).notNull().default('absent'),
+    verifiedBy: varchar('verifiedBy', { length: 128 }),
+    verifiedAt: timestamp('verifiedAt', { fsp: 3 }),
+    signingStatus: mysqlEnum('signingStatus', DESKTOP_BUILD_SIGNING_STATUS).notNull().default('unsigned'),
+    notes: text('notes'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('desk_build_manifest_uq').on(t.desktopVersion, t.buildCommit, t.platform),
+    statusIdx: index('desk_build_status_idx').on(t.artifactStatus),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -6348,3 +6625,23 @@ export type KellyActivationEvaluationRow = typeof kellyActivationEvaluations.$in
 export type KellyActivationEvaluationInsert = typeof kellyActivationEvaluations.$inferInsert;
 export type ValidationIncidentRow = typeof validationIncidents.$inferSelect;
 export type ValidationIncidentInsert = typeof validationIncidents.$inferInsert;
+export type DesktopInstallationRow = typeof desktopInstallations.$inferSelect;
+export type DesktopInstallationInsert = typeof desktopInstallations.$inferInsert;
+export type DesktopSessionRow = typeof desktopSessions.$inferSelect;
+export type DesktopSessionInsert = typeof desktopSessions.$inferInsert;
+export type DesktopServiceStateRow = typeof desktopServiceStates.$inferSelect;
+export type DesktopServiceStateInsert = typeof desktopServiceStates.$inferInsert;
+export type DesktopServiceEventRow = typeof desktopServiceEvents.$inferSelect;
+export type DesktopServiceEventInsert = typeof desktopServiceEvents.$inferInsert;
+export type DesktopConfigurationVersionRow = typeof desktopConfigurationVersions.$inferSelect;
+export type DesktopConfigurationVersionInsert = typeof desktopConfigurationVersions.$inferInsert;
+export type DesktopOperatorActionRow = typeof desktopOperatorActions.$inferSelect;
+export type DesktopOperatorActionInsert = typeof desktopOperatorActions.$inferInsert;
+export type DesktopExportJobRow = typeof desktopExportJobs.$inferSelect;
+export type DesktopExportJobInsert = typeof desktopExportJobs.$inferInsert;
+export type DesktopExportArtifactRow = typeof desktopExportArtifacts.$inferSelect;
+export type DesktopExportArtifactInsert = typeof desktopExportArtifacts.$inferInsert;
+export type DesktopIncidentRow = typeof desktopIncidents.$inferSelect;
+export type DesktopIncidentInsert = typeof desktopIncidents.$inferInsert;
+export type DesktopBuildManifestRow = typeof desktopBuildManifests.$inferSelect;
+export type DesktopBuildManifestInsert = typeof desktopBuildManifests.$inferInsert;

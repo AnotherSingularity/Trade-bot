@@ -39,6 +39,17 @@ export async function resetDatabase(): Promise<void> {
       'shadow_certification_runs',
       'post_fill_revalidations',
       'shadow_execution_plans',
+      // Phase 3A additions — child first (all FK to prior tables).
+      'desktop_build_manifests',
+      'desktop_incidents',
+      'desktop_export_artifacts',
+      'desktop_export_jobs',
+      'desktop_operator_actions',
+      'desktop_configuration_versions',
+      'desktop_service_events',
+      'desktop_service_states',
+      'desktop_sessions',
+      'desktop_installations',
       // Phase 2F additions — child first (all FK to prior tables).
       'validation_incidents',
       'kelly_activation_evaluations',

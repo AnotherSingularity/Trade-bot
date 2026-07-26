@@ -1,0 +1,76 @@
+name: desktop-windows
+
+# Phase 3A §Z — Windows packaging workflow.
+#
+# Builds the Horizon Trade Desktop operator console into a per-user
+# NSIS installer and uploads the artifact for operator install
+# verification. This workflow verifies packaging structure — it does
+# NOT constitute operational validation.
+#
+# Explicit posture:
+#   - DRY_RUN=true, ORDER_SUBMISSION_ENABLED=false enforced at build.
+#   - No live signing (signAndEditExecutable=false in package.json).
+#   - No auto-upload to release channels.
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  DRY_RUN: 'true'
+  ORDER_SUBMISSION_ENABLED: 'false'
+
+jobs:
+  lint-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install monorepo dependencies
+        run: npm ci
+      - name: Typecheck (main + preload + renderer)
+        working-directory: apps/desktop
+        run: npm run lint
+      - name: Run desktop tests
+        working-directory: apps/desktop
+        run: npm test
+
+  package-windows:
+    needs: lint-and-test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install monorepo dependencies
+        run: npm ci
+      - name: Build desktop bundle
+        working-directory: apps/desktop
+        run: npm run build
+      - name: Generate build manifest
+        working-directory: apps/desktop
+        run: npx ts-node build/generate-build-manifest.ts dist
+        env:
+          HORIZON_BUILD_COMMIT: ${{ github.sha }}
+      - name: Package Windows NSIS installer
+        working-directory: apps/desktop
+        run: npm run package:win
+        env:
+          HORIZON_BUILD_COMMIT: ${{ github.sha }}
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: horizon-trade-desktop-installer
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/dist/build-manifest.json
+          if-no-files-found: error
+          retention-days: 14

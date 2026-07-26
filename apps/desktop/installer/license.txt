@@ -1,0 +1,20 @@
+Horizon Trade — Desktop Operator Console (Phase 3A)
+
+This software is provided for authorized operators only. It is
+distributed AS-IS, without warranty of any kind, express or
+implied. In no event shall the authors be liable for any claim,
+damages or other liability arising from the use of this software.
+
+Safety guarantees enforced by this build:
+  - DRY_RUN is TRUE and cannot be disabled from the desktop UI.
+  - ORDER_SUBMISSION_ENABLED is FALSE.
+  - Live production Coinbase providers are not selectable.
+  - Live order submission is unconditionally disabled.
+  - Kelly sizing, non-interactive promotion, and observer
+    enforcement are disabled.
+  - Coinbase credentials are stored ONLY in the OS credential
+    store and are never exposed to the renderer, IPC, logs,
+    exports, or crash reports.
+
+By installing this software you acknowledge that no live capital
+may be placed at risk by this build under any circumstance.

@@ -1,0 +1,82 @@
+{
+  "name": "@horizon/desktop",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Horizon Trade — Windows Desktop Operator Console (Phase 3A)",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev:main": "tsc -p tsconfig.main.json --watch",
+    "dev:renderer": "vite",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:preload": "tsc -p tsconfig.preload.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:preload && npm run build:renderer",
+    "package:win": "electron-builder --win --publish never",
+    "lint": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "typecheck": "npm run lint",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@horizon/shared": "*",
+    "electron-log": "^5.2.4",
+    "electron-store": "^10.0.0",
+    "keytar": "^7.9.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^6.30.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.11.4",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.4.0",
+    "electron-builder": "^25.1.8",
+    "jsdom": "^26.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.7",
+    "vitest": "^3.2.6"
+  },
+  "build": {
+    "appId": "com.horizon.trade.desktop",
+    "productName": "Horizon Trade",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "files": [
+      "dist/**/*",
+      "!node_modules/**/*",
+      "node_modules/electron-log/**/*",
+      "node_modules/electron-store/**/*",
+      "node_modules/keytar/**/*"
+    ],
+    "extraMetadata": {
+      "main": "dist/main/index.js"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "Horizon Trade Setup ${version}.${ext}",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "installer/installer.nsh",
+      "license": "installer/license.txt",
+      "warningsAsErrors": true
+    },
+    "asar": true,
+    "removePackageScripts": true
+  }
+}
