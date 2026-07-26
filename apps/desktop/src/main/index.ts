@@ -116,7 +116,10 @@ async function boot(): Promise<void> {
     assets,
     mariadbUrl: process.env.HORIZON_MARIADB_URL ?? 'mysql://root:password@127.0.0.1:3306/horizon_trade',
     redisUrl: process.env.HORIZON_REDIS_URL ?? 'redis://127.0.0.1:6379',
-    serverHealthUrl: process.env.HORIZON_SERVER_HEALTH_URL ?? 'http://127.0.0.1:3000/health',
+    // Stage 1-FIX §4: use the dependency-aware readiness endpoint.
+    // The desktop's ServerProcessManager treats `ready=false` as
+    // not-ready even though HTTP is 200.
+    serverHealthUrl: process.env.HORIZON_SERVER_HEALTH_URL ?? 'http://127.0.0.1:3000/api/system/readiness',
     redisNamespace: 'horizon:*',
   });
 

@@ -42,21 +42,25 @@ services:
         condition: service_healthy
 
   db:
-    image: mysql:8.0.40
+    # Horizon's canonical database is MariaDB — the migrations and
+    # fingerprints (0000-0020_mariadb_fingerprint.json) were all
+    # produced against MariaDB. Do not swap to MySQL without a
+    # separate database-portability certification.
+    image: mariadb:10.11.6
     restart: on-failure:5
     stop_grace_period: 30s
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-password}
-      MYSQL_DATABASE: horizon_trade
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-password}
+      MARIADB_DATABASE: horizon_trade
     # Localhost-only binding; comment out the port block entirely to
     # keep the DB internal to the compose network. Uncomment only
     # when the operator explicitly needs a client from the host.
     # ports:
     #   - '127.0.0.1:3306:3306'
     volumes:
-      - mysql_data:/var/lib/mysql
+      - mariadb_data:/var/lib/mysql
     healthcheck:
-      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
+      test: ['CMD', 'mariadb-admin', 'ping', '-h', 'localhost', '-p${MYSQL_ROOT_PASSWORD:-password}']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -75,5 +79,5 @@ services:
       retries: 10
 
 volumes:
-  mysql_data:
+  mariadb_data:
   redis_data:

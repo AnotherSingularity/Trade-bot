@@ -73,6 +73,13 @@ function detailOfRedis(res: RedisProbeResult): string {
 // Managed Docker adapters (composeFile-aware)
 // ---------------------------------------------------------------------------
 
+// Stage 1-FIX §E: managed_docker adapters expose their runtime state
+// as `contract_verified` at the maturity level. The dependency-check
+// path parses the actual compose file and refuses if the canonical
+// service name is missing; the start path constructs the correct
+// docker CLI invocation. Whether Docker actually runs is beyond
+// what unit tests can prove — see docs/audit/stage1_fix_report.md.
+
 export function createMariadbAdapterManaged(rt: AdapterRuntime): ServiceAdapter {
   return {
     kind: 'mariadb',
@@ -103,6 +110,7 @@ export function createMariadbAdapterManaged(rt: AdapterRuntime): ServiceAdapter 
       const p = await rt.mariadbProbe.probe({
         connection: parseMysqlUrl(rt.input.mariadbUrl),
         expectedDatabase: 'horizon_trade',
+        engineEnforcement: 'strict_mariadb',
       });
       return { ok: p.ok, detail: detailOfMariadb(p) };
     },
@@ -163,7 +171,7 @@ export function createServerAdapterManaged(rt: AdapterRuntime, fingerprintPath: 
   return {
     kind: 'server',
     checkDependencies: async () => {
-      const m = await rt.mariadbProbe.probe({ connection: parseMysqlUrl(rt.input.mariadbUrl), expectedDatabase: 'horizon_trade' });
+      const m = await rt.mariadbProbe.probe({ connection: parseMysqlUrl(rt.input.mariadbUrl), expectedDatabase: 'horizon_trade', engineEnforcement: 'strict_mariadb' });
       if (!m.ok) return { ok: false, detail: `mariadb: ${detailOfMariadb(m)}` };
       const r = await rt.redisProbe.probe({ url: rt.input.redisUrl });
       if (!r.ok) return { ok: false, detail: `redis: ${detailOfRedis(r)}` };
@@ -218,12 +226,12 @@ export function createMariadbAdapterExternal(rt: AdapterRuntime): ServiceAdapter
   return {
     kind: 'mariadb',
     checkDependencies: async () => {
-      const p = await rt.mariadbProbe.probe({ connection: parseMysqlUrl(rt.input.mariadbUrl), expectedDatabase: 'horizon_trade' });
+      const p = await rt.mariadbProbe.probe({ connection: parseMysqlUrl(rt.input.mariadbUrl), expectedDatabase: 'horizon_trade', engineEnforcement: 'strict_mariadb' });
       return { ok: p.ok, detail: detailOfMariadb(p) };
     },
     start: async () => ({ ok: true, detail: 'externally_managed' }),
     healthCheck: async () => {
-      const p = await rt.mariadbProbe.probe({ connection: parseMysqlUrl(rt.input.mariadbUrl), expectedDatabase: 'horizon_trade' });
+      const p = await rt.mariadbProbe.probe({ connection: parseMysqlUrl(rt.input.mariadbUrl), expectedDatabase: 'horizon_trade', engineEnforcement: 'strict_mariadb' });
       return { ok: p.ok, detail: detailOfMariadb(p) };
     },
     stop: async () => ({ ok: true, detail: 'externally_managed' }),
@@ -250,7 +258,7 @@ export function createServerAdapterOutOfProcess(rt: AdapterRuntime, fingerprintP
   return {
     kind: 'server',
     checkDependencies: async () => {
-      const m = await rt.mariadbProbe.probe({ connection: parseMysqlUrl(rt.input.mariadbUrl), expectedDatabase: 'horizon_trade' });
+      const m = await rt.mariadbProbe.probe({ connection: parseMysqlUrl(rt.input.mariadbUrl), expectedDatabase: 'horizon_trade', engineEnforcement: 'strict_mariadb' });
       if (!m.ok) return { ok: false, detail: `mariadb: ${detailOfMariadb(m)}` };
       const r = await rt.redisProbe.probe({ url: rt.input.redisUrl });
       if (!r.ok) return { ok: false, detail: `redis: ${detailOfRedis(r)}` };

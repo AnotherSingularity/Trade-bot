@@ -6,24 +6,31 @@
 version: '3.8'
 services:
   db:
-    image: mysql:8.0
+    # Canonical DB engine: MariaDB. Do not swap to MySQL.
+    image: mariadb:10.11.6
     environment:
-      MYSQL_ROOT_PASSWORD: password
-      MYSQL_DATABASE: horizon_trade
+      MARIADB_ROOT_PASSWORD: password
+      MARIADB_DATABASE: horizon_trade
     ports:
       - '3306:3306'
     volumes:
-      - mysql_data:/var/lib/mysql
+      - mariadb_data:/var/lib/mysql
     healthcheck:
-      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
+      test: ['CMD', 'mariadb-admin', 'ping', '-h', 'localhost', '-ppassword']
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
+    command: ['redis-server', '--appendonly', 'yes']
     ports:
       - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
-  mysql_data:
+  mariadb_data:

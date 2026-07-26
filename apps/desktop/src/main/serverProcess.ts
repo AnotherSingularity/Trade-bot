@@ -28,8 +28,13 @@ export interface ServerProcessRecord {
 }
 
 export type HealthOutcome =
-  | { ok: true; body: string; ms: number }
-  | { ok: false; reason: 'not_running' | 'timeout' | 'non_2xx' | 'body_missing'; detail?: string; ms: number };
+  | { ok: true; body: string; ms: number; readiness?: ReadinessBody }
+  | { ok: false; reason: 'not_running' | 'timeout' | 'non_2xx' | 'body_missing' | 'not_ready'; detail?: string; ms: number; readiness?: ReadinessBody };
+
+export interface ReadinessBody {
+  ready: boolean;
+  components: Record<string, { ok: boolean; detail?: string }>;
+}
 
 export class ServerProcessManager {
   private record: ServerProcessRecord | null = null;
@@ -87,8 +92,24 @@ export class ServerProcessManager {
       if (!res.ok) return { ok: false, reason: 'non_2xx', detail: `status=${res.status}`, ms };
       const body = await res.text();
       if (!body) return { ok: false, reason: 'body_missing', ms };
+      // Stage 1-FIX §4/§F: if the endpoint returns a dependency-aware
+      // readiness body (`ready: boolean`, `components: {...}`), treat
+      // `ready=false` as `not_ready` — HTTP success alone does NOT
+      // establish operational readiness.
+      let readiness: ReadinessBody | undefined;
+      try {
+        const parsed = JSON.parse(body) as { ready?: boolean; components?: Record<string, { ok: boolean; detail?: string }> };
+        if (parsed && typeof parsed.ready === 'boolean' && parsed.components) {
+          readiness = { ready: parsed.ready, components: parsed.components };
+          if (!parsed.ready) {
+            const failed = Object.entries(parsed.components)
+              .filter(([, c]) => !c.ok).map(([k, c]) => `${k}:${c.detail ?? 'not_ok'}`).join(',');
+            return { ok: false, reason: 'not_ready', detail: failed || 'ready=false', ms, readiness };
+          }
+        }
+      } catch { /* body is not JSON — treat as legacy /health */ }
       if (this.record) this.record.lastHealthyAt = new Date();
-      return { ok: true, body, ms };
+      return { ok: true, body, ms, readiness };
     } catch (e) {
       const msg = String(e);
       if (/Abort|abort/.test(msg)) return { ok: false, reason: 'timeout', detail: msg.slice(0, 200), ms: Date.now() - started };

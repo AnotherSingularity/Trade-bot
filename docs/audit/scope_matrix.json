@@ -17,12 +17,24 @@
   "auditCommit": "0a1d76fa9770d045d7b64d1cb3d6b81069d4816a",
   "auditBranch": "claude/horizon-trade-bot-mcbcfo",
   "stage1Update": {
-    "note": "Stage 1 delivers real production runner, compose contract, MariaDB/Redis probes, migration runner, schema fingerprint verifier, server process manager, adapter factory (production forbids stubs), scanner readiness derivation, authoritative status source, and graceful shutdown. Existing capabilities whose maturity changes are annotated in the 'maturityAfterStage1' field below.",
+    "note": "Stage 1 delivers real production runner, MariaDB/Redis probes, migration runner, schema fingerprint verifier, server process manager, adapter factory (production forbids stubs), scanner readiness derivation, authoritative status source, and graceful shutdown. Stage 1-FIX restores MariaDB as canonical engine, adds real server bootstrap endpoints, downgrades managed-Docker to contract_verified only, and adds a real external-services integration test that spawns the actual server. Existing capabilities whose maturity changes are annotated below.",
     "changes": [
-      { "capabilityId": "desktop.serviceSupervisor", "before": "unit_verified", "after": "integration_verified", "evidence": "170/170 desktop tests including MariaDB + Redis integration against local services and supervisor scripting" },
-      { "capabilityId": "desktop.migrationRunner", "before": "absent", "after": "integration_verified", "evidence": "MigrationRunner spawns real drizzle-kit via ChildProcessCommandRunner; tests confirm nonzero-exit + timeout paths" },
-      { "capabilityId": "package.dockerImagesPin", "before": "absent", "after": "unit_verified", "evidence": "docker-compose.prod.yml pins mysql:8.0.40 and redis:7.4-alpine and adds server + db + redis healthchecks; localhost binding" },
-      { "capabilityId": "desktop.safetyValues", "before": "contract_only", "after": "integration_verified", "evidence": "DesktopStatusSource replaces the Phase 3A hardcoded map; unknown source yields known=false rather than misleading zeros" }
+      { "capabilityId": "desktop.serviceSupervisor", "before": "unit_verified", "after": "external_services_integration_verified; managed_docker_contract_verified", "evidence": "External-services integration test spawns the real server against local MariaDB + Redis and exercises: dependency-aware readiness, migrations through the desktop migration runner, real Create Order counters, real reconciliation state, derived scanner readiness, graceful shutdown, and restart. Managed_docker remains contract-only until a real Docker engine executes the stack." },
+      { "capabilityId": "desktop.migrationRunner", "before": "absent", "after": "integration_verified", "evidence": "MigrationRunner spawns real drizzle-kit via ChildProcessCommandRunner; the Stage 1-FIX external-services test runs it end-to-end against a fresh MariaDB database" },
+      { "capabilityId": "package.dockerImagesPin", "before": "absent", "after": "unit_verified", "evidence": "docker-compose.prod.yml pins mariadb:10.11.6 and redis:7.4-alpine with server/db/redis healthchecks; localhost binding; volumes renamed mariadb_data. Runtime not verified in this stage (no Docker available in the audit container)." },
+      { "capabilityId": "desktop.safetyValues", "before": "contract_only", "after": "runtime_wired", "evidence": "DesktopStatusSource reads authoritative values from /api/desktop/create-order-counters, /api/desktop/observer-policy-versions, /api/desktop/champion-configuration on the real running server. Unknown source yields known=false rather than misleading zeros." },
+      { "capabilityId": "desktop.serverReadiness", "before": "contract_only", "after": "integration_verified", "evidence": "ServerAdapter uses /api/system/readiness (dependency-aware). ServerProcessManager parses the readiness body and treats ready=false as not_ready even when HTTP is 200. 7 tests in stage1fix_readiness_semantics.test.ts exercise every failure component." },
+      { "capabilityId": "server.desktopBootstrapEndpoints", "before": "absent", "after": "integration_verified", "evidence": "apps/server/src/routes/desktop.ts: /api/system/readiness, /api/desktop/create-order-counters, /api/desktop/observer-policy-versions, /api/desktop/champion-configuration, /api/desktop/scanner-readiness, /api/desktop/reconciliation/status. Localhost-only. External test proves the desktop reads real values from a running server." }
+    ]
+  },
+  "stage1FixCorrections": {
+    "note": "Stage 1-FIX corrections applied against the Stage 1 review",
+    "corrections": [
+      { "issue": "canonical DB engine swapped from MariaDB to MySQL", "correction": "docker-compose.prod.yml + docker-compose.yml restored to mariadb:10.11.6; MariadbProbe now defaults engineEnforcement=strict_mariadb so production rejects a MySQL server" },
+      { "issue": "managed Docker labeled integration_verified without real Docker", "correction": "downgraded to managed_docker_contract_verified + managed_docker_runtime_verification_pending" },
+      { "issue": "server endpoints referenced by DesktopStatusSource did not exist", "correction": "added /api/system/readiness + /api/desktop/* — real values from fetchBarrier + DB queries" },
+      { "issue": "server health check was too shallow", "correction": "ServerProcessManager now parses the readiness body and returns not_ready when ready=false; HTTP-200 alone no longer establishes operational readiness" },
+      { "issue": "test-count reporting inconsistent", "correction": "exact counts recorded in docs/audit/stage1_fix_report.md and this scope matrix" }
     ]
   },
   "capabilities": [

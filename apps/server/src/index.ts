@@ -13,6 +13,7 @@ import { requireAuth } from './middleware/auth';
 import { closeDb } from './db';
 import { reconcileOnStartup } from './trading/reconciler';
 import { withLease, RECONCILE_LEASE_KEY } from './jobs/lease';
+import { desktopRouter, systemReadinessRouter } from './routes/desktop';
 
 /**
  * Express server entry point — Phase 0.
@@ -87,6 +88,12 @@ async function main() {
   app.get('/api/trading/status', requireAuth, async (_req: Request, res: Response) => {
     res.json(await getBotStatusDTO());
   });
+
+  // ── Stage 1-FIX §B: dependency-aware system readiness + desktop
+  // bootstrap surfaces. Localhost-only, bootstrap-safe values only.
+  app.set('trust proxy', 'loopback');
+  app.use('/api', systemReadinessRouter());
+  app.use('/api/desktop', desktopRouter());
 
   // ── tRPC
   app.use(

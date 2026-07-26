@@ -13,6 +13,7 @@ export type MariadbFailureReason =
   | 'unreachable'
   | 'auth_failed'
   | 'unsupported_version'
+  | 'engine_not_mariadb'
   | 'database_missing'
   | 'migration_table_missing'
   | 'transaction_unsupported'
@@ -23,18 +24,24 @@ export interface MariadbProbeResult {
   reason?: MariadbFailureReason;
   detail?: string;
   serverVersion?: string;
+  serverEngine?: 'mariadb' | 'mysql' | 'unknown';
   currentDatabase?: string;
   migrationCount?: number;
 }
 
-const MIN_MAJOR = 8;   // MySQL 8+
 const MIN_MARIADB_MAJOR = 10;
+
+export type EngineEnforcement = 'strict_mariadb' | 'accept_both';
 
 export interface MariadbProbeInput {
   connection: ConnectionOptions;
   expectedDatabase: string;
   migrationTable?: string;
   timeoutMs?: number;
+  // Stage 1-FIX §A: production rejects MySQL because migrations +
+  // fingerprints were produced against MariaDB. Only the fixture /
+  // test harness may opt into accept_both.
+  engineEnforcement?: EngineEnforcement;
 }
 
 const DEFAULT_MIGRATION_TABLE = '__drizzle_migrations';
@@ -67,8 +74,14 @@ export class MariadbProbe {
       const [verRows] = await conn.query('SELECT VERSION() AS v');
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const v = String((verRows as any[])[0]?.v ?? '');
+      const engine: MariadbProbeResult['serverEngine'] = /mariadb/i.test(v)
+        ? 'mariadb' : /^\d+\./.test(v) ? 'mysql' : 'unknown';
+      const enforcement: EngineEnforcement = input.engineEnforcement ?? 'strict_mariadb';
+      if (enforcement === 'strict_mariadb' && engine !== 'mariadb') {
+        return { ok: false, reason: 'engine_not_mariadb', detail: `engine=${engine}; version=${v}`, serverVersion: v, serverEngine: engine };
+      }
       const versionOk = supportsVersion(v);
-      if (!versionOk.ok) return { ok: false, reason: 'unsupported_version', detail: v, serverVersion: v };
+      if (!versionOk.ok) return { ok: false, reason: 'unsupported_version', detail: v, serverVersion: v, serverEngine: engine };
 
       const [dbRows] = await conn.query('SELECT DATABASE() AS db');
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -107,7 +120,7 @@ export class MariadbProbe {
         return { ok: false, reason: 'transaction_unsupported', detail: 'begin/rollback failed', serverVersion: v, currentDatabase: currentDb, migrationCount };
       }
 
-      return { ok: true, serverVersion: v, currentDatabase: currentDb, migrationCount };
+      return { ok: true, serverVersion: v, serverEngine: engine, currentDatabase: currentDb, migrationCount };
     } catch (e) {
       return { ok: false, reason: 'probe_threw', detail: String(e).slice(0, 200) };
     } finally {
@@ -117,7 +130,10 @@ export class MariadbProbe {
 }
 
 export function supportsVersion(version: string): { ok: boolean; reason?: string } {
-  // Accept MySQL 8.x or MariaDB 10.x/11.x.
+  // Canonical engine: MariaDB 10+. MySQL is only accepted when the
+  // caller explicitly asks for accept_both engine enforcement — a
+  // separate database-portability certification would be required
+  // to make that the production default.
   const m = version.match(/^(\d+)\.(\d+)/);
   if (!m) return { ok: false, reason: 'unparseable_version' };
   const major = Number(m[1]);
@@ -125,6 +141,9 @@ export function supportsVersion(version: string): { ok: boolean; reason?: string
     if (major >= MIN_MARIADB_MAJOR) return { ok: true };
     return { ok: false, reason: `mariadb<${MIN_MARIADB_MAJOR}` };
   }
-  if (major >= MIN_MAJOR) return { ok: true };
-  return { ok: false, reason: `mysql<${MIN_MAJOR}` };
+  // Non-MariaDB engine. supportsVersion returns ok for MySQL 8+
+  // ONLY when the caller has already relaxed engineEnforcement to
+  // accept_both. The strict path in `probe()` catches this earlier.
+  if (major >= 8) return { ok: true };
+  return { ok: false, reason: `mysql<8` };
 }
