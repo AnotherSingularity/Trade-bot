@@ -585,6 +585,7 @@ export const RegimePayloadSchema = z.object({
 }).strict();
 export const RegimeEnvelopeSchema = desktopDataEnvelope(RegimePayloadSchema);
 export type RegimeEnvelope = z.infer<typeof RegimeEnvelopeSchema>;
+export type RegimePayload = z.infer<typeof RegimePayloadSchema>;
 
 // ---------------------------------------------------------------------------
 // Risk (Portfolio Risk) — Stage 3 §12.
@@ -629,6 +630,7 @@ export const RiskPayloadSchema = z.object({
 }).strict();
 export const RiskEnvelopeSchema = desktopDataEnvelope(RiskPayloadSchema);
 export type RiskEnvelope = z.infer<typeof RiskEnvelopeSchema>;
+export type RiskPayload = z.infer<typeof RiskPayloadSchema>;
 
 // ---------------------------------------------------------------------------
 // Microstructure — Stage 3 §13.
@@ -678,6 +680,7 @@ export const MicrostructurePayloadSchema = z.object({
 }).strict();
 export const MicrostructureEnvelopeSchema = desktopDataEnvelope(MicrostructurePayloadSchema);
 export type MicrostructureEnvelope = z.infer<typeof MicrostructureEnvelopeSchema>;
+export type MicrostructurePayload = z.infer<typeof MicrostructurePayloadSchema>;
 
 // ---------------------------------------------------------------------------
 // Context — Stage 3 §14.
@@ -719,6 +722,7 @@ export const ContextPayloadSchema = z.object({
 }).strict();
 export const ContextEnvelopeSchema = desktopDataEnvelope(ContextPayloadSchema);
 export type ContextEnvelope = z.infer<typeof ContextEnvelopeSchema>;
+export type ContextPayload = z.infer<typeof ContextPayloadSchema>;
 
 // ---------------------------------------------------------------------------
 // Validation Lab — Stage 3 §15.
@@ -788,6 +792,7 @@ export const CostsPayloadSchema = z.object({
 }).strict();
 export const CostsEnvelopeSchema = desktopDataEnvelope(CostsPayloadSchema);
 export type CostsEnvelope = z.infer<typeof CostsEnvelopeSchema>;
+export type CostsPayload = z.infer<typeof CostsPayloadSchema>;
 
 // ---------------------------------------------------------------------------
 // Protection — Stage 3 §16 (protection).
@@ -814,6 +819,7 @@ export const ProtectionPayloadSchema = z.object({
 }).strict();
 export const ProtectionEnvelopeSchema = desktopDataEnvelope(ProtectionPayloadSchema);
 export type ProtectionEnvelope = z.infer<typeof ProtectionEnvelopeSchema>;
+export type ProtectionPayload = z.infer<typeof ProtectionPayloadSchema>;
 
 // ---------------------------------------------------------------------------
 // Reconciliation — Stage 3 §16 (reconciliation).
@@ -874,6 +880,7 @@ export const IncidentRowSchema = z.object({
 export const IncidentListPayloadSchema = paginatedList(IncidentRowSchema);
 export const IncidentListEnvelopeSchema = desktopDataEnvelope(IncidentListPayloadSchema);
 export type IncidentListEnvelope = z.infer<typeof IncidentListEnvelopeSchema>;
+export type IncidentRow = z.infer<typeof IncidentRowSchema>;
 
 export const IncidentAcknowledgeInputSchema = z.object({
   incidentId: OpaqueIdSchema,

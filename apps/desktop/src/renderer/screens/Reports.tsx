@@ -1,45 +1,67 @@
-import { useState } from 'react';
-import { ScreenLayout, EmptyState } from '../components/ScreenLayout';
-
-const REPORT_KINDS = [
-  'decision_chain', 'daily_shadow', 'portfolio_risk', 'universe_and_hygiene',
-  'fingerprints', 'regimes', 'microstructure', 'context', 'cost_attribution',
-  'validation', 'incidents', 'safety_status', 'system_manifest',
-] as const;
+import { ScreenLayout } from '../components/ScreenLayout';
+import { StateFrame } from '../components/StateFrame';
+import { useDesktopData } from '../hooks/useDesktopData';
 
 export function ReportsScreen() {
-  const [status, setStatus] = useState<string | null>(null);
-
-  async function pickFolder() {
-    if (!window.horizon) { setStatus('Desktop bridge not available.'); return; }
-    try {
-      const r = await window.horizon.selectExportFolder();
-      setStatus(r.folder ? `Selected folder: ${r.folder}` : 'Folder selection cancelled.');
-    } catch (e) {
-      setStatus(String(e));
-    }
-  }
-
+  const { state, envelope, error, refresh } = useDesktopData('reports.get');
   return (
     <ScreenLayout
       title="Reports"
-      subtitle="Signed, versioned export bundles. Secrets are always redacted."
-      banner={{ kind: 'info', text: 'Reports are exported only to an operator-selected folder. Never to the network.' }}
+      subtitle="Report catalog and export-job history. Actual generation is deferred to Stage 4."
+      banner={{ kind: 'danger', text: 'LIVE ORDER SUBMISSION DISABLED — report generation is Stage-4 pending.' }}
     >
-      <h2>Report kinds</h2>
-      <div className="grid grid-4">
-        {REPORT_KINDS.map((k) => (
-          <div key={k} className="card">
-            <div className="k">Kind</div>
-            <div className="v">{k}</div>
-          </div>
-        ))}
-      </div>
-      <h2>Choose export folder</h2>
-      <button onClick={pickFolder}>Select export folder</button>
-      {status && <p className="subtitle">{status}</p>}
-      <h2>Recent exports</h2>
-      <EmptyState message="Recent exports appear here with checksum, report version and applied redactions." />
+      <StateFrame label="reports.get" state={state} envelope={envelope} error={error} refresh={refresh}>
+        {(p) => (
+          <>
+            <div className="banner warn" role="status" data-testid="report-generation-pending-banner">
+              Report generation is NOT YET IMPLEMENTED — every catalog entry surfaces
+              <code> generationAvailable: false</code> with reason <code>{p.reasonCode}</code>.
+              Actual deterministic report generation and export lands in Stage 4.
+            </div>
+            <h2>Report catalog</h2>
+            <table className="data">
+              <thead>
+                <tr><th>Kind</th><th>Label</th><th>Description</th><th>Formats</th><th>Available</th><th>Reason</th></tr>
+              </thead>
+              <tbody>
+                {p.catalog.map((c) => (
+                  <tr key={c.kind}>
+                    <td><code>{c.kind}</code></td>
+                    <td>{c.label}</td>
+                    <td>{c.description}</td>
+                    <td>{c.supportedFormats.join(', ')}</td>
+                    <td><span className="state-badge disabled">no</span></td>
+                    <td><code>{c.reasonCode}</code></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <h2>Export-job history</h2>
+            {p.history.items.length === 0 ? (
+              <div className="empty">No export jobs recorded yet.</div>
+            ) : (
+              <table className="data">
+                <thead>
+                  <tr><th>Job</th><th>Kind</th><th>Status</th><th>Requested</th><th>Completed</th><th>Checksum</th><th>Reason</th></tr>
+                </thead>
+                <tbody>
+                  {p.history.items.map((r) => (
+                    <tr key={r.jobId}>
+                      <td>{r.jobId}</td>
+                      <td>{r.kind}</td>
+                      <td><span className={`state-badge ${r.status}`}>{r.status}</span></td>
+                      <td>{r.requestedAt}</td>
+                      <td>{r.completedAt ?? '—'}</td>
+                      <td>{r.artifactChecksum ? <code>{r.artifactChecksum.slice(0, 16)}</code> : '—'}</td>
+                      <td>{r.reasonCode ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
+      </StateFrame>
     </ScreenLayout>
   );
 }

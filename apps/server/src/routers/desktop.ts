@@ -46,7 +46,7 @@ import {
   listIncidents,
   listReconciliation,
   listUniverse,
-} from '../desktop/queries/stubs';
+} from '../desktop/queries/domains';
 
 const EmptyInputSchema = z.object({}).strict();
 
@@ -117,7 +117,12 @@ export const desktopRouter = router({
       .query(({ input }) => listIncidents(input)),
     acknowledge: operatorProcedure
       .input(IncidentAcknowledgeInputSchema)
-      .mutation(({ input }) => acknowledgeIncident(input)),
+      .mutation(({ input, ctx }) => {
+        // Actor username from the resolved operator identity — never
+        // renderer-supplied.
+        const actor = ctx.auth?.kind === 'operator' ? ctx.auth.account.usernameNormalized : null;
+        return acknowledgeIncident(input, actor);
+      }),
   }),
   reports: router({
     get: operatorProcedure.input(PaginationInputSchema.optional()).query(() => getReports()),

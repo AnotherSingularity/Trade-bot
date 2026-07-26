@@ -60,18 +60,56 @@ which `blocking_gaps.md` categories it consumes.
   Deferred to Stage 3 per the Stage 2 work order — Stage 2 restricts
   the renderer to the auth flow.
 
-## Stage 3 — Full screen binding
+## Stage 3 — Full screen binding ✅ COMPLETE
 
-- **Entry**: Stage 2 committed.
-- **Exit**:
-  - Per-screen data binding for the remaining 15 screens
-    (Cat F 19-22 × 15). Each screen's endpoint returns real
-    server-side data (from fixtures or fresh integration tests).
-  - Every screen's state matrix (loading, empty, healthy, degraded,
-    failed, stale, unauthorized, api-error) implemented.
+### Stage 3A — foundation + reference bindings (complete)
+
+- **Delivered**: shared `DesktopDataEnvelope<T>` v3.0.0 contract + 22
+  operator-authenticated tRPC procedures across 18 domains + main-process
+  `DesktopDataClient` + `desktop.data` IPC channel with authenticated
+  discriminated-union schema + `useDesktopData` hook + `<StateFrame>`
+  10-state renderer + Overview / ShadowPortfolio / Positions /
+  DecisionJournal bound end-to-end. See `stage3a_report.md` +
+  `stage3a-fix-readonly-boundaries.test.ts` + Stage 3A-FIX corrections.
+
+### Stage 3B — remaining 15 screens (complete)
+
+- **Entry**: Stage 3A + Stage 3A-FIX committed.
+- **Delivered**:
+  - Replaced the 11 remaining stub query services with real DB-backed
+    reads in `apps/server/src/desktop/queries/domains.ts`; every response
+    envelope carries its real `<domain>.v1` sourceVersion. Isolated the
+    incident-acknowledge audit-insert into
+    `apps/server/src/desktop/audit/operatorActions.ts` (outside
+    `desktop/queries/`) so the read-only boundary test enforces zero
+    mutations in the query layer.
+  - Rebuilt all 15 remaining renderer screens (ResearchUniverse /
+    Fingerprints / Regimes / PortfolioRisk / Microstructure / Context /
+    ValidationLab / CostsAttribution / Protection / Reconciliation /
+    Incidents / Reports / Configuration / System / Safety) using
+    `useDesktopData(key)` + `<StateFrame>`, preserving mandatory
+    banners (LIVE ORDER SUBMISSION DISABLED on every screen; OBSERVER
+    ENFORCEMENT DISABLED + KELLY DISABLED on PortfolioRisk; PRODUCTION
+    LEVEL-2 PROVIDER INACTIVE + QUEUE POSITION NOT KNOWN on
+    Microstructure; PROSPECTIVE EVIDENCE PENDING + MODEL PROMOTION
+    DISABLED on ValidationLab).
+  - Full 10-state matrix machine-checked for every remaining screen via
+    the 150-assertion `apps/desktop/tests/renderer/stage3b_state_matrices.test.tsx`
+    (15 screens × loading / healthy / empty / stale / degraded /
+    unavailable / unauthorized / session_expired / api_failure /
+    contract_mismatch).
+  - Cursor pagination for the list domains (universe, fingerprints,
+    validation, reconciliation, incidents) — all cursors are opaque
+    base64url-encoded JSON; invalid cursors reject with unavailable.
+  - Honesty proof in `apps/server/tests/stage3b-domain-honesty.test.ts`
+    (13 assertions covering §21 items 2, 3, 4, 15, 18-24, 30-33).
 - **Consumes**: Category F.
-- **Verdict**: `desktop.screenIntegration: integration_verified` for
-  all 19 screens.
+- **Verdict achieved**: `stage3b_screen_binding_complete +
+  all_19_desktop_screens_bound +
+  authenticated_desktop_data_integration_verified` (see
+  `stage3b_report.md`). `desktop_screen_binding_complete_final` is NOT
+  claimed — native Electron smoke, report generation, managed-Docker
+  runtime verification, and Windows packaging remain pending.
 
 ## Stage 4 — Real report generation
 

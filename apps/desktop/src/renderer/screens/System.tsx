@@ -1,48 +1,80 @@
-import { ScreenLayout, KVCard, LoadingState } from '../components/ScreenLayout';
-import { useApplicationVersion, useDesktopStatus, useServiceHealth } from '../hooks/useHorizon';
+import { KVCard, ScreenLayout } from '../components/ScreenLayout';
+import { StateFrame } from '../components/StateFrame';
+import { useDesktopData } from '../hooks/useDesktopData';
 
 export function SystemScreen() {
-  const { version } = useApplicationVersion();
-  const { status } = useDesktopStatus();
-  const { services, loading, refresh } = useServiceHealth();
+  const { state, envelope, error, refresh } = useDesktopData('system.get');
   return (
     <ScreenLayout
       title="System"
-      subtitle="Local services, build fingerprint and runtime environment."
-      banner={{ kind: 'info', text: 'All service controls operate on the local runtime. No remote hosts.' }}
+      subtitle="Runtime versions, service ownership, migration + schema state."
+      banner={{ kind: 'danger', text: 'LIVE ORDER SUBMISSION DISABLED — read-only system view.' }}
     >
-      <h2>Build</h2>
-      <div className="grid grid-4">
-        <KVCard label="Desktop version" value={version?.desktopVersion ?? status?.desktopVersion ?? '—'} />
-        <KVCard label="Build commit" value={version?.buildCommit ?? status?.buildCommit ?? '—'} />
-        <KVCard label="Build timestamp" value={version?.buildTimestamp ?? '—'} />
-        <KVCard label="Schema version" value={status?.schemaVersion ?? '—'} />
-      </div>
-      <h2>Runtime</h2>
-      <div className="grid grid-4">
-        <KVCard label="Electron" value={version?.electronVersion ?? '—'} />
-        <KVCard label="Node" value={version?.nodeVersion ?? '—'} />
-        <KVCard label="Platform" value={version?.platform ?? '—'} />
-        <KVCard label="Database mode" value={status?.databaseMode ?? '—'} />
-      </div>
-      <h2>Services</h2>
-      <button onClick={refresh}>Refresh</button>
-      {loading ? <LoadingState /> : (
-        <table className="data">
-          <thead><tr><th>Service</th><th>State</th><th>Restarts</th><th>Crash loop</th><th>Detail</th></tr></thead>
-          <tbody>
-            {services.map((s) => (
-              <tr key={s.kind}>
-                <td>{s.kind}</td>
-                <td><span className={`state-badge ${s.state.toLowerCase()}`}>{s.state}</span></td>
-                <td>{s.restartCount}</td>
-                <td>{s.crashLoopDetected ? 'YES' : 'no'}</td>
-                <td>{s.detail ?? '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <StateFrame label="system.get" state={state} envelope={envelope} error={error} refresh={refresh}>
+        {(sys) => (
+          <>
+            <h2>Build</h2>
+            <div className="grid grid-4">
+              <KVCard label="Desktop version" value={sys.desktopVersion} />
+              <KVCard label="Server version" value={sys.serverVersion ?? '—'} />
+              <KVCard label="Build commit" value={sys.buildCommit ?? '—'} />
+              <KVCard label="Build timestamp" value={sys.buildTimestamp ?? '—'} />
+            </div>
+            <h2>Runtime</h2>
+            <div className="grid grid-4">
+              <KVCard label="Electron" value={sys.electronVersion ?? '—'} />
+              <KVCard label="Node" value={sys.nodeVersion ?? '—'} />
+              <KVCard label="Platform" value={sys.platform} />
+              <KVCard label="Runtime mode" value={sys.runtimeMode} />
+              <KVCard label="Uptime (seconds)" value={sys.uptimeSeconds ?? '—'} />
+              <KVCard label="Log health" value={sys.logHealth} />
+            </div>
+            <h2>Schema + migrations</h2>
+            <div className="grid grid-4">
+              <KVCard label="Applied count" value={sys.migrationState.appliedCount ?? '—'} />
+              <KVCard label="Schema (observed)" value={sys.migrationState.schemaVersion ?? '—'} />
+              <KVCard label="Fingerprint" value={sys.schemaState.fingerprintMatch} status={sys.schemaState.fingerprintMatch === 'match' ? 'healthy' : sys.schemaState.fingerprintMatch === 'mismatch' ? 'danger' : 'unknown'} />
+              <KVCard label="Expected version" value={sys.schemaState.expectedVersion} />
+            </div>
+            <h2>Processes</h2>
+            <table className="data">
+              <thead><tr><th>Kind</th><th>PID</th><th>State</th><th>Started at</th></tr></thead>
+              <tbody>
+                {sys.processes.map((p, i) => (
+                  <tr key={`${p.kind}-${i}`}>
+                    <td>{p.kind}</td>
+                    <td>{p.pid ?? '—'}</td>
+                    <td>{p.state}</td>
+                    <td>{p.startedAt ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <h2>Service ownership</h2>
+            <table className="data">
+              <thead><tr><th>Service</th><th>Owner</th></tr></thead>
+              <tbody>{sys.serviceOwnership.map((s) => (
+                <tr key={s.service}><td>{s.service}</td><td>{s.owner}</td></tr>
+              ))}</tbody>
+            </table>
+            <h2>Runtime assets</h2>
+            {sys.runtimeAssets.length === 0 ? (
+              <div className="empty">No runtime assets registered.</div>
+            ) : (
+              <table className="data">
+                <thead><tr><th>Asset</th><th>Version</th></tr></thead>
+                <tbody>{sys.runtimeAssets.map((a) => (
+                  <tr key={a.name}><td>{a.name}</td><td>{a.version ?? '—'}</td></tr>
+                ))}</tbody>
+              </table>
+            )}
+            <p className="subtitle">
+              Sensitive paths are redacted or normalized. Absent workers appear absent —
+              never healthy. Managed Docker runtime verification remains pending.
+            </p>
+          </>
+        )}
+      </StateFrame>
     </ScreenLayout>
   );
 }

@@ -103,7 +103,10 @@ describe('Stage 3A-FIX §4.1 + §4.2 — desktop query services are read-only', 
     expect(queries).toHaveProperty('portfolio.ts');
     expect(queries).toHaveProperty('positions.ts');
     expect(queries).toHaveProperty('decisions.ts');
-    expect(queries).toHaveProperty('stubs.ts');
+    // Stage 3B: `stubs.ts` was superseded by real DB-backed queries in
+    // `domains.ts` (the 11 domains listed in the Stage 3B spec §1). The
+    // read-only boundary rules below apply to every file in this dir.
+    expect(queries).toHaveProperty('domains.ts');
   });
 
   it('no query service imports an economic writer or execution module', () => {

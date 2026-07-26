@@ -104,19 +104,30 @@ are in `revised_roadmap.md`.
     operator clicks a kind + format; render the returned
     `artifactPath` + `checksum`; open the folder on success.
 
-## Category F — Per-screen data binding (blocks 15 of 19 screens)
+## Category F — Per-screen data binding — CLOSED IN STAGE 3A + STAGE 3B
 
-For each of the 15 non-bound screens, four things need to happen:
-
-19. **Server read API** returning the data the screen would show.
-20. **IPC method** in `ipcContract.ts` + `preload/index.ts` +
-    `main/ipc.ts`.
-21. **`window.horizon.*` hook** in `hooks/useHorizon.ts`.
-22. **Screen wiring** in `renderer/screens/<Screen>.tsx` — replace
-    `EmptyState` with real data + loading/empty/healthy/degraded/
-    failed/stale/unauth/api-error states.
-
-Per screen, roughly 3-6 hours of work. 15 screens → substantial.
+19. ✅ **Server read APIs.** Stage 3A introduced 22 `operator_authenticated_business`
+    procedures under the `desktop.*` tRPC namespace across 18 domains.
+    Stage 3B replaced the 11 remaining stubs with real DB-backed queries in
+    `apps/server/src/desktop/queries/domains.ts`; all responses carry their
+    real `<domain>.v1` sourceVersion.
+20. ✅ **IPC method.** `IPC_CHANNELS.desktopData` (single discriminated-union
+    business-data channel) declared with
+    `requiresAuthenticatedSession: true` and
+    `DesktopDataChannelRequestSchema` in `apps/desktop/src/shared/ipcContract.ts`.
+21. ✅ **`window.horizon.*` hook.** `useDesktopData(key)` renderer hook +
+    `<StateFrame>` component implement all 10 required states with a
+    single API surface. The preload bridge validates every key against
+    the compiled-in `DESKTOP_DATA_KEYS`.
+22. ✅ **Screen wiring — all 19 screens.** Overview / ShadowPortfolio /
+    Positions / DecisionJournal bound in Stage 3A; the remaining 15
+    (ResearchUniverse / Fingerprints / Regimes / PortfolioRisk /
+    Microstructure / Context / ValidationLab / CostsAttribution /
+    Protection / Reconciliation / Incidents / Reports / Configuration /
+    System / Safety) bound in Stage 3B, each via
+    `useDesktopData(key)` + `<StateFrame>` with 10 states rendered.
+    Machine proof: 150-assertion state matrix in
+    `apps/desktop/tests/renderer/stage3b_state_matrices.test.tsx`.
 
 ## Category G — Windows packaging (blocks §M + §N)
 
@@ -167,11 +178,13 @@ Per screen, roughly 3-6 hours of work. 15 screens → substantial.
 | C. Authentication | 4 | safety-critical IPC |
 | D. Real safety values | 2 | Overview/Safety/Configuration |
 | E. Reports | 3 | Reports screen |
-| F. Per-screen data binding | 4 per screen × 15 = 60 | 15 screens |
+| F. Per-screen data binding | 0 (closed in Stage 3A + Stage 3B) | — |
 | G. Windows packaging | 4 | Windows CI + installer |
 | H. Native Windows smoke | 1 | §N |
 | I. Backend integration | 2 | observer maturity |
 | J. Documentation | 3 | operator UX |
 
-Total: roughly **88 discrete gaps** before the current freeze claim
-becomes honest.
+Total: roughly **28 discrete gaps** before the current freeze claim
+becomes honest (down from ~88 pre-Stage-3B; Stage 3A cleared
+authentication, and Stage 3B cleared per-screen data binding — the two
+largest categories).
