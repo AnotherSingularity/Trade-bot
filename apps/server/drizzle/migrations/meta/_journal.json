@@ -120,6 +120,13 @@
       "when": 1786800000000,
       "tag": "0016_phase2c_risk_engine",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1786900000000,
+      "tag": "0017_phase2d_microstructure_observer",
+      "breakpoints": true
     }
   ]
 }

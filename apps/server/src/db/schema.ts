@@ -3803,6 +3803,484 @@ export const championRiskComparisons = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Phase 2D — microstructure observer
+// ---------------------------------------------------------------------------
+import { bigint } from 'drizzle-orm/mysql-core';
+
+export const microstructureShortlistPolicies = mysqlTable(
+  'microstructure_shortlist_policies',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyKey: varchar('policyKey', { length: 64 }).notNull(),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    description: text('description').notNull(),
+    maxProducts: int('maxProducts').notNull(),
+    selectionCriteria: text('selectionCriteria').notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', ['draft', 'observer', 'deprecated', 'disabled']).notNull().default('observer'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('ms_shortlist_policy_uq').on(t.policyKey, t.policyVersion),
+  }),
+);
+
+export const microstructureShortlistRuns = mysqlTable(
+  'microstructure_shortlist_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyVersionId: int('policyVersionId').notNull(),
+    startedAt: timestamp('startedAt', { fsp: 3 }).notNull(),
+    completedAt: timestamp('completedAt', { fsp: 3 }),
+    productsConsidered: int('productsConsidered').notNull().default(0),
+    productsSelected: int('productsSelected').notNull().default(0),
+    notes: text('notes'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    policyIdx: index('ms_shortlist_run_policy_idx').on(t.policyVersionId, t.startedAt),
+    policyFk: foreignKey({
+      name: 'ms_shortlist_run_policy_fk',
+      columns: [t.policyVersionId],
+      foreignColumns: [microstructureShortlistPolicies.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const microstructureShortlistMemberships = mysqlTable(
+  'microstructure_shortlist_memberships',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    runId: int('runId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    selected: boolean('selected').notNull().default(false),
+    rank: int('rank'),
+    selectionScore: decimal('selectionScore', { precision: 20, scale: 10 }),
+    reasonCodes: varchar('reasonCodes', { length: 255 }).notNull(),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    memUq: uniqueIndex('ms_shortlist_mem_uq').on(t.runId, t.productId),
+    selIdx: index('ms_shortlist_mem_sel_idx').on(t.selected),
+    runFk: foreignKey({
+      name: 'ms_shortlist_mem_run_fk',
+      columns: [t.runId],
+      foreignColumns: [microstructureShortlistRuns.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+const ORDER_BOOK_SESSION_STATES = [
+  'empty',
+  'synchronizing',
+  'healthy',
+  'gap_detected',
+  'stale',
+  'inconsistent',
+  'resync_required',
+  'failed',
+] as const;
+
+export const orderBookSessions = mysqlTable(
+  'order_book_sessions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    providerId: varchar('providerId', { length: 64 }).notNull(),
+    providerVersion: varchar('providerVersion', { length: 32 }).notNull(),
+    startedAt: timestamp('startedAt', { fsp: 3 }).notNull(),
+    endedAt: timestamp('endedAt', { fsp: 3 }),
+    initialSnapshotId: int('initialSnapshotId'),
+    latestSnapshotId: int('latestSnapshotId'),
+    state: mysqlEnum('state', ORDER_BOOK_SESSION_STATES).notNull().default('empty'),
+    sequenceNext: bigint('sequenceNext', { mode: 'number' }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    prodIdx: index('ob_sess_prod_idx').on(t.productId, t.startedAt),
+    stateIdx: index('ob_sess_state_idx').on(t.state),
+  }),
+);
+
+export const orderBookEvents = mysqlTable(
+  'order_book_events',
+  {
+    id: bigint('id', { mode: 'number' }).autoincrement().primaryKey(),
+    sessionId: int('sessionId').notNull(),
+    sequence: bigint('sequence', { mode: 'number' }).notNull(),
+    eventType: mysqlEnum('eventType', ['snapshot', 'delta', 'trade', 'heartbeat', 'gap']).notNull(),
+    side: mysqlEnum('side', ['bid', 'ask', 'trade', 'none']).notNull().default('none'),
+    price: decimal('price', { precision: 30, scale: 10 }),
+    size: decimal('size', { precision: 30, scale: 10 }),
+    aggregatedLevelCount: int('aggregatedLevelCount'),
+    payloadHash: varchar('payloadHash', { length: 64 }).notNull(),
+    sourceTimestamp: timestamp('sourceTimestamp', { fsp: 3 }).notNull(),
+    receivedAt: timestamp('receivedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    sessSeqUq: uniqueIndex('ob_evt_sess_seq_uq').on(t.sessionId, t.sequence, t.eventType, t.payloadHash),
+    sessTimeIdx: index('ob_evt_sess_time_idx').on(t.sessionId, t.sourceTimestamp),
+    sessFk: foreignKey({
+      name: 'ob_evt_sess_fk',
+      columns: [t.sessionId],
+      foreignColumns: [orderBookSessions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const orderBookGaps = mysqlTable(
+  'order_book_gaps',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    sessionId: int('sessionId').notNull(),
+    expectedSequence: bigint('expectedSequence', { mode: 'number' }).notNull(),
+    observedSequence: bigint('observedSequence', { mode: 'number' }).notNull(),
+    missingCount: int('missingCount').notNull(),
+    detectedAt: timestamp('detectedAt', { fsp: 3 }).notNull(),
+    resolvedAt: timestamp('resolvedAt', { fsp: 3 }),
+    resolution: mysqlEnum('resolution', ['resynchronized', 'abandoned', 'pending']).notNull().default('pending'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    sessIdx: index('ob_gap_sess_idx').on(t.sessionId, t.detectedAt),
+    sessFk: foreignKey({
+      name: 'ob_gap_sess_fk',
+      columns: [t.sessionId],
+      foreignColumns: [orderBookSessions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+const BOOK_HEALTH_VALUES = ['healthy', 'degraded', 'stale', 'gap_detected', 'inconsistent', 'unknown'] as const;
+
+export const orderBookSnapshots = mysqlTable(
+  'order_book_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    sessionId: int('sessionId').notNull(),
+    sequence: bigint('sequence', { mode: 'number' }).notNull(),
+    bestBid: decimal('bestBid', { precision: 30, scale: 10 }),
+    bestAsk: decimal('bestAsk', { precision: 30, scale: 10 }),
+    midprice: decimal('midprice', { precision: 30, scale: 10 }),
+    quotedSpread: decimal('quotedSpread', { precision: 30, scale: 10 }),
+    spreadBps: decimal('spreadBps', { precision: 20, scale: 6 }),
+    bidLevels: int('bidLevels').notNull().default(0),
+    askLevels: int('askLevels').notNull().default(0),
+    bidDepthQuote: decimal('bidDepthQuote', { precision: 30, scale: 10 }).notNull().default('0'),
+    askDepthQuote: decimal('askDepthQuote', { precision: 30, scale: 10 }).notNull().default('0'),
+    bookHealth: mysqlEnum('bookHealth', BOOK_HEALTH_VALUES).notNull().default('unknown'),
+    staleAgeMs: int('staleAgeMs'),
+    payloadHash: varchar('payloadHash', { length: 64 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    sessSeqUq: uniqueIndex('ob_snap_sess_seq_uq').on(t.sessionId, t.sequence),
+    healthIdx: index('ob_snap_health_idx').on(t.bookHealth),
+    sessFk: foreignKey({
+      name: 'ob_snap_sess_fk',
+      columns: [t.sessionId],
+      foreignColumns: [orderBookSessions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const orderBookLevels = mysqlTable(
+  'order_book_levels',
+  {
+    id: bigint('id', { mode: 'number' }).autoincrement().primaryKey(),
+    snapshotId: int('snapshotId').notNull(),
+    side: mysqlEnum('side', ['bid', 'ask']).notNull(),
+    levelIndex: int('levelIndex').notNull(),
+    price: decimal('price', { precision: 30, scale: 10 }).notNull(),
+    size: decimal('size', { precision: 30, scale: 10 }).notNull(),
+    cumulativeSize: decimal('cumulativeSize', { precision: 30, scale: 10 }).notNull(),
+    cumulativeQuote: decimal('cumulativeQuote', { precision: 30, scale: 10 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapSideIdxUq: uniqueIndex('ob_lvl_snap_side_idx_uq').on(t.snapshotId, t.side, t.levelIndex),
+    snapFk: foreignKey({
+      name: 'ob_lvl_snap_fk',
+      columns: [t.snapshotId],
+      foreignColumns: [orderBookSnapshots.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const microstructureFeatureDefinitions = mysqlTable(
+  'microstructure_feature_definitions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    featureKey: varchar('featureKey', { length: 64 }).notNull(),
+    featureVersion: varchar('featureVersion', { length: 32 }).notNull(),
+    family: mysqlEnum('family', ['price', 'depth', 'flow', 'quality']).notNull(),
+    description: text('description').notNull(),
+    unit: varchar('unit', { length: 32 }).notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', ['draft', 'observer', 'deprecated', 'disabled']).notNull().default('observer'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('ms_feat_key_ver_uq').on(t.featureKey, t.featureVersion),
+  }),
+);
+
+const MS_FEATURE_STATUS_VALUES = [
+  'valid',
+  'low_confidence',
+  'insufficient_history',
+  'stale',
+  'gap_detected',
+  'invalid_input',
+  'numerical_failure',
+  'unsupported',
+] as const;
+
+export const microstructureFeatureValues = mysqlTable(
+  'microstructure_feature_values',
+  {
+    id: bigint('id', { mode: 'number' }).autoincrement().primaryKey(),
+    snapshotId: int('snapshotId').notNull(),
+    featureKey: varchar('featureKey', { length: 64 }).notNull(),
+    featureVersion: varchar('featureVersion', { length: 32 }).notNull(),
+    status: mysqlEnum('status', MS_FEATURE_STATUS_VALUES).notNull(),
+    value: decimal('value', { precision: 30, scale: 12 }),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }),
+    sampleCount: int('sampleCount'),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    failureReason: varchar('failureReason', { length: 255 }),
+    diagnostics: text('diagnostics'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    valUq: uniqueIndex('ms_feat_val_uq').on(t.snapshotId, t.featureKey, t.featureVersion),
+    statusIdx: index('ms_feat_val_status_idx').on(t.featureKey, t.status),
+    snapFk: foreignKey({
+      name: 'ms_feat_val_snap_fk',
+      columns: [t.snapshotId],
+      foreignColumns: [orderBookSnapshots.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const tradeFlowWindows = mysqlTable(
+  'trade_flow_windows',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    sessionId: int('sessionId').notNull(),
+    windowStart: timestamp('windowStart', { fsp: 3 }).notNull(),
+    windowEnd: timestamp('windowEnd', { fsp: 3 }).notNull(),
+    buyerVolume: decimal('buyerVolume', { precision: 30, scale: 10 }).notNull().default('0'),
+    sellerVolume: decimal('sellerVolume', { precision: 30, scale: 10 }).notNull().default('0'),
+    unknownVolume: decimal('unknownVolume', { precision: 30, scale: 10 }).notNull().default('0'),
+    cvd: decimal('cvd', { precision: 30, scale: 10 }).notNull().default('0'),
+    imbalance: decimal('imbalance', { precision: 10, scale: 6 }),
+    classifierVersion: varchar('classifierVersion', { length: 32 }).notNull(),
+    windowPolicyVersion: varchar('windowPolicyVersion', { length: 32 }).notNull(),
+    status: varchar('status', { length: 32 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    sessIdx: index('flow_win_sess_idx').on(t.sessionId, t.windowStart),
+    sessFk: foreignKey({
+      name: 'flow_win_sess_fk',
+      columns: [t.sessionId],
+      foreignColumns: [orderBookSessions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const executionCostObserverSnapshots = mysqlTable(
+  'execution_cost_observer_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    bookSnapshotId: int('bookSnapshotId').notNull(),
+    entryNotional: decimal('entryNotional', { precision: 30, scale: 10 }).notNull(),
+    marketableVWAP: decimal('marketableVWAP', { precision: 30, scale: 10 }),
+    passiveLimitPrice: decimal('passiveLimitPrice', { precision: 30, scale: 10 }),
+    estimatedSpreadCost: decimal('estimatedSpreadCost', { precision: 30, scale: 10 }),
+    estimatedImpact: decimal('estimatedImpact', { precision: 30, scale: 10 }),
+    estimatedLatencyCost: decimal('estimatedLatencyCost', { precision: 30, scale: 10 }),
+    estimatedFee: decimal('estimatedFee', { precision: 30, scale: 10 }),
+    estimatedFillProbability: decimal('estimatedFillProbability', { precision: 6, scale: 4 }),
+    estimatedUnfilledProbability: decimal('estimatedUnfilledProbability', { precision: 6, scale: 4 }),
+    estimatedPartialFillProbability: decimal('estimatedPartialFillProbability', { precision: 6, scale: 4 }),
+    estimatedQueueUncertainty: decimal('estimatedQueueUncertainty', { precision: 6, scale: 4 }),
+    estimatedStopExecutionCost: decimal('estimatedStopExecutionCost', { precision: 30, scale: 10 }),
+    isBookAware: boolean('isBookAware').notNull().default(true),
+    modelVersion: varchar('modelVersion', { length: 32 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapIdx: index('exec_cost_snap_idx').on(t.bookSnapshotId),
+    snapFk: foreignKey({
+      name: 'exec_cost_snap_fk',
+      columns: [t.bookSnapshotId],
+      foreignColumns: [orderBookSnapshots.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const marketImpactCurves = mysqlTable(
+  'market_impact_curves',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    bookSnapshotId: int('bookSnapshotId').notNull(),
+    side: mysqlEnum('side', ['buy', 'sell']).notNull(),
+    notional: decimal('notional', { precision: 30, scale: 10 }).notNull(),
+    filledNotional: decimal('filledNotional', { precision: 30, scale: 10 }).notNull(),
+    unfilledNotional: decimal('unfilledNotional', { precision: 30, scale: 10 }).notNull(),
+    avgFillPrice: decimal('avgFillPrice', { precision: 30, scale: 10 }),
+    impactBps: decimal('impactBps', { precision: 20, scale: 6 }),
+    extrapolated: boolean('extrapolated').notNull().default(false),
+    monotonic: boolean('monotonic').notNull().default(true),
+    modelVersion: varchar('modelVersion', { length: 32 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapIdx: index('impact_snap_idx').on(t.bookSnapshotId, t.side, t.notional),
+    snapFk: foreignKey({
+      name: 'impact_snap_fk',
+      columns: [t.bookSnapshotId],
+      foreignColumns: [orderBookSnapshots.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const passiveFillEstimates = mysqlTable(
+  'passive_fill_estimates',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    bookSnapshotId: int('bookSnapshotId').notNull(),
+    side: mysqlEnum('side', ['buy', 'sell']).notNull(),
+    limitPrice: decimal('limitPrice', { precision: 30, scale: 10 }).notNull(),
+    visibleSizeAhead: decimal('visibleSizeAhead', { precision: 30, scale: 10 }),
+    state: mysqlEnum('state', ['unlikely', 'low_confidence', 'possible', 'probable', 'unknown']).notNull(),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }).notNull().default('0'),
+    modelVersion: varchar('modelVersion', { length: 32 }).notNull(),
+    diagnostics: text('diagnostics'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapIdx: index('pass_fill_snap_idx').on(t.bookSnapshotId),
+    snapFk: foreignKey({
+      name: 'pass_fill_snap_fk',
+      columns: [t.bookSnapshotId],
+      foreignColumns: [orderBookSnapshots.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+const MS_EXECUTION_RECOMMENDATION_VALUES = [
+  'proceed_as_planned',
+  'prefer_marketable',
+  'prefer_passive',
+  'reduce_size',
+  'delay',
+  'reject',
+  'abstain',
+  'data_failure',
+] as const;
+
+export const microstructureExecutionDecisions = mysqlTable(
+  'microstructure_execution_decisions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    shortlistMembershipId: int('shortlistMembershipId'),
+    bookSnapshotId: int('bookSnapshotId'),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    championOrderType: varchar('championOrderType', { length: 32 }),
+    championSize: decimal('championSize', { precision: 30, scale: 10 }).notNull(),
+    recommendedAction: mysqlEnum('recommendedAction', MS_EXECUTION_RECOMMENDATION_VALUES).notNull(),
+    recommendedMaximumSize: decimal('recommendedMaximumSize', { precision: 30, scale: 10 }).notNull(),
+    sizeMultiplier: decimal('sizeMultiplier', { precision: 10, scale: 8 }).notNull(),
+    preferredOrderStyle: varchar('preferredOrderStyle', { length: 32 }),
+    preferredPriceBand: varchar('preferredPriceBand', { length: 64 }),
+    expiryRecommendation: varchar('expiryRecommendation', { length: 64 }),
+    fillConfidence: decimal('fillConfidence', { precision: 6, scale: 4 }),
+    impactEstimateBps: decimal('impactEstimateBps', { precision: 20, scale: 6 }),
+    reasonCodes: varchar('reasonCodes', { length: 255 }).notNull(),
+    dataQualityState: varchar('dataQualityState', { length: 64 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainUq: uniqueIndex('ms_exec_chain_uq').on(t.decisionChainId),
+    actionIdx: index('ms_exec_action_idx').on(t.recommendedAction),
+    chainFk: foreignKey({
+      name: 'ms_exec_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    snapFk: foreignKey({
+      name: 'ms_exec_snap_fk',
+      columns: [t.bookSnapshotId],
+      foreignColumns: [orderBookSnapshots.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const championMicrostructureComparisons = mysqlTable(
+  'champion_microstructure_comparisons',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    msExecutionDecisionId: int('msExecutionDecisionId'),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    championOrderType: varchar('championOrderType', { length: 32 }),
+    championSize: decimal('championSize', { precision: 30, scale: 10 }).notNull(),
+    msRecommendation: mysqlEnum('msRecommendation', MS_EXECUTION_RECOMMENDATION_VALUES).notNull(),
+    msRecommendedSize: decimal('msRecommendedSize', { precision: 30, scale: 10 }).notNull(),
+    agreementState: mysqlEnum('agreementState', [
+      'agree',
+      'ms_prefers_style',
+      'ms_reduced',
+      'ms_delayed',
+      'ms_rejected',
+      'ms_abstained',
+      'unresolved',
+    ]).notNull(),
+    reasonCodes: varchar('reasonCodes', { length: 255 }).notNull(),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainUq: uniqueIndex('champ_ms_chain_uq').on(t.decisionChainId),
+    agreeIdx: index('champ_ms_agreement_idx').on(t.agreementState),
+    chainFk: foreignKey({
+      name: 'champ_ms_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    decFk: foreignKey({
+      name: 'champ_ms_dec_fk',
+      columns: [t.msExecutionDecisionId],
+      foreignColumns: [microstructureExecutionDecisions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -3994,3 +4472,37 @@ export type StressTestResultRow = typeof stressTestResults.$inferSelect;
 export type StressTestResultInsert = typeof stressTestResults.$inferInsert;
 export type ChampionRiskComparisonRow = typeof championRiskComparisons.$inferSelect;
 export type ChampionRiskComparisonInsert = typeof championRiskComparisons.$inferInsert;
+
+// Phase 2D
+export type MicrostructureShortlistPolicyRow = typeof microstructureShortlistPolicies.$inferSelect;
+export type MicrostructureShortlistPolicyInsert = typeof microstructureShortlistPolicies.$inferInsert;
+export type MicrostructureShortlistRunRow = typeof microstructureShortlistRuns.$inferSelect;
+export type MicrostructureShortlistRunInsert = typeof microstructureShortlistRuns.$inferInsert;
+export type MicrostructureShortlistMembershipRow = typeof microstructureShortlistMemberships.$inferSelect;
+export type MicrostructureShortlistMembershipInsert = typeof microstructureShortlistMemberships.$inferInsert;
+export type OrderBookSessionRow = typeof orderBookSessions.$inferSelect;
+export type OrderBookSessionInsert = typeof orderBookSessions.$inferInsert;
+export type OrderBookEventRow = typeof orderBookEvents.$inferSelect;
+export type OrderBookEventInsert = typeof orderBookEvents.$inferInsert;
+export type OrderBookGapRow = typeof orderBookGaps.$inferSelect;
+export type OrderBookGapInsert = typeof orderBookGaps.$inferInsert;
+export type OrderBookSnapshotRow = typeof orderBookSnapshots.$inferSelect;
+export type OrderBookSnapshotInsert = typeof orderBookSnapshots.$inferInsert;
+export type OrderBookLevelRow = typeof orderBookLevels.$inferSelect;
+export type OrderBookLevelInsert = typeof orderBookLevels.$inferInsert;
+export type MicrostructureFeatureDefinitionRow = typeof microstructureFeatureDefinitions.$inferSelect;
+export type MicrostructureFeatureDefinitionInsert = typeof microstructureFeatureDefinitions.$inferInsert;
+export type MicrostructureFeatureValueRow = typeof microstructureFeatureValues.$inferSelect;
+export type MicrostructureFeatureValueInsert = typeof microstructureFeatureValues.$inferInsert;
+export type TradeFlowWindowRow = typeof tradeFlowWindows.$inferSelect;
+export type TradeFlowWindowInsert = typeof tradeFlowWindows.$inferInsert;
+export type ExecutionCostObserverSnapshotRow = typeof executionCostObserverSnapshots.$inferSelect;
+export type ExecutionCostObserverSnapshotInsert = typeof executionCostObserverSnapshots.$inferInsert;
+export type MarketImpactCurveRow = typeof marketImpactCurves.$inferSelect;
+export type MarketImpactCurveInsert = typeof marketImpactCurves.$inferInsert;
+export type PassiveFillEstimateRow = typeof passiveFillEstimates.$inferSelect;
+export type PassiveFillEstimateInsert = typeof passiveFillEstimates.$inferInsert;
+export type MicrostructureExecutionDecisionRow = typeof microstructureExecutionDecisions.$inferSelect;
+export type MicrostructureExecutionDecisionInsert = typeof microstructureExecutionDecisions.$inferInsert;
+export type ChampionMicrostructureComparisonRow = typeof championMicrostructureComparisons.$inferSelect;
+export type ChampionMicrostructureComparisonInsert = typeof championMicrostructureComparisons.$inferInsert;
