@@ -197,7 +197,11 @@ content. Stage 3B will rebind them.
 - `apps/desktop` renderer `tsc --noEmit -p tsconfig.renderer.json`: **green**
 - `drizzle-kit generate`: **"No schema changes, nothing to migrate 😴"**
 - `apps/desktop` `vitest run` (full suite): **42/42 files · 363/363 tests passed** (24.40s, from clean state).
-- `apps/server` `vitest run` (full suite): filled in after the reproducible run in Stage 3C once the desktop.* server tests are staged into the suite; Stage 3A adds 19 new server tests (11 contract + 8 authorization) that all pass in isolation.
+- `apps/server` `vitest run` (full suite): counts filled in by the
+  Stage 3A-FIX rerun (§15 below) — the initial Stage 3A commit was
+  reviewed against a targeted 19/19 Stage 3A pass only, which the
+  reviewer correctly rejected as insufficient. The FIX rerun uses a
+  clean `horizon_trade_test` bootstrapped by the server globalSetup.
 
 ## 10. Stage 3A tests
 
@@ -219,8 +223,19 @@ New test files:
 ## 11. Known limitations (Stage 3A)
 
 - Screen binding is 4/19; Stage 3B binds the remaining 15.
-- 14 of the 18 query domains are stubs that return degraded/empty
-  envelopes with `stage3b_pending` reasons — no fabricated data.
+- 11 of the 18 query domains are **placeholder stubs** that return
+  degraded/empty envelopes with `stage3b_pending` reasons — no
+  fabricated data (see stage3a-fix-deferred-domain-honesty.test.ts).
+- 4 domains have **functional query services** (configuration, system,
+  safety, reports) but their **renderers are not yet rebound** to
+  useDesktopData — Stage 3B fixes this.
+- Count reconciliation:
+  - 18 desktop.* domains (18 tRPC sub-routers) vs 19 screens —
+    `positions` is one domain producing both the list and detail view;
+    `incidents` is one domain producing both `list` and `acknowledge`
+    procedures but still corresponds to a single screen.
+  - 11 stubbed query services + 4 functional-but-unbound query services
+    = **15 screens still needing renderer rewrite in Stage 3B**.
 - Native Electron integration test not run (Stage 3C).
 - `desktop_native_runtime` maturity remains `not_exercised` until
   Stage 3C runs Playwright + Xvfb.
@@ -240,21 +255,180 @@ New test files:
 Full desktop + Stage-3A-scoped server test runs: CreateOrder function
 invocation, attempt, and network counts remain `0`.
 
-## 14. Verdict (Stage 3A only)
+## 14. Verdict (Stage 3A only — corrected format)
 
 ```
-desktop_data_foundation_complete
-desktop_screen_binding_partial_4_of_19
-authenticated_desktop_data_integration_verified_for_stage3a_scope
-desktop_authentication_complete
-desktop_runtime_core_wiring_complete
-desktop_screen_binding_pending_15_screens (Stage 3B)
-native_electron_integration_pending (Stage 3C)
-report_generation_pending (Stage 4)
+stage3a_data_foundation_complete
+four_reference_screens_bound
+authenticated_data_boundary_integration_verified
+remaining_screen_binding_pending
+native_electron_test_pending
+report_generation_pending
 managed_docker_runtime_verification_pending
 windows_packaging_pending
 operational_validation_not_started
 live_capital_prohibited
 ```
 
-Stage 3 verdict is NOT claimed here — that arrives after Stage 3C.
+`desktop_screen_binding_complete` is NOT claimed and will not be
+claimed until Stage 3C. Stage 3 verdict is NOT claimed here — that
+arrives after Stage 3C.
+
+## 15. Stage 3A-FIX corrections (continues from `e18037c`)
+
+The Stage 3A review flagged that the initial commit was pushed with
+only a 19/19 Stage 3A-scoped server run and deferred the full-suite
+verification to Stage 3C. This section documents the corrections.
+
+### 15.1 Full server suite verification (§1 of the correction)
+
+Run against a fresh `horizon_trade_test` on the reference environment:
+
+```
+DROP DATABASE IF EXISTS horizon_trade_test;
+cd apps/server && npx vitest run --reporter=default
+```
+
+Reproducible-run results (from the actual background completion, not
+projected):
+
+- Test Files: **52 passed (52)**
+- Tests: **1028 passed (1028)**
+- Failed: **0**
+- Skipped: **0**
+- Duration: **1367.63s** (`transform 2.95s, setup 0ms, collect 6.76s,
+  tests 1358.13s, environment 0ms, prepare 65ms`)
+- Start: 22:27:05 UTC
+- Unhandled rejections observed by vitest: **0**
+- Leaked child processes at afterAll: **0** (globalSetup + per-file
+  spawn tracking; no processes survived teardown)
+- Open-handle warnings / timeouts: **0**
+
+The 52 file count is Stage 2-FIX's 48 files + Stage 3A's 4 new server
+test files: `stage3-desktop-contracts.test.ts` (11 tests),
+`stage3-desktop-router-authorization.test.ts` (8 tests),
+`stage3a-fix-deferred-domain-honesty.test.ts` (10 tests),
+`stage3a-fix-readonly-boundaries.test.ts` (12 tests). The 1028 test
+count is Stage 2-FIX's 987 + 41 new Stage 3A + Stage 3A-FIX tests.
+No existing test file was modified.
+
+**Reliability note.** The very first Stage 3A-FIX full-suite attempt
+surfaced 9 failures in `tests/research/phase2f_validation.test.ts`
+starting with `unifiedChallengerDecision !== null` followed by 8
+cascade `Lock wait timeout exceeded` errors on `TRUNCATE`. When
+re-run in isolation, `phase2f_validation.test.ts` passed 90/90, and
+the immediate full-suite rerun from a clean `horizon_trade_test`
+passed 52/52 files · 1028/1028 tests as recorded above. Diagnosis:
+pre-existing sensitivity of `tests/setup/db.ts::resetDatabase` to
+`innodb_lock_wait_timeout=50s` under sustained suite load. Not a
+Stage 3A regression — Stage 3A's new tests run alphabetically AFTER
+`phase2f_validation.test.ts` and are therefore not on its execution
+critical path. Documented here so a future run that hits the same
+flake has an established diagnosis and reproducible workaround
+(rerun once from clean scratch).
+
+### 15.2 Re-run the active verification surface (§2 of the correction)
+
+- `apps/server` `tsc --noEmit`: **green**
+- `apps/server` `tsup` build: **green**
+- `apps/desktop` main `tsc --noEmit -p tsconfig.main.json`: **green**
+- `apps/desktop` preload `tsc --noEmit -p tsconfig.preload.json`: **green**
+- `apps/desktop` renderer `tsc --noEmit -p tsconfig.renderer.json`: **green**
+- `packages/shared` `tsc --noEmit`: **green**
+- `apps/desktop` `vitest run` (full suite): 42 files · 363 tests · 0
+  failed (unchanged since Stage 3A commit).
+- `drizzle-kit generate`: "No schema changes, nothing to migrate 😴"
+- Migration integrity (gate1-migration-integrity.test.ts) 7/7 green
+  from clean scratch DB.
+- Migrations 0000-0021 byte-identical to pre-Stage-2 tree.
+
+### 15.3 Deferred-domain honesty proof (§3 of the correction)
+
+New test `apps/server/tests/stage3a-fix-deferred-domain-honesty.test.ts`
+(10 assertions):
+
+- Every Stage 3B-deferred domain returns `status ∈ {degraded, empty,
+  unavailable}` — NEVER `healthy`.
+- Every deferred domain carries a `reasonCode` prefixed by the domain
+  name and ending in `_stage3b_pending`.
+- Every deferred domain carries a `<domain>.v0-stub` sourceVersion.
+- List domains return empty items — no fabricated sample rows.
+- Measurement-carrying stubs (`risk`, `context`) have `status:
+  'unknown'` measurements with `value: null` and reason codes.
+- Safety literals preserved in every stub: `kellyEnabled=false`,
+  `promotionEnabled=false`, `observerEnforcementActive=false`,
+  `productionLevel2Active=false`, `queuePositionKnown=false`.
+- `incidents.acknowledge` mutation refuses in Stage 3A with `status:
+  'unavailable'` + `stage3b_pending` reason.
+- `reports.get` returns the catalog with `generationImplemented=false`
+  and every catalog entry `generationAvailable=false` + `stage4_pending`.
+- `configuration`, `system`, `safety` functional stubs render only
+  safe-flag literals; system stub contains no `DATABASE_URL`,
+  `mysql://`, or `password` substring.
+- Every deferred domain envelope passes its published schema.
+
+### 15.4 Read-only-boundary proof (§4 of the correction)
+
+New test `apps/server/tests/stage3a-fix-readonly-boundaries.test.ts`
+(12 assertions):
+
+- Every query file in `apps/server/src/desktop/queries/` is loaded.
+- No query service imports an economic writer or execution module
+  (forbidden-pattern scan across `execution/`, `executor/`, `scanner/`,
+  `coinbase/`, `reconciliation/`, `protection/`, `promotion/`,
+  `mode/`, `shadow/runtimeService`, `entryExecutor`, `exitExecutor`,
+  `lib/economicState`).
+- No query service uses `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`,
+  `DROP`, `ALTER`, or `REPLACE INTO` SQL verbs.
+- No query service calls drizzle mutation helpers (`db.insert`,
+  `db.update`, `db.delete`, `.insert(schema.…)`, etc.) or
+  economic-writer functions (`applyEntryEconomicStateTx`,
+  `applyExitEconomicStateTx`, `createPlan`, `recordFill`,
+  `recordLedger`, `promoteChallenger`, `publishPolicyVersion`, etc.).
+- `DesktopDataClient` defines an exhaustive `PROCEDURE_PATHS` map
+  keyed by every `DesktopDataRequestKey`.
+- `DesktopDataClient` rejects unknown request keys via
+  `DesktopDataRequestSchema.safeParse` before touching `fetch`.
+- `DesktopDataClient` constructs URLs only from the compiled-in
+  `spec.path` — never from renderer input.
+- The preload bridge validates the desktop-data key against
+  `DESKTOP_DATA_KEYS` before invoking IPC.
+- The IPC allowlist declares `desktop.data` as
+  `requiresAuthenticatedSession: true` with `DesktopDataChannelRequestSchema`.
+- The preload bridge never exposes raw `ipcRenderer`.
+- Every `DESKTOP_DATA_KEYS` entry has a matching `desktop.*` tRPC
+  procedure; no `desktop.*` procedure is missing from
+  `DESKTOP_DATA_KEYS`.
+
+### 15.5 Documentation corrections (§5 of the correction)
+
+- `docs/audit/desktop_api_coverage.json` — replaced. Now records
+  per-screen coverage matrix (route / contract / server query /
+  operator-auth / main-client / preload / renderer / healthy /
+  empty / stale / failure / native Electron evidence), classifies
+  each screen `integration_verified` (4 screens) or
+  `contract_present_binding_pending` (15 screens), and includes a
+  `countReconciliation` block explaining the 14-domains vs 15-screens
+  arithmetic.
+- `docs/audit/scope_matrix.json` — added `stage3aFix` block.
+- `docs/audit/stage3a_report.md` — this section (§15).
+
+### 15.6 Corrected Stage 3A verdict (accepted format)
+
+```
+stage3a_data_foundation_complete
+four_reference_screens_bound
+authenticated_data_boundary_integration_verified
+remaining_screen_binding_pending
+native_electron_test_pending
+report_generation_pending
+managed_docker_runtime_verification_pending
+windows_packaging_pending
+operational_validation_not_started
+live_capital_prohibited
+```
+
+Stage 3B binds the remaining fifteen screens with real DB-backed query
+services (11 stubs to replace + 4 functional-stub renderer rewrites).
+Stage 3C delivers the native Electron integration test, the full
+Stage 3 verification matrix, and the final Stage 3 verdict.
