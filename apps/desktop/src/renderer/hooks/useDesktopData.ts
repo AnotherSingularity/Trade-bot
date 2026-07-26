@@ -1,0 +1,148 @@
+/**
+ * Stage 3 §5 / §18 — renderer hook for the desktop-data bridge.
+ *
+ * Every screen consumes envelopes through this hook. The hook maintains
+ * the exhaustive state machine required by §18:
+ *   loading | healthy | empty | stale | degraded | unavailable |
+ *   unauthorized | session_expired | api_failure | contract_mismatch.
+ *
+ * On authentication loss the hook CLEARS its business data (§18 rule:
+ * "no screen may silently retain old data after authentication loss").
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { DesktopDataEnvelope, DesktopDataRequestKey, DesktopDataResponse } from '@horizon/shared';
+import { useAuth } from './useAuth';
+
+export type ScreenState =
+  | 'loading'
+  | 'healthy'
+  | 'empty'
+  | 'stale'
+  | 'degraded'
+  | 'unavailable'
+  | 'unauthorized'
+  | 'session_expired'
+  | 'api_failure'
+  | 'contract_mismatch';
+
+export interface UseDesktopDataOptions {
+  /** Poll interval in ms. Omit for on-demand only. */
+  refreshMs?: number;
+  /** Skip the initial call — useful for optional detail queries. */
+  skip?: boolean;
+}
+
+export interface UseDesktopDataResult<K extends DesktopDataRequestKey> {
+  state: ScreenState;
+  envelope: DesktopDataResponse<K> | null;
+  error: { code: string; detail: string | null } | null;
+  refresh: () => void;
+  loadingCount: number;
+}
+
+interface WindowWithHorizon {
+  horizon?: {
+    desktopData<K extends DesktopDataRequestKey>(
+      key: K,
+      input?: unknown,
+    ): Promise<
+      | { ok: true; key: K; envelope: DesktopDataResponse<K> }
+      | { ok: false; key: K; error: { code: string; detail: string | null } }
+    >;
+  };
+}
+
+function envelopeStatusToScreenState<K extends DesktopDataRequestKey>(env: DesktopDataResponse<K>): ScreenState {
+  // The envelope is typed as `{ status, ... }`; the discriminant is safe.
+  const e = env as unknown as DesktopDataEnvelope<unknown>;
+  switch (e.status) {
+    case 'healthy': return 'healthy';
+    case 'degraded': return 'degraded';
+    case 'stale': return 'stale';
+    case 'empty': return 'empty';
+    case 'unavailable': return 'unavailable';
+    default: return 'contract_mismatch';
+  }
+}
+
+function errorCodeToScreenState(code: string): ScreenState {
+  if (code === 'unauthenticated' || code === 'session_expired') return 'unauthorized';
+  if (code === 'contract_mismatch') return 'contract_mismatch';
+  if (code === 'timeout' || code === 'network_error') return 'api_failure';
+  if (code.startsWith('server_')) return 'api_failure';
+  return 'api_failure';
+}
+
+/**
+ * Hook that binds a screen to a single desktop-data key. Cancels in-flight
+ * requests when the component unmounts or the auth phase transitions away
+ * from `authenticated`. When the auth phase leaves `authenticated`, the
+ * envelope is cleared so the renderer cannot retain old business data.
+ */
+export function useDesktopData<K extends DesktopDataRequestKey>(
+  key: K,
+  input?: unknown,
+  opts: UseDesktopDataOptions = {},
+): UseDesktopDataResult<K> {
+  const auth = useAuth();
+  const authPhase = auth.state.phase;
+  const [state, setState] = useState<ScreenState>('loading');
+  const [envelope, setEnvelope] = useState<DesktopDataResponse<K> | null>(null);
+  const [error, setError] = useState<{ code: string; detail: string | null } | null>(null);
+  const [loadingCount, setLoadingCount] = useState(0);
+  const activeReqRef = useRef(0);
+
+  const run = useCallback(async () => {
+    if (opts.skip) return;
+    const win = window as unknown as WindowWithHorizon;
+    const api = win.horizon?.desktopData;
+    if (!api) {
+      setState('api_failure');
+      setError({ code: 'bridge_unavailable', detail: null });
+      return;
+    }
+    const myReq = ++activeReqRef.current;
+    setLoadingCount((c) => c + 1);
+    try {
+      const res = await api(key, input);
+      if (myReq !== activeReqRef.current) return; // superseded
+      if (res.ok) {
+        setEnvelope(res.envelope);
+        setError(null);
+        setState(envelopeStatusToScreenState(res.envelope));
+      } else {
+        setEnvelope(null);
+        setError(res.error);
+        setState(errorCodeToScreenState(res.error.code));
+      }
+    } finally {
+      setLoadingCount((c) => Math.max(0, c - 1));
+    }
+  }, [key, JSON.stringify(input), opts.skip]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clear business data on auth loss (§18).
+  useEffect(() => {
+    if (authPhase !== 'authenticated') {
+      activeReqRef.current++; // supersede any in-flight
+      setEnvelope(null);
+      setError(null);
+      setState(authPhase === 'session_expired' ? 'session_expired' : 'unauthorized');
+    }
+  }, [authPhase]);
+
+  // Initial + reactive fetch when key/input/auth changes.
+  useEffect(() => {
+    if (authPhase !== 'authenticated') return;
+    void run();
+  }, [run, authPhase]);
+
+  // Optional polling.
+  useEffect(() => {
+    if (!opts.refreshMs || authPhase !== 'authenticated') return;
+    const timer = setInterval(() => { void run(); }, opts.refreshMs);
+    return () => clearInterval(timer);
+  }, [run, opts.refreshMs, authPhase]);
+
+  return { state, envelope, error, refresh: () => { void run(); }, loadingCount };
+}

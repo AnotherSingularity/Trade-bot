@@ -5,6 +5,7 @@ import { tokensRouter } from './tokens';
 import { historyRouter } from './history';
 import { settingsRouter } from './settings';
 import { lineageRouter } from './lineage';
+import { desktopRouter } from './desktop';
 
 /** Root tRPC router — the single source of truth for the API surface. */
 export const appRouter = router({
@@ -14,6 +15,7 @@ export const appRouter = router({
   history: historyRouter,
   settings: settingsRouter,
   lineage: lineageRouter,
+  desktop: desktopRouter,
 });
 
 export type AppRouter = typeof appRouter;

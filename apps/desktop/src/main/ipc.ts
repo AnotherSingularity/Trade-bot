@@ -6,6 +6,8 @@ import {
   type AppVersionResponse,
   type AuthOperationResponse,
   type ControlledChangeResponse,
+  type DesktopDataChannelRequest,
+  type DesktopDataChannelResponse,
   type DesktopStatusResponse,
   type ExportReportRequest,
   type ExportReportResponse,
@@ -22,6 +24,9 @@ import type { CredentialStatusMap } from './secrets';
 import { toSanitizedSnapshot, type DesktopEnvironment } from './localEnvironment';
 import type { ServiceKind, ServiceRecord, ServiceSupervisor } from './serviceSupervisor';
 import type { DesktopAuthManager } from './desktopAuthManager';
+import type { DesktopDataClient, DesktopDataClientResult } from './desktopDataClient';
+import { sanitizeError } from './desktopDataClient';
+import type { DesktopDataRequestKey } from '@horizon/shared';
 
 /**
  * Phase 3A §B — IPC handler.
@@ -49,6 +54,9 @@ export interface IpcHostContext {
   requestControlledChange: (input: RequestControlledChange) => Promise<ControlledChangeResponse>;
   authManager: DesktopAuthManager;
   authenticationRequired: boolean;
+  // Stage 3 §4 — main-process client for the desktop.* tRPC surface.
+  // Optional so unit tests can construct a context without a live server.
+  desktopDataClient?: DesktopDataClient;
 }
 
 export interface IpcCallResult<T = unknown> {
@@ -285,6 +293,36 @@ export async function handleIpcCall(
       }
       case IPC_CHANNELS.authRevokeAll: {
         data = await ctx.authManager.revokeAll();
+        break;
+      }
+      case IPC_CHANNELS.desktopData: {
+        // Stage 3 §5. The IPC schema has already validated the request
+        // shape (discriminated union over the 22 known keys). We pass it
+        // straight to the compiled-in main client — the renderer cannot
+        // choose paths, methods, or procedure names beyond this union.
+        if (!ctx.desktopDataClient) {
+          const resp: DesktopDataChannelResponse = {
+            ok: false,
+            key: (parsed.data as DesktopDataChannelRequest).key,
+            error: { code: 'desktop_data_client_unavailable', detail: null },
+          };
+          data = resp;
+          break;
+        }
+        const req = parsed.data as DesktopDataChannelRequest;
+        const inputArg = 'input' in req ? req.input : undefined;
+        const result: DesktopDataClientResult<DesktopDataRequestKey> = await ctx.desktopDataClient.call(
+          req.key as DesktopDataRequestKey,
+          inputArg,
+        );
+        if (result.ok) {
+          const resp: DesktopDataChannelResponse = { ok: true, key: req.key, envelope: result.envelope };
+          data = resp;
+        } else {
+          const sanitized = sanitizeError(result.error);
+          const resp: DesktopDataChannelResponse = { ok: false, key: req.key, error: sanitized };
+          data = resp;
+        }
         break;
       }
       default:

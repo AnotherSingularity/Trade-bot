@@ -13,6 +13,8 @@ import {
   type AppVersionResponse,
   type AuthOperationResponse,
   type ControlledChangeResponse,
+  type DesktopDataChannelRequest,
+  type DesktopDataChannelResponse,
   type DesktopStatusResponse,
   type ExportReportRequest,
   type ExportReportResponse,
@@ -24,6 +26,11 @@ import {
   type ServicesStartRequest,
   type ServicesStartResponse,
 } from '../shared/ipcContract';
+import {
+  DESKTOP_DATA_KEYS,
+  type DesktopDataRequestKey,
+  type DesktopDataResponse,
+} from '@horizon/shared';
 
 interface HorizonBridge {
   getDesktopStatus(): Promise<DesktopStatusResponse>;
@@ -51,6 +58,19 @@ interface HorizonBridge {
     changePassword(input: { currentPassword: string; newPassword: string; newPasswordConfirmation: string }): Promise<AuthOperationResponse>;
     revokeAll(): Promise<AuthOperationResponse>;
   };
+  /**
+   * Stage 3 §5 — desktop-data bridge. `key` MUST be one of the compile-time
+   * DesktopDataRequestKey values; unknown keys reject at the IPC boundary.
+   * The renderer receives the sanitized envelope or a sanitized error —
+   * never a raw server response, connection string, or bearer token.
+   */
+  desktopData<K extends DesktopDataRequestKey>(
+    key: K,
+    input?: unknown,
+  ): Promise<
+    | { ok: true; key: K; envelope: DesktopDataResponse<K> }
+    | { ok: false; key: K; error: { code: string; detail: string | null } }
+  >;
 }
 
 async function invoke<T>(channel: string, payload: unknown): Promise<T> {
@@ -83,11 +103,30 @@ const api: HorizonBridge = {
     changePassword: (input) => invoke(IPC_CHANNELS.authChangePassword, input),
     revokeAll: () => invoke(IPC_CHANNELS.authRevokeAll, {}),
   },
+  desktopData: async (key, input) => {
+    // Compile-time refusal: only enumerated keys reach the boundary.
+    if (!(DESKTOP_DATA_KEYS as readonly string[]).includes(key)) {
+      return { ok: false, key, error: { code: 'unknown_desktop_data_key', detail: null } };
+    }
+    const req: DesktopDataChannelRequest = input === undefined
+      ? { key } as DesktopDataChannelRequest
+      : { key, input } as DesktopDataChannelRequest;
+    const result = await ipcRenderer.invoke(IPC_CHANNELS.desktopData, req) as {
+      ok: boolean; data: DesktopDataChannelResponse | null; error: string | null;
+    };
+    if (!result.ok || !result.data) {
+      return { ok: false, key, error: { code: result.error ?? 'ipc_call_failed', detail: null } };
+    }
+    return result.data.ok
+      ? { ok: true, key, envelope: result.data.envelope as DesktopDataResponse<typeof key> }
+      : { ok: false, key, error: result.data.error };
+  },
 };
 
 // Sanity: every allowlisted channel must be reachable through the bridge.
-// The `auth` group is one bridge property carrying 8 channels; the top-
-// level bridge properties account for the other 11 channels.
+// The `auth` group is one bridge property carrying 8 channels; `desktopData`
+// is one bridge property that carries the Stage 3 discriminated union
+// (dispatches all 22 keys through a single IPC channel).
 const allowedChannels = new Set(IPC_ALLOWLIST.map((e) => e.channel));
 const bridgeChannelCount = Object.keys(api).length - 1 + Object.keys(api.auth).length;
 if (allowedChannels.size !== bridgeChannelCount) {

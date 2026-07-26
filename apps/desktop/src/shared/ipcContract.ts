@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  DesktopDataRequestSchema,
+  desktopDataEnvelope,
+  type DesktopDataRequestKey,
+} from '@horizon/shared';
 
 /**
  * Phase 3A §B — IPC allowlist contract.
@@ -42,6 +47,12 @@ export const IPC_CHANNELS = {
   authRefresh: 'auth.refresh',
   authChangePassword: 'auth.changePassword',
   authRevokeAll: 'auth.revokeAll',
+  // Stage 3 §5 — desktop-data bridge. ONE channel that carries the
+  // discriminated union of every operator-authenticated business read.
+  // The renderer supplies a compile-time-known `key`; unknown keys fail
+  // closed. Payload size is bounded via strict schema. Session state is
+  // checked at invocation time.
+  desktopData: 'desktop.data',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -294,6 +305,39 @@ export const AuthOperationResponseSchema = z.object({
 export type AuthOperationResponse = z.infer<typeof AuthOperationResponseSchema>;
 
 // ---------------------------------------------------------------------------
+// Stage 3 §5 — desktop-data channel schema.
+//
+// Request: the shared `DesktopDataRequestSchema` (discriminated union
+// over 22 typed keys). Response: `{ ok: true, envelope: <envelope> } |
+// { ok: false, error: { code, detail } }`. The IPC boundary rejects
+// anything else — the renderer cannot request arbitrary paths, methods,
+// or procedure names.
+// ---------------------------------------------------------------------------
+
+export const DesktopDataChannelRequestSchema = DesktopDataRequestSchema;
+export type DesktopDataChannelRequest = z.infer<typeof DesktopDataChannelRequestSchema>;
+
+export const DesktopDataChannelResponseSchema = z.union([
+  z.object({
+    ok: z.literal(true),
+    key: z.string(),
+    envelope: desktopDataEnvelope(z.unknown()),
+  }).strict(),
+  z.object({
+    ok: z.literal(false),
+    key: z.string(),
+    error: z.object({
+      code: z.string(),
+      detail: z.string().nullable(),
+    }).strict(),
+  }).strict(),
+]);
+export type DesktopDataChannelResponse = z.infer<typeof DesktopDataChannelResponseSchema>;
+
+/** Compile-time re-export of the shared key type. */
+export type DesktopDataChannelKey = DesktopDataRequestKey;
+
+// ---------------------------------------------------------------------------
 // Registry — the exhaustive allowlist
 // ---------------------------------------------------------------------------
 
@@ -324,6 +368,9 @@ export const IPC_ALLOWLIST: readonly {
   { channel: IPC_CHANNELS.authRefresh, requestSchema: AuthEmptyRequestSchema, responseSchema: AuthOperationResponseSchema, requiresAuthenticatedSession: false },
   { channel: IPC_CHANNELS.authChangePassword, requestSchema: AuthChangePasswordRequestSchema, responseSchema: AuthOperationResponseSchema, requiresAuthenticatedSession: true },
   { channel: IPC_CHANNELS.authRevokeAll, requestSchema: AuthEmptyRequestSchema, responseSchema: AuthOperationResponseSchema, requiresAuthenticatedSession: true },
+  // Stage 3 — desktop-data business reads. ALWAYS requires an
+  // authenticated operator session; bootstrap tokens cannot invoke this.
+  { channel: IPC_CHANNELS.desktopData, requestSchema: DesktopDataChannelRequestSchema, responseSchema: DesktopDataChannelResponseSchema, requiresAuthenticatedSession: true },
 ];
 
 export function isAllowlistedChannel(channel: string): channel is IpcChannel {
