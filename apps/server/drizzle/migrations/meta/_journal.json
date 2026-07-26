@@ -113,6 +113,13 @@
       "when": 1786700000000,
       "tag": "0015_phase2b_regime_observer",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1786800000000,
+      "tag": "0016_phase2c_risk_engine",
+      "breakpoints": true
     }
   ]
 }

@@ -3103,6 +3103,706 @@ export const championChallengerRoutingComparisons = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Phase 2C — independent portfolio RiskEngine + conservative sizing observer
+// ---------------------------------------------------------------------------
+
+export const riskPolicyVersions = mysqlTable(
+  'risk_policy_versions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyKey: varchar('policyKey', { length: 64 }).notNull(),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    description: text('description').notNull(),
+    operatingScope: varchar('operatingScope', { length: 64 }).notNull(),
+    status: mysqlEnum('status', [
+      'draft',
+      'observer',
+      'validated_for_research',
+      'approved_for_shadow_enforcement',
+      'deprecated',
+      'disabled',
+    ])
+      .notNull()
+      .default('observer'),
+    effectiveFrom: timestamp('effectiveFrom', { fsp: 3 }).notNull(),
+    effectiveTo: timestamp('effectiveTo', { fsp: 3 }),
+    supersedesPolicyId: int('supersedesPolicyId'),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    configurationHash: varchar('configurationHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('risk_policy_key_ver_uq').on(t.policyKey, t.policyVersion),
+    statusIdx: index('risk_policy_status_idx').on(t.status),
+    supersedesFk: foreignKey({
+      name: 'risk_policy_supersedes_fk',
+      columns: [t.supersedesPolicyId],
+      foreignColumns: [t.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const riskLimitDefinitions = mysqlTable(
+  'risk_limit_definitions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyVersionId: int('policyVersionId').notNull(),
+    limitKey: varchar('limitKey', { length: 64 }).notNull(),
+    scope: mysqlEnum('scope', [
+      'candidate',
+      'product',
+      'strategy_mode',
+      'correlation_cluster',
+      'benchmark_beta',
+      'portfolio',
+      'daily',
+      'weekly',
+      'drawdown',
+      'liquidity',
+      'system_integrity',
+    ]).notNull(),
+    measurementKey: varchar('measurementKey', { length: 64 }).notNull(),
+    operator: mysqlEnum('operator', ['lte', 'lt', 'gte', 'gt', 'eq']).notNull().default('lte'),
+    warningThreshold: decimal('warningThreshold', { precision: 30, scale: 12 }),
+    hardThreshold: decimal('hardThreshold', { precision: 30, scale: 12 }).notNull(),
+    unit: varchar('unit', { length: 32 }).notNull(),
+    aggregationMethod: varchar('aggregationMethod', { length: 64 }).notNull(),
+    lookbackWindow: int('lookbackWindow'),
+    minimumSampleCount: int('minimumSampleCount'),
+    breachAction: mysqlEnum('breachAction', [
+      'observe',
+      'reduce',
+      'reject',
+      'block_all_new_entries',
+      'require_reconciliation',
+    ]).notNull(),
+    missingDataAction: mysqlEnum('missingDataAction', [
+      'abstain',
+      'reject',
+      'block_all_new_entries',
+    ]).notNull(),
+    priority: int('priority').notNull().default(100),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    policyLimitUq: uniqueIndex('risk_limit_policy_key_uq').on(t.policyVersionId, t.limitKey),
+    scopeIdx: index('risk_limit_scope_idx').on(t.scope, t.measurementKey),
+    policyFk: foreignKey({
+      name: 'risk_limit_policy_fk',
+      columns: [t.policyVersionId],
+      foreignColumns: [riskPolicyVersions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const portfolioRiskRuns = mysqlTable(
+  'portfolio_risk_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyVersionId: int('policyVersionId').notNull(),
+    startedAt: timestamp('startedAt', { fsp: 3 }).notNull(),
+    completedAt: timestamp('completedAt', { fsp: 3 }),
+    candidatesEvaluated: int('candidatesEvaluated').notNull().default(0),
+    authorizeAsProposed: int('authorizeAsProposed').notNull().default(0),
+    reduceSize: int('reduceSize').notNull().default(0),
+    rejects: int('rejects').notNull().default(0),
+    abstains: int('abstains').notNull().default(0),
+    dataFailures: int('dataFailures').notNull().default(0),
+    runnerVersion: varchar('runnerVersion', { length: 32 }).notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    policyIdx: index('risk_runs_policy_idx').on(t.policyVersionId, t.startedAt),
+    policyFk: foreignKey({
+      name: 'risk_runs_policy_fk',
+      columns: [t.policyVersionId],
+      foreignColumns: [riskPolicyVersions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+const SYSTEM_INTEGRITY_VALUES = [
+  'healthy',
+  'degraded',
+  'block_all_new_entries_recommended',
+  'reconciliation_required',
+  'invalid',
+] as const;
+
+export const portfolioRiskSnapshots = mysqlTable(
+  'portfolio_risk_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    observerRunId: int('observerRunId').notNull(),
+    policyVersionId: int('policyVersionId').notNull(),
+    cash: decimal('cash', { precision: 30, scale: 10 }).notNull(),
+    reservedCash: decimal('reservedCash', { precision: 30, scale: 10 }).notNull(),
+    grossExposure: decimal('grossExposure', { precision: 30, scale: 10 }).notNull(),
+    netExposure: decimal('netExposure', { precision: 30, scale: 10 }).notNull(),
+    totalOpenStopRisk: decimal('totalOpenStopRisk', { precision: 30, scale: 10 }).notNull(),
+    pendingEntryRisk: decimal('pendingEntryRisk', { precision: 30, scale: 10 }).notNull(),
+    unprotectedExposure: decimal('unprotectedExposure', { precision: 30, scale: 10 }).notNull(),
+    btcBetaExposure: decimal('btcBetaExposure', { precision: 30, scale: 10 }),
+    ethBetaExposure: decimal('ethBetaExposure', { precision: 30, scale: 10 }),
+    dailyLoss: decimal('dailyLoss', { precision: 30, scale: 10 }).notNull().default('0'),
+    weeklyLoss: decimal('weeklyLoss', { precision: 30, scale: 10 }).notNull().default('0'),
+    currentDrawdown: decimal('currentDrawdown', { precision: 30, scale: 10 }).notNull().default('0'),
+    historicalVaR: decimal('historicalVaR', { precision: 30, scale: 10 }),
+    historicalExpectedShortfall: decimal('historicalExpectedShortfall', { precision: 30, scale: 10 }),
+    worstStressLoss: decimal('worstStressLoss', { precision: 30, scale: 10 }),
+    positionCount: int('positionCount').notNull().default(0),
+    clusterCount: int('clusterCount').notNull().default(0),
+    dataQualityState: varchar('dataQualityState', { length: 64 }).notNull(),
+    systemIntegrityState: mysqlEnum('systemIntegrityState', SYSTEM_INTEGRITY_VALUES).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runUq: uniqueIndex('risk_snap_run_uq').on(t.observerRunId),
+    integrityIdx: index('risk_snap_integrity_idx').on(t.systemIntegrityState),
+    runFk: foreignKey({
+      name: 'risk_snap_run_fk',
+      columns: [t.observerRunId],
+      foreignColumns: [portfolioRiskRuns.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    policyFk: foreignKey({
+      name: 'risk_snap_policy_fk',
+      columns: [t.policyVersionId],
+      foreignColumns: [riskPolicyVersions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const positionRiskSnapshots = mysqlTable(
+  'position_risk_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    portfolioRiskSnapshotId: int('portfolioRiskSnapshotId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    entryDecisionChainId: int('entryDecisionChainId'),
+    remainingBaseSize: decimal('remainingBaseSize', { precision: 30, scale: 10 }).notNull(),
+    weightedAverageEntry: decimal('weightedAverageEntry', { precision: 30, scale: 10 }).notNull(),
+    openStopRisk: decimal('openStopRisk', { precision: 30, scale: 10 }),
+    grossQuoteExposure: decimal('grossQuoteExposure', { precision: 30, scale: 10 }).notNull(),
+    protectionState: varchar('protectionState', { length: 64 }).notNull(),
+    state: mysqlEnum('state', [
+      'measured',
+      'partially_measured',
+      'unprotected',
+      'reconciliation_required',
+      'unknown',
+    ]).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapIdx: index('pos_risk_snap_idx').on(t.portfolioRiskSnapshotId),
+    prodIdx: index('pos_risk_prod_idx').on(t.productId),
+    snapFk: foreignKey({
+      name: 'pos_risk_snap_fk',
+      columns: [t.portfolioRiskSnapshotId],
+      foreignColumns: [portfolioRiskSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+const RISK_DECISION_VALUES = [
+  'authorize_as_proposed',
+  'reduce_size',
+  'reject',
+  'abstain',
+  'data_failure',
+] as const;
+
+export const candidateRiskDecisions = mysqlTable(
+  'candidate_risk_decisions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    candidateId: varchar('candidateId', { length: 64 }).notNull(),
+    policyVersionId: int('policyVersionId').notNull(),
+    portfolioRiskSnapshotId: int('portfolioRiskSnapshotId').notNull(),
+    proposedBaseSize: decimal('proposedBaseSize', { precision: 30, scale: 10 }).notNull(),
+    proposedQuoteSize: decimal('proposedQuoteSize', { precision: 30, scale: 10 }).notNull(),
+    recommendedBaseSize: decimal('recommendedBaseSize', { precision: 30, scale: 10 }).notNull(),
+    recommendedQuoteSize: decimal('recommendedQuoteSize', { precision: 30, scale: 10 }).notNull(),
+    sizeMultiplier: decimal('sizeMultiplier', { precision: 10, scale: 8 }).notNull(),
+    decision: mysqlEnum('decision', RISK_DECISION_VALUES).notNull(),
+    bindingLimit: varchar('bindingLimit', { length: 64 }),
+    warningBreaches: int('warningBreaches').notNull().default(0),
+    hardBreaches: int('hardBreaches').notNull().default(0),
+    systemIntegrityState: mysqlEnum('systemIntegrityState', SYSTEM_INTEGRITY_VALUES).notNull(),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }).notNull().default('0'),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    reasonCodes: varchar('reasonCodes', { length: 255 }).notNull(),
+    diagnostics: text('diagnostics'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainCandUq: uniqueIndex('cand_risk_chain_cand_uq').on(t.decisionChainId, t.candidateId),
+    decisionIdx: index('cand_risk_decision_idx').on(t.decision),
+    chainFk: foreignKey({
+      name: 'cand_risk_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    policyFk: foreignKey({
+      name: 'cand_risk_policy_fk',
+      columns: [t.policyVersionId],
+      foreignColumns: [riskPolicyVersions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    snapFk: foreignKey({
+      name: 'cand_risk_snap_fk',
+      columns: [t.portfolioRiskSnapshotId],
+      foreignColumns: [portfolioRiskSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const riskLimitBreaches = mysqlTable(
+  'risk_limit_breaches',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    portfolioRiskSnapshotId: int('portfolioRiskSnapshotId').notNull(),
+    candidateRiskDecisionId: int('candidateRiskDecisionId'),
+    limitDefinitionId: int('limitDefinitionId').notNull(),
+    scope: varchar('scope', { length: 64 }).notNull(),
+    subjectId: varchar('subjectId', { length: 64 }),
+    measuredValue: decimal('measuredValue', { precision: 30, scale: 12 }).notNull(),
+    warningThreshold: decimal('warningThreshold', { precision: 30, scale: 12 }),
+    hardThreshold: decimal('hardThreshold', { precision: 30, scale: 12 }).notNull(),
+    severity: mysqlEnum('severity', ['warning', 'hard', 'system_integrity']).notNull(),
+    breachAction: varchar('breachAction', { length: 64 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapIdx: index('risk_breach_snap_idx').on(t.portfolioRiskSnapshotId),
+    severityIdx: index('risk_breach_severity_idx').on(t.severity, t.scope),
+    snapFk: foreignKey({
+      name: 'risk_breach_snap_fk',
+      columns: [t.portfolioRiskSnapshotId],
+      foreignColumns: [portfolioRiskSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    limitFk: foreignKey({
+      name: 'risk_breach_limit_fk',
+      columns: [t.limitDefinitionId],
+      foreignColumns: [riskLimitDefinitions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    candFk: foreignKey({
+      name: 'risk_breach_cand_fk',
+      columns: [t.candidateRiskDecisionId],
+      foreignColumns: [candidateRiskDecisions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const correlationModelVersions = mysqlTable(
+  'correlation_model_versions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    modelKey: varchar('modelKey', { length: 64 }).notNull(),
+    modelVersion: varchar('modelVersion', { length: 32 }).notNull(),
+    estimator: varchar('estimator', { length: 64 }).notNull(),
+    shrinkageMethod: varchar('shrinkageMethod', { length: 64 }).notNull(),
+    shrinkageCoefficient: decimal('shrinkageCoefficient', { precision: 6, scale: 4 }),
+    minimumOverlap: int('minimumOverlap').notNull(),
+    returnInterval: varchar('returnInterval', { length: 32 }).notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', ['draft', 'observer', 'deprecated', 'disabled']).notNull().default('observer'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('corr_model_key_ver_uq').on(t.modelKey, t.modelVersion),
+  }),
+);
+
+export const correlationSnapshots = mysqlTable(
+  'correlation_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    modelVersionId: int('modelVersionId').notNull(),
+    observerRunId: int('observerRunId'),
+    productCount: int('productCount').notNull(),
+    pairCount: int('pairCount').notNull(),
+    rawCovarianceHash: varchar('rawCovarianceHash', { length: 64 }),
+    shrunkCovarianceHash: varchar('shrunkCovarianceHash', { length: 64 }),
+    numericalStatus: mysqlEnum('numericalStatus', ['ok', 'psd_failure', 'underflow_handled', 'failure']).notNull().default('ok'),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx: index('corr_snap_run_idx').on(t.observerRunId),
+    modelIdx: index('corr_snap_model_idx').on(t.modelVersionId),
+    modelFk: foreignKey({
+      name: 'corr_snap_model_fk',
+      columns: [t.modelVersionId],
+      foreignColumns: [correlationModelVersions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    runFk: foreignKey({
+      name: 'corr_snap_run_fk',
+      columns: [t.observerRunId],
+      foreignColumns: [portfolioRiskRuns.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+const RISK_MEASUREMENT_STATUS_VALUES = [
+  'valid',
+  'low_confidence',
+  'insufficient_history',
+  'stale',
+  'invalid_input',
+  'numerical_failure',
+  'unresolved_state',
+  'unsupported',
+] as const;
+
+export const correlationPairs = mysqlTable(
+  'correlation_pairs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    snapshotId: int('snapshotId').notNull(),
+    productA: varchar('productA', { length: 30 }).notNull(),
+    productB: varchar('productB', { length: 30 }).notNull(),
+    correlation: decimal('correlation', { precision: 10, scale: 6 }),
+    overlapCount: int('overlapCount').notNull(),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }).notNull().default('0'),
+    status: mysqlEnum('status', RISK_MEASUREMENT_STATUS_VALUES).notNull(),
+    lookbackStart: timestamp('lookbackStart', { fsp: 3 }).notNull(),
+    lookbackEnd: timestamp('lookbackEnd', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapAbUq: uniqueIndex('corr_pair_snap_ab_uq').on(t.snapshotId, t.productA, t.productB),
+    statusIdx: index('corr_pair_status_idx').on(t.status),
+    snapFk: foreignKey({
+      name: 'corr_pair_snap_fk',
+      columns: [t.snapshotId],
+      foreignColumns: [correlationSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const riskClusterSnapshots = mysqlTable(
+  'risk_cluster_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    correlationSnapshotId: int('correlationSnapshotId').notNull(),
+    observerRunId: int('observerRunId'),
+    clusteringPolicyVersion: varchar('clusteringPolicyVersion', { length: 32 }).notNull(),
+    absoluteThreshold: decimal('absoluteThreshold', { precision: 6, scale: 4 }).notNull(),
+    clusterCount: int('clusterCount').notNull(),
+    unclusteredCount: int('unclusteredCount').notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    corrIdx: index('cluster_snap_corr_idx').on(t.correlationSnapshotId),
+    corrFk: foreignKey({
+      name: 'cluster_snap_corr_fk',
+      columns: [t.correlationSnapshotId],
+      foreignColumns: [correlationSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    runFk: foreignKey({
+      name: 'cluster_snap_run_fk',
+      columns: [t.observerRunId],
+      foreignColumns: [portfolioRiskRuns.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const riskClusters = mysqlTable(
+  'risk_clusters',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    clusterSnapshotId: int('clusterSnapshotId').notNull(),
+    clusterKey: varchar('clusterKey', { length: 64 }).notNull(),
+    productCount: int('productCount').notNull(),
+    representativeProductId: varchar('representativeProductId', { length: 30 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapKeyUq: uniqueIndex('cluster_snap_key_uq').on(t.clusterSnapshotId, t.clusterKey),
+    snapFk: foreignKey({
+      name: 'cluster_snap_fk',
+      columns: [t.clusterSnapshotId],
+      foreignColumns: [riskClusterSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const riskClusterMemberships = mysqlTable(
+  'risk_cluster_memberships',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    clusterSnapshotId: int('clusterSnapshotId').notNull(),
+    clusterId: int('clusterId'),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    membershipStrength: decimal('membershipStrength', { precision: 6, scale: 4 }),
+    reason: varchar('reason', { length: 64 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapProdUq: uniqueIndex('cluster_mem_snap_prod_uq').on(t.clusterSnapshotId, t.productId),
+    clusterIdx: index('cluster_mem_cluster_idx').on(t.clusterId),
+    snapFk: foreignKey({
+      name: 'cluster_mem_snap_fk',
+      columns: [t.clusterSnapshotId],
+      foreignColumns: [riskClusterSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    clusterFk: foreignKey({
+      name: 'cluster_mem_cluster_fk',
+      columns: [t.clusterId],
+      foreignColumns: [riskClusters.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+const LOSS_STATE_VALUES = ['open', 'warning', 'hard_breached', 'closed', 'invalid'] as const;
+
+export const dailyLossStates = mysqlTable(
+  'daily_loss_states',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    periodStart: timestamp('periodStart', { fsp: 3 }).notNull(),
+    periodEnd: timestamp('periodEnd', { fsp: 3 }).notNull(),
+    startingEquity: decimal('startingEquity', { precision: 30, scale: 10 }).notNull(),
+    endingEquity: decimal('endingEquity', { precision: 30, scale: 10 }).notNull(),
+    realizedNetPnl: decimal('realizedNetPnl', { precision: 30, scale: 10 }).notNull(),
+    fees: decimal('fees', { precision: 30, scale: 10 }).notNull(),
+    status: mysqlEnum('status', LOSS_STATE_VALUES).notNull().default('open'),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    periodUq: uniqueIndex('daily_loss_period_policy_uq').on(t.policyVersion, t.periodStart),
+    statusIdx: index('daily_loss_status_idx').on(t.status),
+  }),
+);
+
+export const weeklyLossStates = mysqlTable(
+  'weekly_loss_states',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    periodStart: timestamp('periodStart', { fsp: 3 }).notNull(),
+    periodEnd: timestamp('periodEnd', { fsp: 3 }).notNull(),
+    startingEquity: decimal('startingEquity', { precision: 30, scale: 10 }).notNull(),
+    endingEquity: decimal('endingEquity', { precision: 30, scale: 10 }).notNull(),
+    realizedNetPnl: decimal('realizedNetPnl', { precision: 30, scale: 10 }).notNull(),
+    fees: decimal('fees', { precision: 30, scale: 10 }).notNull(),
+    status: mysqlEnum('status', LOSS_STATE_VALUES).notNull().default('open'),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    periodUq: uniqueIndex('weekly_loss_period_policy_uq').on(t.policyVersion, t.periodStart),
+    statusIdx: index('weekly_loss_status_idx').on(t.status),
+  }),
+);
+
+export const portfolioDrawdownStates = mysqlTable(
+  'portfolio_drawdown_states',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    peakEquity: decimal('peakEquity', { precision: 30, scale: 10 }).notNull(),
+    currentEquity: decimal('currentEquity', { precision: 30, scale: 10 }).notNull(),
+    currentDrawdown: decimal('currentDrawdown', { precision: 30, scale: 10 }).notNull(),
+    maximumDrawdown: decimal('maximumDrawdown', { precision: 30, scale: 10 }).notNull(),
+    peakEquityAt: timestamp('peakEquityAt', { fsp: 3 }).notNull(),
+    status: mysqlEnum('status', ['healthy', 'warning', 'hard_breached', 'invalid']).notNull().default('healthy'),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    policyIdx: index('drawdown_policy_idx').on(t.policyVersion, t.createdAt),
+    statusIdx: index('drawdown_status_idx').on(t.status),
+  }),
+);
+
+export const stressScenarioDefinitions = mysqlTable(
+  'stress_scenario_definitions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    scenarioKey: varchar('scenarioKey', { length: 64 }).notNull(),
+    scenarioVersion: varchar('scenarioVersion', { length: 32 }).notNull(),
+    description: text('description').notNull(),
+    shockDefinitions: text('shockDefinitions').notNull(),
+    correlationPolicy: varchar('correlationPolicy', { length: 64 }).notNull(),
+    liquidityPolicy: varchar('liquidityPolicy', { length: 64 }).notNull(),
+    protectionPolicy: varchar('protectionPolicy', { length: 64 }).notNull(),
+    valuationPolicy: varchar('valuationPolicy', { length: 64 }).notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', ['draft', 'observer', 'deprecated', 'disabled']).notNull().default('observer'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('stress_key_ver_uq').on(t.scenarioKey, t.scenarioVersion),
+  }),
+);
+
+export const stressTestRuns = mysqlTable(
+  'stress_test_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    portfolioRiskSnapshotId: int('portfolioRiskSnapshotId').notNull(),
+    scenarioCount: int('scenarioCount').notNull(),
+    worstScenarioKey: varchar('worstScenarioKey', { length: 64 }),
+    worstLoss: decimal('worstLoss', { precision: 30, scale: 10 }),
+    startedAt: timestamp('startedAt', { fsp: 3 }).notNull(),
+    completedAt: timestamp('completedAt', { fsp: 3 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapIdx: index('stress_runs_snap_idx').on(t.portfolioRiskSnapshotId),
+    snapFk: foreignKey({
+      name: 'stress_runs_snap_fk',
+      columns: [t.portfolioRiskSnapshotId],
+      foreignColumns: [portfolioRiskSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const stressTestResults = mysqlTable(
+  'stress_test_results',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    stressTestRunId: int('stressTestRunId').notNull(),
+    scenarioDefinitionId: int('scenarioDefinitionId').notNull(),
+    portfolioValueBefore: decimal('portfolioValueBefore', { precision: 30, scale: 10 }).notNull(),
+    portfolioValueAfter: decimal('portfolioValueAfter', { precision: 30, scale: 10 }).notNull(),
+    estimatedLoss: decimal('estimatedLoss', { precision: 30, scale: 10 }).notNull(),
+    candidateIncrementalLoss: decimal('candidateIncrementalLoss', { precision: 30, scale: 10 }),
+    largestPositionContribution: decimal('largestPositionContribution', { precision: 30, scale: 10 }),
+    largestClusterContribution: decimal('largestClusterContribution', { precision: 30, scale: 10 }),
+    assumptions: text('assumptions').notNull(),
+    limitBreaches: int('limitBreaches').notNull().default(0),
+    dataQualityStatus: varchar('dataQualityStatus', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runScenUq: uniqueIndex('stress_result_run_scen_uq').on(t.stressTestRunId, t.scenarioDefinitionId),
+    runFk: foreignKey({
+      name: 'stress_result_run_fk',
+      columns: [t.stressTestRunId],
+      foreignColumns: [stressTestRuns.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    scenFk: foreignKey({
+      name: 'stress_result_scen_fk',
+      columns: [t.scenarioDefinitionId],
+      foreignColumns: [stressScenarioDefinitions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const championRiskComparisons = mysqlTable(
+  'champion_risk_comparisons',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    candidateRiskDecisionId: int('candidateRiskDecisionId'),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    championProposedBaseSize: decimal('championProposedBaseSize', { precision: 30, scale: 10 }).notNull(),
+    championProposedQuoteSize: decimal('championProposedQuoteSize', { precision: 30, scale: 10 }).notNull(),
+    riskRecommendedBaseSize: decimal('riskRecommendedBaseSize', { precision: 30, scale: 10 }).notNull(),
+    riskRecommendedQuoteSize: decimal('riskRecommendedQuoteSize', { precision: 30, scale: 10 }).notNull(),
+    riskDecision: mysqlEnum('riskDecision', RISK_DECISION_VALUES).notNull(),
+    bindingLimit: varchar('bindingLimit', { length: 64 }),
+    championExecutionOutcome: varchar('championExecutionOutcome', { length: 64 }),
+    agreementState: mysqlEnum('agreementState', [
+      'agree',
+      'risk_reduced',
+      'risk_rejected',
+      'risk_abstained',
+      'unresolved',
+    ]).notNull(),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainUq: uniqueIndex('champ_risk_chain_uq').on(t.decisionChainId),
+    agreementIdx: index('champ_risk_agreement_idx').on(t.agreementState),
+    chainFk: foreignKey({
+      name: 'champ_risk_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    candFk: foreignKey({
+      name: 'champ_risk_cand_fk',
+      columns: [t.candidateRiskDecisionId],
+      foreignColumns: [candidateRiskDecisions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -3252,3 +3952,45 @@ export type ChallengerRoutingDecisionRow = typeof challengerRoutingDecisions.$in
 export type ChallengerRoutingDecisionInsert = typeof challengerRoutingDecisions.$inferInsert;
 export type ChampionChallengerRoutingComparisonRow = typeof championChallengerRoutingComparisons.$inferSelect;
 export type ChampionChallengerRoutingComparisonInsert = typeof championChallengerRoutingComparisons.$inferInsert;
+
+// Phase 2C
+export type RiskPolicyVersionRow = typeof riskPolicyVersions.$inferSelect;
+export type RiskPolicyVersionInsert = typeof riskPolicyVersions.$inferInsert;
+export type RiskLimitDefinitionRow = typeof riskLimitDefinitions.$inferSelect;
+export type RiskLimitDefinitionInsert = typeof riskLimitDefinitions.$inferInsert;
+export type PortfolioRiskRunRow = typeof portfolioRiskRuns.$inferSelect;
+export type PortfolioRiskRunInsert = typeof portfolioRiskRuns.$inferInsert;
+export type PortfolioRiskSnapshotRow = typeof portfolioRiskSnapshots.$inferSelect;
+export type PortfolioRiskSnapshotInsert = typeof portfolioRiskSnapshots.$inferInsert;
+export type PositionRiskSnapshotRow = typeof positionRiskSnapshots.$inferSelect;
+export type PositionRiskSnapshotInsert = typeof positionRiskSnapshots.$inferInsert;
+export type CandidateRiskDecisionRow = typeof candidateRiskDecisions.$inferSelect;
+export type CandidateRiskDecisionInsert = typeof candidateRiskDecisions.$inferInsert;
+export type RiskLimitBreachRow = typeof riskLimitBreaches.$inferSelect;
+export type RiskLimitBreachInsert = typeof riskLimitBreaches.$inferInsert;
+export type CorrelationModelVersionRow = typeof correlationModelVersions.$inferSelect;
+export type CorrelationModelVersionInsert = typeof correlationModelVersions.$inferInsert;
+export type CorrelationSnapshotRow = typeof correlationSnapshots.$inferSelect;
+export type CorrelationSnapshotInsert = typeof correlationSnapshots.$inferInsert;
+export type CorrelationPairRow = typeof correlationPairs.$inferSelect;
+export type CorrelationPairInsert = typeof correlationPairs.$inferInsert;
+export type RiskClusterSnapshotRow = typeof riskClusterSnapshots.$inferSelect;
+export type RiskClusterSnapshotInsert = typeof riskClusterSnapshots.$inferInsert;
+export type RiskClusterRow = typeof riskClusters.$inferSelect;
+export type RiskClusterInsert = typeof riskClusters.$inferInsert;
+export type RiskClusterMembershipRow = typeof riskClusterMemberships.$inferSelect;
+export type RiskClusterMembershipInsert = typeof riskClusterMemberships.$inferInsert;
+export type DailyLossStateRow = typeof dailyLossStates.$inferSelect;
+export type DailyLossStateInsert = typeof dailyLossStates.$inferInsert;
+export type WeeklyLossStateRow = typeof weeklyLossStates.$inferSelect;
+export type WeeklyLossStateInsert = typeof weeklyLossStates.$inferInsert;
+export type PortfolioDrawdownStateRow = typeof portfolioDrawdownStates.$inferSelect;
+export type PortfolioDrawdownStateInsert = typeof portfolioDrawdownStates.$inferInsert;
+export type StressScenarioDefinitionRow = typeof stressScenarioDefinitions.$inferSelect;
+export type StressScenarioDefinitionInsert = typeof stressScenarioDefinitions.$inferInsert;
+export type StressTestRunRow = typeof stressTestRuns.$inferSelect;
+export type StressTestRunInsert = typeof stressTestRuns.$inferInsert;
+export type StressTestResultRow = typeof stressTestResults.$inferSelect;
+export type StressTestResultInsert = typeof stressTestResults.$inferInsert;
+export type ChampionRiskComparisonRow = typeof championRiskComparisons.$inferSelect;
+export type ChampionRiskComparisonInsert = typeof championRiskComparisons.$inferInsert;

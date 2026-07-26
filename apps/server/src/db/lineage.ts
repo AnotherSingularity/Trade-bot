@@ -2,8 +2,10 @@ import { createHash } from 'node:crypto';
 import { and, desc, eq, lte } from 'drizzle-orm';
 import { db } from './index';
 import {
+  candidateRiskDecisions,
   challengerRoutingDecisions,
   championChallengerRoutingComparisons,
+  championRiskComparisons,
   changePointEvents,
   decisionChains,
   eligibilityDecisions,
@@ -15,6 +17,8 @@ import {
   lineageEvents,
   marketObservations,
   outcomeLabels,
+  portfolioRiskSnapshots,
+  positionRiskSnapshots,
   postFillRevalidations,
   productHygieneDecisions,
   productQuarantines,
@@ -27,11 +31,14 @@ import {
   regimeEvidence,
   regimeObserverRuns,
   regimeTransitions,
+  riskLimitBreaches,
   scanRuns,
   setupEvaluations,
   shadowExecutionPlans,
   shortlistDecisions,
   strategyRoutingDecisions,
+  stressTestResults,
+  stressTestRuns,
   universeSnapshots,
   type DecisionChainRow,
   type EligibilityDecisionRow,
@@ -41,12 +48,16 @@ import {
   type MarketObservationRow,
   type OutcomeLabelRow,
   type PostFillRevalidationRow,
+  type CandidateRiskDecisionRow,
   type ChallengerRoutingDecisionRow,
   type ChampionChallengerRoutingComparisonRow,
+  type ChampionRiskComparisonRow,
   type ChangePointEventRow,
   type GlobalRegimeSnapshotRow,
   type LatentStateAssignmentRow,
   type LatentStateMappingRow,
+  type PortfolioRiskSnapshotRow,
+  type PositionRiskSnapshotRow,
   type ProductHygieneDecisionRow,
   type ProductQuarantineRow,
   type ProductRegimeSnapshotRow,
@@ -58,7 +69,10 @@ import {
   type RegimeEvidenceRow,
   type RegimeObserverRunRow,
   type RegimeTransitionRow,
+  type RiskLimitBreachRow,
   type ScanRunRow,
+  type StressTestResultRow,
+  type StressTestRunRow,
   type SetupEvaluationRow,
   type ShadowExecutionPlanRow,
   type ShortlistDecisionRow,
@@ -762,6 +776,15 @@ export interface ResearchObserverAggregate {
   transitions: RegimeTransitionRow[];
   challengerRouting: ChallengerRoutingDecisionRow | null;
   championComparison: ChampionChallengerRoutingComparisonRow | null;
+  portfolioRisk: {
+    snapshot: PortfolioRiskSnapshotRow | null;
+    positions: PositionRiskSnapshotRow[];
+    candidateDecision: CandidateRiskDecisionRow | null;
+    breaches: RiskLimitBreachRow[];
+    stressTestRun: StressTestRunRow | null;
+    stressResults: StressTestResultRow[];
+    championComparison: ChampionRiskComparisonRow | null;
+  };
 }
 
 async function loadResearchObserverChain(
@@ -774,6 +797,9 @@ async function loadResearchObserverChain(
     .orderBy(desc(universeSnapshots.observedAt))
     .limit(1);
   if (!snapshot) {
+    // No Phase 2A universe snapshot exists, but Phase 2C data may still be
+    // present. Load it independently.
+    const portfolioRisk = await loadPortfolioRiskForChain(chain.id);
     return {
       snapshot: null,
       hygiene: null,
@@ -791,6 +817,7 @@ async function loadResearchObserverChain(
       transitions: [],
       challengerRouting: null,
       championComparison: null,
+      portfolioRisk,
     };
   }
   const [hygiene] = await db
@@ -928,6 +955,8 @@ async function loadResearchObserverChain(
     .where(eq(championChallengerRoutingComparisons.decisionChainId, chain.id))
     .limit(1);
 
+  const portfolioRisk = await loadPortfolioRiskForChain(chain.id);
+
   return {
     snapshot,
     hygiene: hygiene ?? null,
@@ -945,6 +974,66 @@ async function loadResearchObserverChain(
     transitions,
     challengerRouting,
     championComparison: championComparison ?? null,
+    portfolioRisk,
+  };
+}
+
+async function loadPortfolioRiskForChain(chainId: number): Promise<ResearchObserverAggregate['portfolioRisk']> {
+  const [candidateRisk] = await db
+    .select()
+    .from(candidateRiskDecisions)
+    .where(eq(candidateRiskDecisions.decisionChainId, chainId))
+    .orderBy(desc(candidateRiskDecisions.createdAt))
+    .limit(1);
+  let portfolioRiskSnapshot: PortfolioRiskSnapshotRow | null = null;
+  let portfolioRiskPositions: PositionRiskSnapshotRow[] = [];
+  let portfolioRiskBreaches: RiskLimitBreachRow[] = [];
+  let stressTestRun: StressTestRunRow | null = null;
+  let stressResults: StressTestResultRow[] = [];
+  if (candidateRisk) {
+    const [snap] = await db
+      .select()
+      .from(portfolioRiskSnapshots)
+      .where(eq(portfolioRiskSnapshots.id, candidateRisk.portfolioRiskSnapshotId))
+      .limit(1);
+    portfolioRiskSnapshot = snap ?? null;
+    if (portfolioRiskSnapshot) {
+      portfolioRiskPositions = await db
+        .select()
+        .from(positionRiskSnapshots)
+        .where(eq(positionRiskSnapshots.portfolioRiskSnapshotId, portfolioRiskSnapshot.id));
+      portfolioRiskBreaches = await db
+        .select()
+        .from(riskLimitBreaches)
+        .where(eq(riskLimitBreaches.candidateRiskDecisionId, candidateRisk.id));
+      const [str] = await db
+        .select()
+        .from(stressTestRuns)
+        .where(eq(stressTestRuns.portfolioRiskSnapshotId, portfolioRiskSnapshot.id))
+        .orderBy(desc(stressTestRuns.startedAt))
+        .limit(1);
+      stressTestRun = str ?? null;
+      if (stressTestRun) {
+        stressResults = await db
+          .select()
+          .from(stressTestResults)
+          .where(eq(stressTestResults.stressTestRunId, stressTestRun.id));
+      }
+    }
+  }
+  const [championRiskCmp] = await db
+    .select()
+    .from(championRiskComparisons)
+    .where(eq(championRiskComparisons.decisionChainId, chainId))
+    .limit(1);
+  return {
+    snapshot: portfolioRiskSnapshot,
+    positions: portfolioRiskPositions,
+    candidateDecision: candidateRisk ?? null,
+    breaches: portfolioRiskBreaches,
+    stressTestRun,
+    stressResults,
+    championComparison: championRiskCmp ?? null,
   };
 }
 
