@@ -1,0 +1,48 @@
+{
+  "auditCommit": "0a1d76fa9770d045d7b64d1cb3d6b81069d4816a",
+  "note": "The audit distinguishes: (1) route exists (React Router), (2) API contract exists in ipcContract.ts, (3) preload bridge exposes a method, (4) server endpoint exists that could back it, (5) auth enforced at IPC, (6) real DB evidence rendered in the DOM.",
+  "authenticationEnforced": false,
+  "authenticationReason": "apps/desktop/src/main/index.ts:166 sets authenticationRequired: false; every allowlisted channel is open regardless of its requiresAuthenticatedSession declaration",
+  "totalScreens": 19,
+  "totalIpcMethodsBound": 11,
+  "totalIpcMethodsUsedByRenderer": 5,
+  "unusedIpcMethods": [
+    "startLocalServices",
+    "stopLocalServices",
+    "restartLocalServices",
+    "openLogFolder",
+    "exportReport",
+    "requestControlledConfigurationChange"
+  ],
+  "screens": [
+    { "key": "overview", "route": "/overview", "contractExists": true, "preloadMethod": "getDesktopStatus + readSafeConfiguration + getServiceHealth", "serverEndpoint": "hardcoded in main-process handler", "authEnforced": false, "realDataRendered": "partial (structure only; counters + versions hardcoded)", "maturity": "contract_only" },
+    { "key": "shadow_portfolio", "route": "/shadow-portfolio", "contractExists": false, "preloadMethod": "none", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "positions", "route": "/positions", "contractExists": false, "preloadMethod": "none", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "decision_journal", "route": "/decision-journal", "contractExists": false, "preloadMethod": "none", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "research_universe", "route": "/research/universe", "contractExists": false, "preloadMethod": "readSafeConfiguration (version-only, no data)", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "fingerprints", "route": "/research/fingerprints", "contractExists": false, "preloadMethod": "readSafeConfiguration (version-only)", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "regimes", "route": "/research/regimes", "contractExists": false, "preloadMethod": "readSafeConfiguration (version-only)", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "portfolio_risk", "route": "/research/portfolio-risk", "contractExists": false, "preloadMethod": "readSafeConfiguration (version-only)", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "microstructure", "route": "/research/microstructure", "contractExists": false, "preloadMethod": "readSafeConfiguration (version-only)", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "context", "route": "/research/context", "contractExists": false, "preloadMethod": "readSafeConfiguration (version-only)", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "validation_lab", "route": "/research/validation-lab", "contractExists": false, "preloadMethod": "readSafeConfiguration (version-only)", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "costs_attribution", "route": "/ops/costs-attribution", "contractExists": false, "preloadMethod": "none", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "protection", "route": "/ops/protection", "contractExists": false, "preloadMethod": "none", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "reconciliation", "route": "/ops/reconciliation", "contractExists": false, "preloadMethod": "none", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "incidents", "route": "/ops/incidents", "contractExists": false, "preloadMethod": "none", "serverEndpoint": "none", "authEnforced": false, "realDataRendered": "no", "maturity": "ui_shell" },
+    { "key": "reports", "route": "/ops/reports", "contractExists": true, "preloadMethod": "selectExportFolder ONLY (exportReport never invoked)", "serverEndpoint": "handler returns ok:false always", "authEnforced": false, "realDataRendered": "no", "maturity": "contract_only" },
+    { "key": "configuration", "route": "/system/configuration", "contractExists": true, "preloadMethod": "readSafeConfiguration", "serverEndpoint": "hardcoded in main-process handler", "authEnforced": false, "realDataRendered": "partial (values hardcoded)", "maturity": "contract_only" },
+    { "key": "system", "route": "/system", "contractExists": true, "preloadMethod": "getApplicationVersion + getDesktopStatus + getServiceHealth", "serverEndpoint": "hardcoded in main-process handler", "authEnforced": false, "realDataRendered": "partial (versions hardcoded)", "maturity": "contract_only" },
+    { "key": "safety", "route": "/safety", "contractExists": true, "preloadMethod": "getDesktopStatus", "serverEndpoint": "hardcoded", "authEnforced": false, "realDataRendered": "no (all shown values are hardcoded literals)", "maturity": "contract_only" }
+  ],
+  "stateMatrixCoverage": {
+    "loading": "rendered (Loading… string) — passive; not proof of real request",
+    "empty": "rendered as static copy — describes what would appear IF the runtime ran",
+    "healthy": "not proven for 15/19 screens because no request is made",
+    "degraded": "not implemented in the renderer for any data-bound screen",
+    "failed": "not implemented in the renderer for any data-bound screen",
+    "stale": "not implemented in the renderer for any data-bound screen",
+    "unauthorized": "not implemented in the renderer for any data-bound screen",
+    "apiError": "generic try/catch in useHorizon.ts; no per-screen error UI"
+  }
+}

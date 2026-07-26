@@ -1,0 +1,43 @@
+{
+  "auditCommit": "0a1d76fa9770d045d7b64d1cb3d6b81069d4816a",
+  "packagerConfig": "apps/desktop/package.json (build section)",
+  "explicitFileAllowlist": [
+    "dist/**/*",
+    "!node_modules/**/*",
+    "node_modules/electron-log/**/*",
+    "node_modules/electron-store/**/*",
+    "node_modules/keytar/**/*"
+  ],
+  "requiredAfterInstall": [
+    { "item": "Electron main bundle", "path": "dist/main/index.js", "packaged": true, "notes": "compiled from src/main" },
+    { "item": "Electron preload bundle", "path": "dist/preload/index.js", "packaged": true, "notes": "compiled from src/preload" },
+    { "item": "Electron renderer bundle", "path": "dist/renderer/**", "packaged": true, "notes": "Vite output" },
+    { "item": "zod runtime module", "path": "node_modules/zod/**", "packaged": "unknown", "notes": "Imported by dist/main and dist/preload; not in explicit allowlist. electron-builder's node-file-trace usually pulls it in via asar, but this must be audited on a produced .exe rather than assumed" },
+    { "item": "electron-log", "path": "node_modules/electron-log/**", "packaged": true, "notes": "explicit" },
+    { "item": "electron-store", "path": "node_modules/electron-store/**", "packaged": true, "notes": "explicit" },
+    { "item": "keytar (native)", "path": "node_modules/keytar/**", "packaged": true, "notes": "explicit; ships prebuilt binaries" },
+    { "item": "server build output", "path": "apps/server/dist/**", "packaged": false, "notes": "The desktop is intended to supervise the server, but the server bundle is not packaged. Either the desktop must ship the server, or the desktop must require Docker to run the server as a container (in which case the compose files + Dockerfile become mandatory)" },
+    { "item": "server Dockerfile", "path": "apps/server/Dockerfile", "packaged": false, "notes": "referenced by docker-compose.prod.yml" },
+    { "item": "database migrations", "path": "apps/server/drizzle/migrations/*.sql", "packaged": false, "notes": "21 migration files (0000-0020). Not in installer" },
+    { "item": "schema fingerprints", "path": "apps/server/drizzle/fingerprints/*.json", "packaged": false, "notes": "canonical fingerprint that ServerAdapter.synchronize is supposed to compare against" },
+    { "item": "docker-compose.yml (dev)", "path": "docker-compose.yml", "packaged": false, "notes": "root compose; also has wrong service names for the adapter" },
+    { "item": "docker-compose.prod.yml", "path": "docker-compose.prod.yml", "packaged": false, "notes": "production compose; desktop never selects it" },
+    { "item": "configuration templates", "path": ".env.example", "packaged": false, "notes": "operator would install and immediately need env values; none shipped" },
+    { "item": "runbooks", "path": "docs/runbooks/*.md", "packaged": false, "notes": "27 runbooks; installer does not bundle" },
+    { "item": "audit reports", "path": "phase3b_audit/reports/*", "packaged": false, "notes": "operator has no way to see the freeze manifest from inside the installed app" },
+    { "item": "Coinbase SDK / adapters", "path": "apps/server/src/coinbase/*", "packaged": false, "notes": "included transitively IF server is packaged, which it is not" },
+    { "item": "Node runtime (for server)", "path": "n/a", "packaged": false, "notes": "Electron ships Node for the main process, not the server. Server needs its own Node OR must run under Docker" }
+  ],
+  "gapSummary": {
+    "requiredButNotPackaged": 12,
+    "requiredAndPackaged": 4,
+    "requiredButUnknown": 1
+  },
+  "packagingMaturity": "absent",
+  "packagingReason": "The explicit files list is materially incomplete. Even with electron-builder's automatic node-file-trace, the installer cannot boot the server or run migrations because none of the server code, migrations, or compose files are included",
+  "correctionOptions": [
+    "Option A — bundle everything the desktop needs to supervise the server: server build + migrations + fingerprints + prod compose + Dockerfile + report templates. Installer becomes larger; desktop can run without an external server.",
+    "Option B — desktop requires an external server (running under Docker) that the operator sets up separately. Then the installer packages only the desktop; the server is deployed via docker-compose from a separate distribution."
+  ],
+  "recommendation": "Decide Option A or B before spending time on packaging fixes"
+}

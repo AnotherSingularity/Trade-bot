@@ -1,0 +1,38 @@
+# End-to-end runtime path
+
+Every arrow: implementing function → runtime caller → required
+configuration → test coverage → current maturity → missing work.
+
+| # | Arrow | Function | Runtime caller | Required config | Test coverage | Maturity | Missing work |
+|---|---|---|---|---|---|---|---|
+| 1 | desktop launch | `apps/desktop/src/main/index.ts` `boot()` | Electron `app.whenReady` | Node runtime bundled in Electron | none (never launched on native OS) | **contract_only** | actually launch on Windows |
+| 2 | → environment validation | `resolveDesktopEnvironment` + `validateDesktopEnvironment` | `boot()` step 1 | env vars: `DRY_RUN`, `ORDER_SUBMISSION_ENABLED`, `HORIZON_PROVIDER_MODE` | `phase3a_environment.test.ts` (T1-T6) | **unit_verified** | validate under real Electron process env |
+| 3 | → Docker detection | `DockerCommandRunner.which('docker')` (interface only) | `MariaDbAdapter.checkDependencies` | Docker Desktop installed | `phase3a_service_adapters.test.ts` (InMemoryRunner) | **contract_only** | implement a real runner that spawns `docker` CLI |
+| 4 | → MariaDB startup | `MariaDbAdapter.start` → `compose(['up','-d','mariadb'], composeDir)` | ServiceSupervisor.start('mariadb') | `docker-compose.yml` that defines a `mariadb` service | `phase3a_service_supervisor.test.ts` (via stub) | **absent** | rename compose service `db`→`mariadb` OR change adapter arg; produce real runner |
+| 5 | → Redis startup | `RedisAdapter.start` → `compose(['up','-d','redis'], composeDir)` | ServiceSupervisor.start('redis') | `docker-compose.yml` defines `redis` (it does) | via stub | **absent** | produce real runner |
+| 6 | → migrations | `ServerAdapter.migrate` currently returns `ok:true` | ServiceSupervisor.start('server') | drizzle-kit + DATABASE_URL | none (stub) | **absent** | spawn `drizzle-kit migrate`; capture output; expose migration_run row |
+| 7 | → schema verification | `ServerAdapter.synchronize` currently returns `ok:true` | ServiceSupervisor.start('server') | canonical fingerprint file | none (stub) | **absent** | compute live fingerprint; compare to `apps/server/drizzle/fingerprints/0020_mariadb_fingerprint.json` |
+| 8 | → server startup | `ServerAdapter.start` → `compose(['up','-d','server'], composeDir)` | ServiceSupervisor.start('server') | prod compose (server + db + redis) | via stub | **absent** | pick prod compose file at runtime; expose server-boot health |
+| 9 | → reconciliation | `apps/server/src/reconciliation/*` startup gate | server boot | live exchange state OR fixture provider | `phase1_1b.test.ts` | **integration_verified** | exercise against genuine market data (Phase 3C) |
+| 10 | → scanner authorization | `apps/server/src/scanner/*` waits for reconciler ok | server boot | reconciler unresolved_count = 0 | `phase1_1b.test.ts` | **integration_verified** | attach live market-data supervisor |
+| 11 | → market observations | `apps/server/src/market/coinbaseMarketDataSupervisor.ts` | scanner tick | Coinbase WS + REST OR fixture | `phase1_2.test.ts` | **fixture_only** | attach genuine provider under `HORIZON_PROVIDER_MODE=external` (Phase 3C only) |
+| 12 | → shadow candidate | `apps/server/src/scanner/shadowRuntime.ts` | scanner tick | approved champion config | `phase3a_gate3d.test.ts` | **integration_verified** | run against genuine data |
+| 13 | → champion decision | `apps/server/src/champion/*` | shadowRuntime | champion policy version | server tests | **integration_verified** | run against genuine data |
+| 14 | → observer decisions | Phase 2A-2F observer modules | shadowRuntime (currently NOT wired for a live tick) | policy versions | Phase 2X fixture harnesses | **fixture_only** | wire observers into a real shadow tick |
+| 15 | → shadow execution | `executor.ts` (DRY_RUN path) | shadowRuntime | Coinbase preview | server tests | **integration_verified** | exercise against genuine preview API (Phase 3C) |
+| 16 | → fills | `applyEntryEconomicStateTx` | executor | DB transaction | server tests | **integration_verified** | run against genuine fills stream |
+| 17 | → position | positions/round_trips tables | applyEntryEconomicStateTx | DB | server tests | **integration_verified** | genuine data |
+| 18 | → protection | `protection/*` | executor | protection policy | Phase 3C tests | **integration_verified** | genuine data |
+| 19 | → exit | `applyExitEconomicStateTx` | executor exit path | DB | Phase 3A gate 3A tests | **integration_verified** | genuine data |
+| 20 | → ledger | cash_ledger inserts | apply* functions | DB | Phase 1 tests | **integration_verified** | genuine data |
+| 21 | → outcome | outcome_labels inserts | scheduled task | DB + forward-only rule | Phase 1 gate 2d tests | **integration_verified** | genuine data |
+| 22 | → desktop API | expected `apps/server/src/api/*` endpoints that the desktop queries | server | JWT + session | none (endpoints absent for 15/19 screens) | **absent** | design and implement authenticated read APIs |
+| 23 | → screen | React screens under `apps/desktop/src/renderer/screens/*` | React | preload bridge | render tests (T64-T72) | **contract_only** for 4 screens; **ui_shell** for 15 | bind each screen to its API |
+| 24 | → export | `exportReport` main-process handler | Reports screen (currently never invokes it) | report generator | none | **absent** | implement per-kind generators + checksum + redaction |
+
+## Overall runtime maturity
+
+`framework_only`. No arrow past #2 has ever executed end-to-end
+against a real environment on this build. Arrows 3-8 are the desktop
+supervisor layer and are the immediate blocker. Arrows 22-24 are the
+desktop→server integration layer, which is empty for most screens.
