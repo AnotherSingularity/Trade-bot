@@ -107,6 +107,20 @@ describe('Phase 2A §Q — source isolation guardrail', () => {
       'fingerprintSnapshots',
       'fingerprintEvidence',
       'researchObserverRuns',
+      // Phase 2B tables must also be research-only.
+      'regimeDefinitions',
+      'regimeTransitionPolicies',
+      'regimeObserverRuns',
+      'globalRegimeSnapshots',
+      'productRegimeSnapshots',
+      'regimeEvidence',
+      'changePointEvents',
+      'latentStateModelVersions',
+      'latentStateAssignments',
+      'latentStateMappings',
+      'regimeTransitions',
+      'challengerRoutingDecisions',
+      'championChallengerRoutingComparisons',
     ];
     // These symbols may only be WRITTEN from research/* or db/lineage.ts (audit-only read).
     const allowedRoots = ['research', join('db', 'lineage.ts'), join('db', 'schema.ts')];

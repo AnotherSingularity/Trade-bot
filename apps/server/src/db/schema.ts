@@ -2575,6 +2575,534 @@ export const researchObserverRuns = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Phase 2B — regime observer, change detection, challenger routing
+// ---------------------------------------------------------------------------
+
+export const regimeDefinitions = mysqlTable(
+  'regime_definitions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    regimeKey: varchar('regimeKey', { length: 64 }).notNull(),
+    regimeVersion: varchar('regimeVersion', { length: 32 }).notNull(),
+    scope: mysqlEnum('scope', ['global', 'product']).notNull(),
+    description: text('description').notNull(),
+    requiredEvidence: text('requiredEvidence').notNull(),
+    minimumValidEvidence: int('minimumValidEvidence').notNull(),
+    conflictPolicy: varchar('conflictPolicy', { length: 64 }).notNull(),
+    missingDataPolicy: varchar('missingDataPolicy', { length: 64 }).notNull(),
+    transitionPolicyVersion: varchar('transitionPolicyVersion', { length: 32 }).notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', [
+      'draft',
+      'observer',
+      'validated_for_research',
+      'deprecated',
+      'disabled',
+    ])
+      .notNull()
+      .default('observer'),
+    supersedesDefinitionId: int('supersedesDefinitionId'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('regime_defs_key_ver_uq').on(t.regimeKey, t.regimeVersion),
+    scopeStatusIdx: index('regime_defs_scope_status_idx').on(t.scope, t.status),
+    supersedesFk: foreignKey({
+      name: 'regime_defs_supersedes_fk',
+      columns: [t.supersedesDefinitionId],
+      foreignColumns: [t.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const regimeTransitionPolicies = mysqlTable(
+  'regime_transition_policies',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    minimumDwellObservations: int('minimumDwellObservations').notNull(),
+    candidateConfirmationCount: int('candidateConfirmationCount').notNull(),
+    minimumTransitionConfidence: decimal('minimumTransitionConfidence', { precision: 6, scale: 4 }).notNull(),
+    emergencyOverrideStates: text('emergencyOverrideStates').notNull(),
+    confidenceDecay: decimal('confidenceDecay', { precision: 6, scale: 4 }).notNull(),
+    staleStateExpiryMs: int('staleStateExpiryMs').notNull(),
+    transitionMatrixPolicy: varchar('transitionMatrixPolicy', { length: 64 }).notNull(),
+    description: text('description').notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    policyVerUq: uniqueIndex('regime_trans_policy_ver_uq').on(t.policyVersion),
+  }),
+);
+
+export const regimeObserverRuns = mysqlTable(
+  'regime_observer_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    snapshotId: int('snapshotId').notNull(),
+    startedAt: timestamp('startedAt', { fsp: 3 }).notNull(),
+    completedAt: timestamp('completedAt', { fsp: 3 }),
+    productsConsidered: int('productsConsidered').notNull().default(0),
+    globalStatesEmitted: int('globalStatesEmitted').notNull().default(0),
+    productStatesEmitted: int('productStatesEmitted').notNull().default(0),
+    unknownCount: int('unknownCount').notNull().default(0),
+    disorderedCount: int('disorderedCount').notNull().default(0),
+    observerVersion: varchar('observerVersion', { length: 32 }).notNull(),
+    transitionPolicyVersion: varchar('transitionPolicyVersion', { length: 32 }).notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapIdx: index('regime_runs_snap_idx').on(t.snapshotId),
+    snapshotFk: foreignKey({
+      name: 'regime_runs_snapshot_fk',
+      columns: [t.snapshotId],
+      foreignColumns: [universeSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+const REGIME_STATE_VALUES = [
+  'TREND_UP',
+  'TREND_DOWN',
+  'RANGE',
+  'VOLATILITY_EXPANSION',
+  'CAPITULATION',
+  'DISORDERED',
+  'UNKNOWN',
+] as const;
+
+const REGIME_STATUS_VALUES = [
+  'valid',
+  'low_confidence',
+  'insufficient_history',
+  'stale',
+  'gap_detected',
+  'conflicted',
+  'numerical_failure',
+  'quarantined',
+  'unknown',
+] as const;
+
+export const globalRegimeSnapshots = mysqlTable(
+  'global_regime_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    observerRunId: int('observerRunId').notNull(),
+    regimeKey: varchar('regimeKey', { length: 64 }).notNull(),
+    regimeVersion: varchar('regimeVersion', { length: 32 }).notNull(),
+    state: mysqlEnum('state', REGIME_STATE_VALUES).notNull(),
+    status: mysqlEnum('status', REGIME_STATUS_VALUES).notNull(),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }).notNull().default('0'),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    diagnostics: text('diagnostics'),
+    failureReason: varchar('failureReason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runUq: uniqueIndex('global_regime_run_uq').on(t.observerRunId),
+    stateIdx: index('global_regime_state_idx').on(t.state, t.status),
+    runFk: foreignKey({
+      name: 'global_regime_run_fk',
+      columns: [t.observerRunId],
+      foreignColumns: [regimeObserverRuns.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const productRegimeSnapshots = mysqlTable(
+  'product_regime_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    observerRunId: int('observerRunId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    regimeKey: varchar('regimeKey', { length: 64 }).notNull(),
+    regimeVersion: varchar('regimeVersion', { length: 32 }).notNull(),
+    rawState: mysqlEnum('rawState', REGIME_STATE_VALUES).notNull(),
+    smoothedState: mysqlEnum('smoothedState', REGIME_STATE_VALUES).notNull(),
+    status: mysqlEnum('status', REGIME_STATUS_VALUES).notNull(),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }).notNull().default('0'),
+    globalStateId: int('globalStateId'),
+    fingerprintSnapshotId: int('fingerprintSnapshotId'),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    diagnostics: text('diagnostics'),
+    failureReason: varchar('failureReason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runProdUq: uniqueIndex('product_regime_run_prod_uq').on(t.observerRunId, t.productId),
+    stateIdx: index('product_regime_state_idx').on(t.rawState, t.smoothedState),
+    prodIdx: index('product_regime_prod_idx').on(t.productId, t.observedAt),
+    runFk: foreignKey({
+      name: 'product_regime_run_fk',
+      columns: [t.observerRunId],
+      foreignColumns: [regimeObserverRuns.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    globalFk: foreignKey({
+      name: 'product_regime_global_fk',
+      columns: [t.globalStateId],
+      foreignColumns: [globalRegimeSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    fingerprintFk: foreignKey({
+      name: 'product_regime_fingerprint_fk',
+      columns: [t.fingerprintSnapshotId],
+      foreignColumns: [fingerprintSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const regimeEvidence = mysqlTable(
+  'regime_evidence',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    scope: mysqlEnum('scope', ['global', 'product']).notNull(),
+    globalRegimeId: int('globalRegimeId'),
+    productRegimeId: int('productRegimeId'),
+    component: varchar('component', { length: 64 }).notNull(),
+    componentVersion: varchar('componentVersion', { length: 32 }).notNull(),
+    role: mysqlEnum('role', ['supporting', 'conflicting', 'missing']).notNull(),
+    weight: decimal('weight', { precision: 6, scale: 4 }).notNull().default('0'),
+    detail: text('detail'),
+    featureValueId: int('featureValueId'),
+    changePointEventId: int('changePointEventId'),
+    latentStateAssignmentId: int('latentStateAssignmentId'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    globalIdx: index('regime_evidence_global_idx').on(t.globalRegimeId),
+    productIdx: index('regime_evidence_product_idx').on(t.productRegimeId),
+    componentIdx: index('regime_evidence_component_idx').on(t.component, t.role),
+    globalFk: foreignKey({
+      name: 'regime_evidence_global_fk',
+      columns: [t.globalRegimeId],
+      foreignColumns: [globalRegimeSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    productFk: foreignKey({
+      name: 'regime_evidence_product_fk',
+      columns: [t.productRegimeId],
+      foreignColumns: [productRegimeSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const changePointEvents = mysqlTable(
+  'change_point_events',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    observerRunId: int('observerRunId').notNull(),
+    scope: mysqlEnum('scope', ['global', 'product']).notNull(),
+    productId: varchar('productId', { length: 30 }),
+    detector: mysqlEnum('detector', ['cusum', 'segmented_variance', 'bocpd_deferred']).notNull(),
+    detectorVersion: varchar('detectorVersion', { length: 32 }).notNull(),
+    direction: mysqlEnum('direction', ['up', 'down', 'either', 'none']).notNull(),
+    magnitude: decimal('magnitude', { precision: 20, scale: 10 }),
+    changeProbability: decimal('changeProbability', { precision: 6, scale: 4 }),
+    runLengthEstimate: int('runLengthEstimate'),
+    thresholdVersion: varchar('thresholdVersion', { length: 32 }).notNull(),
+    hazardPolicyVersion: varchar('hazardPolicyVersion', { length: 32 }),
+    numericalStatus: mysqlEnum('numericalStatus', [
+      'ok',
+      'underflow_handled',
+      'overflow_handled',
+      'failure',
+    ])
+      .notNull()
+      .default('ok'),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }).notNull().default('0'),
+    detectedAt: timestamp('detectedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    diagnostics: text('diagnostics'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx: index('change_pt_run_idx').on(t.observerRunId),
+    prodIdx: index('change_pt_prod_idx').on(t.productId, t.detectedAt),
+    detectorIdx: index('change_pt_detector_idx').on(t.detector, t.direction),
+    runFk: foreignKey({
+      name: 'change_pt_run_fk',
+      columns: [t.observerRunId],
+      foreignColumns: [regimeObserverRuns.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const latentStateModelVersions = mysqlTable(
+  'latent_state_model_versions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    modelKey: varchar('modelKey', { length: 64 }).notNull(),
+    modelVersion: varchar('modelVersion', { length: 32 }).notNull(),
+    numLatentStates: int('numLatentStates').notNull(),
+    observationDimensions: text('observationDimensions').notNull(),
+    initializationPolicy: varchar('initializationPolicy', { length: 64 }).notNull(),
+    convergencePolicy: varchar('convergencePolicy', { length: 64 }).notNull(),
+    maxIterations: int('maxIterations').notNull(),
+    numericalPolicy: varchar('numericalPolicy', { length: 64 }).notNull(),
+    deterministicSeed: int('deterministicSeed').notNull(),
+    trainingWindowStart: timestamp('trainingWindowStart', { fsp: 3 }).notNull(),
+    trainingWindowEnd: timestamp('trainingWindowEnd', { fsp: 3 }).notNull(),
+    trainingSampleCount: int('trainingSampleCount').notNull(),
+    converged: boolean('converged').notNull().default(false),
+    finalLogLikelihood: decimal('finalLogLikelihood', { precision: 20, scale: 10 }),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', ['draft', 'observer', 'deprecated', 'disabled']).notNull().default('observer'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('latent_model_key_ver_uq').on(t.modelKey, t.modelVersion),
+    statusIdx: index('latent_model_status_idx').on(t.status),
+  }),
+);
+
+export const latentStateAssignments = mysqlTable(
+  'latent_state_assignments',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    modelVersionId: int('modelVersionId').notNull(),
+    observerRunId: int('observerRunId').notNull(),
+    productId: varchar('productId', { length: 30 }),
+    scope: mysqlEnum('scope', ['global', 'product']).notNull(),
+    latentState: int('latentState').notNull(),
+    posterior: decimal('posterior', { precision: 6, scale: 4 }).notNull().default('0'),
+    logLikelihood: decimal('logLikelihood', { precision: 20, scale: 10 }),
+    numericalStatus: mysqlEnum('numericalStatus', [
+      'ok',
+      'underflow_handled',
+      'overflow_handled',
+      'failure',
+    ])
+      .notNull()
+      .default('ok'),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    diagnostics: text('diagnostics'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx: index('latent_assign_run_idx').on(t.observerRunId),
+    prodIdx: index('latent_assign_prod_idx').on(t.productId),
+    modelIdx: index('latent_assign_model_idx').on(t.modelVersionId),
+    modelFk: foreignKey({
+      name: 'latent_assign_model_fk',
+      columns: [t.modelVersionId],
+      foreignColumns: [latentStateModelVersions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    runFk: foreignKey({
+      name: 'latent_assign_run_fk',
+      columns: [t.observerRunId],
+      foreignColumns: [regimeObserverRuns.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const latentStateMappings = mysqlTable(
+  'latent_state_mappings',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    modelVersionId: int('modelVersionId').notNull(),
+    latentState: int('latentState').notNull(),
+    semanticState: mysqlEnum('semanticState', REGIME_STATE_VALUES).notNull(),
+    mappingEvidence: text('mappingEvidence').notNull(),
+    mappingConfidence: decimal('mappingConfidence', { precision: 6, scale: 4 }).notNull().default('0'),
+    mappedAt: timestamp('mappedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    mappingVersion: varchar('mappingVersion', { length: 32 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    modelStateVerUq: uniqueIndex('latent_map_model_state_ver_uq').on(
+      t.modelVersionId,
+      t.latentState,
+      t.mappingVersion,
+    ),
+    modelFk: foreignKey({
+      name: 'latent_map_model_fk',
+      columns: [t.modelVersionId],
+      foreignColumns: [latentStateModelVersions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const regimeTransitions = mysqlTable(
+  'regime_transitions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    observerRunId: int('observerRunId').notNull(),
+    productId: varchar('productId', { length: 30 }),
+    scope: mysqlEnum('scope', ['global', 'product']).notNull(),
+    previousState: mysqlEnum('previousState', REGIME_STATE_VALUES).notNull(),
+    candidateState: mysqlEnum('candidateState', REGIME_STATE_VALUES).notNull(),
+    finalState: mysqlEnum('finalState', REGIME_STATE_VALUES).notNull(),
+    transitionAccepted: boolean('transitionAccepted').notNull().default(false),
+    reasonCodes: varchar('reasonCodes', { length: 255 }).notNull(),
+    confidenceBefore: decimal('confidenceBefore', { precision: 6, scale: 4 }).notNull().default('0'),
+    confidenceAfter: decimal('confidenceAfter', { precision: 6, scale: 4 }).notNull().default('0'),
+    changePointEventId: int('changePointEventId'),
+    transitionPolicyVersion: varchar('transitionPolicyVersion', { length: 32 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx: index('regime_trans_run_idx').on(t.observerRunId),
+    prodIdx: index('regime_trans_prod_idx').on(t.productId, t.observedAt),
+    runFk: foreignKey({
+      name: 'regime_trans_run_fk',
+      columns: [t.observerRunId],
+      foreignColumns: [regimeObserverRuns.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    changePtFk: foreignKey({
+      name: 'regime_trans_changept_fk',
+      columns: [t.changePointEventId],
+      foreignColumns: [changePointEvents.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+const CHALLENGER_RECOMMENDATION_VALUES = [
+  'REVERSION',
+  'BREAKOUT',
+  'MACRO_FLOOR_RESEARCH',
+  'NO_TRADE',
+  'ABSTAIN',
+  'CONFLICT',
+] as const;
+
+export const challengerRoutingDecisions = mysqlTable(
+  'challenger_routing_decisions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    observerRunId: int('observerRunId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    productRegimeId: int('productRegimeId'),
+    globalRegimeId: int('globalRegimeId'),
+    fingerprintSnapshotId: int('fingerprintSnapshotId'),
+    recommendation: mysqlEnum('recommendation', CHALLENGER_RECOMMENDATION_VALUES).notNull(),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }).notNull().default('0'),
+    reasonCodes: varchar('reasonCodes', { length: 255 }).notNull(),
+    routerVersion: varchar('routerVersion', { length: 32 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    diagnostics: text('diagnostics'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runProdUq: uniqueIndex('challenger_run_prod_uq').on(t.observerRunId, t.productId),
+    recIdx: index('challenger_recommendation_idx').on(t.recommendation),
+    runFk: foreignKey({
+      name: 'challenger_run_fk',
+      columns: [t.observerRunId],
+      foreignColumns: [regimeObserverRuns.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    productRegimeFk: foreignKey({
+      name: 'challenger_product_regime_fk',
+      columns: [t.productRegimeId],
+      foreignColumns: [productRegimeSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    globalRegimeFk: foreignKey({
+      name: 'challenger_global_regime_fk',
+      columns: [t.globalRegimeId],
+      foreignColumns: [globalRegimeSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    fingerprintFk: foreignKey({
+      name: 'challenger_fingerprint_fk',
+      columns: [t.fingerprintSnapshotId],
+      foreignColumns: [fingerprintSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const championChallengerRoutingComparisons = mysqlTable(
+  'champion_challenger_routing_comparisons',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    challengerDecisionId: int('challengerDecisionId'),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    championMode: varchar('championMode', { length: 64 }),
+    championDecision: varchar('championDecision', { length: 64 }).notNull(),
+    challengerRecommendation: mysqlEnum('challengerRecommendation', CHALLENGER_RECOMMENDATION_VALUES).notNull(),
+    globalRegimeState: mysqlEnum('globalRegimeState', REGIME_STATE_VALUES),
+    productRegimeState: mysqlEnum('productRegimeState', REGIME_STATE_VALUES),
+    fingerprintClass: varchar('fingerprintClass', { length: 64 }),
+    agreementState: mysqlEnum('agreementState', [
+      'agree',
+      'partial_agreement',
+      'disagree',
+      'champion_only',
+      'challenger_abstained',
+      'unresolved',
+    ]).notNull(),
+    reasonCodes: varchar('reasonCodes', { length: 255 }).notNull(),
+    observerVersion: varchar('observerVersion', { length: 32 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainUq: uniqueIndex('champ_chal_chain_uq').on(t.decisionChainId),
+    agreementIdx: index('champ_chal_agreement_idx').on(t.agreementState),
+    chainFk: foreignKey({
+      name: 'champ_chal_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+    challengerFk: foreignKey({
+      name: 'champ_chal_challenger_fk',
+      columns: [t.challengerDecisionId],
+      foreignColumns: [challengerRoutingDecisions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -2696,3 +3224,31 @@ export type QuantitativeDecisionInsert = typeof quantitativeDecisions.$inferInse
 export type TradeRow = typeof trades.$inferSelect;
 export type ActivityLogRow = typeof activityLog.$inferSelect;
 export type TokenStatRow = typeof tokenStats.$inferSelect;
+
+// Phase 2B
+export type RegimeDefinitionRow = typeof regimeDefinitions.$inferSelect;
+export type RegimeDefinitionInsert = typeof regimeDefinitions.$inferInsert;
+export type RegimeTransitionPolicyRow = typeof regimeTransitionPolicies.$inferSelect;
+export type RegimeTransitionPolicyInsert = typeof regimeTransitionPolicies.$inferInsert;
+export type RegimeObserverRunRow = typeof regimeObserverRuns.$inferSelect;
+export type RegimeObserverRunInsert = typeof regimeObserverRuns.$inferInsert;
+export type GlobalRegimeSnapshotRow = typeof globalRegimeSnapshots.$inferSelect;
+export type GlobalRegimeSnapshotInsert = typeof globalRegimeSnapshots.$inferInsert;
+export type ProductRegimeSnapshotRow = typeof productRegimeSnapshots.$inferSelect;
+export type ProductRegimeSnapshotInsert = typeof productRegimeSnapshots.$inferInsert;
+export type RegimeEvidenceRow = typeof regimeEvidence.$inferSelect;
+export type RegimeEvidenceInsert = typeof regimeEvidence.$inferInsert;
+export type ChangePointEventRow = typeof changePointEvents.$inferSelect;
+export type ChangePointEventInsert = typeof changePointEvents.$inferInsert;
+export type LatentStateModelVersionRow = typeof latentStateModelVersions.$inferSelect;
+export type LatentStateModelVersionInsert = typeof latentStateModelVersions.$inferInsert;
+export type LatentStateAssignmentRow = typeof latentStateAssignments.$inferSelect;
+export type LatentStateAssignmentInsert = typeof latentStateAssignments.$inferInsert;
+export type LatentStateMappingRow = typeof latentStateMappings.$inferSelect;
+export type LatentStateMappingInsert = typeof latentStateMappings.$inferInsert;
+export type RegimeTransitionRow = typeof regimeTransitions.$inferSelect;
+export type RegimeTransitionInsert = typeof regimeTransitions.$inferInsert;
+export type ChallengerRoutingDecisionRow = typeof challengerRoutingDecisions.$inferSelect;
+export type ChallengerRoutingDecisionInsert = typeof challengerRoutingDecisions.$inferInsert;
+export type ChampionChallengerRoutingComparisonRow = typeof championChallengerRoutingComparisons.$inferSelect;
+export type ChampionChallengerRoutingComparisonInsert = typeof championChallengerRoutingComparisons.$inferInsert;

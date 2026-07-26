@@ -2,21 +2,31 @@ import { createHash } from 'node:crypto';
 import { and, desc, eq, lte } from 'drizzle-orm';
 import { db } from './index';
 import {
+  challengerRoutingDecisions,
+  championChallengerRoutingComparisons,
+  changePointEvents,
   decisionChains,
   eligibilityDecisions,
   fingerprintEvidence,
   fingerprintSnapshots,
+  globalRegimeSnapshots,
+  latentStateAssignments,
+  latentStateMappings,
   lineageEvents,
   marketObservations,
   outcomeLabels,
   postFillRevalidations,
   productHygieneDecisions,
   productQuarantines,
+  productRegimeSnapshots,
   protectionCapabilities,
   protectionEvents,
   protectionInstances,
   protectionPolicyVersions,
   protectionValidationRuns,
+  regimeEvidence,
+  regimeObserverRuns,
+  regimeTransitions,
   scanRuns,
   setupEvaluations,
   shadowExecutionPlans,
@@ -31,13 +41,23 @@ import {
   type MarketObservationRow,
   type OutcomeLabelRow,
   type PostFillRevalidationRow,
+  type ChallengerRoutingDecisionRow,
+  type ChampionChallengerRoutingComparisonRow,
+  type ChangePointEventRow,
+  type GlobalRegimeSnapshotRow,
+  type LatentStateAssignmentRow,
+  type LatentStateMappingRow,
   type ProductHygieneDecisionRow,
   type ProductQuarantineRow,
+  type ProductRegimeSnapshotRow,
   type ProtectionCapabilityRow,
   type ProtectionEventRow,
   type ProtectionInstanceRow,
   type ProtectionPolicyVersionRow,
   type ProtectionValidationRunRow,
+  type RegimeEvidenceRow,
+  type RegimeObserverRunRow,
+  type RegimeTransitionRow,
   type ScanRunRow,
   type SetupEvaluationRow,
   type ShadowExecutionPlanRow,
@@ -732,6 +752,16 @@ export interface ResearchObserverAggregate {
   shortlist: ShortlistDecisionRow | null;
   fingerprint: FingerprintSnapshotRow | null;
   fingerprintEvidence: FingerprintEvidenceRow[];
+  regimeObserverRun: RegimeObserverRunRow | null;
+  globalRegime: GlobalRegimeSnapshotRow | null;
+  productRegime: ProductRegimeSnapshotRow | null;
+  regimeEvidenceRows: RegimeEvidenceRow[];
+  changePoints: ChangePointEventRow[];
+  latentAssignment: LatentStateAssignmentRow | null;
+  latentMappings: LatentStateMappingRow[];
+  transitions: RegimeTransitionRow[];
+  challengerRouting: ChallengerRoutingDecisionRow | null;
+  championComparison: ChampionChallengerRoutingComparisonRow | null;
 }
 
 async function loadResearchObserverChain(
@@ -751,6 +781,16 @@ async function loadResearchObserverChain(
       shortlist: null,
       fingerprint: null,
       fingerprintEvidence: [],
+      regimeObserverRun: null,
+      globalRegime: null,
+      productRegime: null,
+      regimeEvidenceRows: [],
+      changePoints: [],
+      latentAssignment: null,
+      latentMappings: [],
+      transitions: [],
+      challengerRouting: null,
+      championComparison: null,
     };
   }
   const [hygiene] = await db
@@ -794,6 +834,100 @@ async function loadResearchObserverChain(
     .from(productQuarantines)
     .where(eq(productQuarantines.productId, chain.productId))
     .orderBy(desc(productQuarantines.startedAt));
+
+  // Phase 2B — most recent regime observer run for this snapshot.
+  const [regimeRun] = await db
+    .select()
+    .from(regimeObserverRuns)
+    .where(eq(regimeObserverRuns.snapshotId, snapshot.id))
+    .orderBy(desc(regimeObserverRuns.startedAt))
+    .limit(1);
+  let globalRegime: GlobalRegimeSnapshotRow | null = null;
+  let productRegime: ProductRegimeSnapshotRow | null = null;
+  let regimeEvidenceRows: RegimeEvidenceRow[] = [];
+  let changePoints: ChangePointEventRow[] = [];
+  let latentAssignment: LatentStateAssignmentRow | null = null;
+  let latentMappings: LatentStateMappingRow[] = [];
+  let transitions: RegimeTransitionRow[] = [];
+  let challengerRouting: ChallengerRoutingDecisionRow | null = null;
+  if (regimeRun) {
+    const [g] = await db
+      .select()
+      .from(globalRegimeSnapshots)
+      .where(eq(globalRegimeSnapshots.observerRunId, regimeRun.id))
+      .limit(1);
+    globalRegime = g ?? null;
+    const [p] = await db
+      .select()
+      .from(productRegimeSnapshots)
+      .where(
+        and(
+          eq(productRegimeSnapshots.observerRunId, regimeRun.id),
+          eq(productRegimeSnapshots.productId, chain.productId),
+        ),
+      )
+      .limit(1);
+    productRegime = p ?? null;
+    if (productRegime) {
+      regimeEvidenceRows = await db
+        .select()
+        .from(regimeEvidence)
+        .where(eq(regimeEvidence.productRegimeId, productRegime.id));
+    }
+    changePoints = await db
+      .select()
+      .from(changePointEvents)
+      .where(
+        and(
+          eq(changePointEvents.observerRunId, regimeRun.id),
+          eq(changePointEvents.productId, chain.productId),
+        ),
+      );
+    const [la] = await db
+      .select()
+      .from(latentStateAssignments)
+      .where(
+        and(
+          eq(latentStateAssignments.observerRunId, regimeRun.id),
+          eq(latentStateAssignments.productId, chain.productId),
+        ),
+      )
+      .orderBy(desc(latentStateAssignments.observedAt))
+      .limit(1);
+    latentAssignment = la ?? null;
+    if (latentAssignment) {
+      latentMappings = await db
+        .select()
+        .from(latentStateMappings)
+        .where(eq(latentStateMappings.modelVersionId, latentAssignment.modelVersionId));
+    }
+    transitions = await db
+      .select()
+      .from(regimeTransitions)
+      .where(
+        and(
+          eq(regimeTransitions.observerRunId, regimeRun.id),
+          eq(regimeTransitions.productId, chain.productId),
+        ),
+      );
+    const [cr] = await db
+      .select()
+      .from(challengerRoutingDecisions)
+      .where(
+        and(
+          eq(challengerRoutingDecisions.observerRunId, regimeRun.id),
+          eq(challengerRoutingDecisions.productId, chain.productId),
+        ),
+      )
+      .limit(1);
+    challengerRouting = cr ?? null;
+  }
+  const [championComparison] = await db
+    .select()
+    .from(championChallengerRoutingComparisons)
+    .where(eq(championChallengerRoutingComparisons.decisionChainId, chain.id))
+    .limit(1);
+
   return {
     snapshot,
     hygiene: hygiene ?? null,
@@ -801,6 +935,16 @@ async function loadResearchObserverChain(
     shortlist: shortlist ?? null,
     fingerprint: fingerprint ?? null,
     fingerprintEvidence: evidence,
+    regimeObserverRun: regimeRun ?? null,
+    globalRegime,
+    productRegime,
+    regimeEvidenceRows,
+    changePoints,
+    latentAssignment,
+    latentMappings,
+    transitions,
+    challengerRouting,
+    championComparison: championComparison ?? null,
   };
 }
 
