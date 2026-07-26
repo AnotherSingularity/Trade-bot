@@ -1,4 +1,4 @@
-# Horizon Trade
+
 
 **Autonomous crypto trading bot — mobile app + standalone backend.**
 Built for Horizon Holdings. Fully self-hosted, no vendor lock-in.
