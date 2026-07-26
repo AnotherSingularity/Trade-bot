@@ -50,6 +50,23 @@ export const SafeFlagsSchema = z.object({
 }).strict();
 export type SafeFlags = z.infer<typeof SafeFlagsSchema>;
 
+export const CreateOrderCountersSchema = z.object({
+  functionInvocations: z.number().int().nonnegative(),
+  attemptCount: z.number().int().nonnegative(),
+  networkCount: z.number().int().nonnegative(),
+}).strict();
+export type CreateOrderCounters = z.infer<typeof CreateOrderCountersSchema>;
+
+// Stage 1 §12: counters must be authoritative. `known=false` means
+// the desktop cannot vouch for the values; the UI renders "unknown"
+// and readiness is BLOCKED.
+export const CreateOrderCountersEnvelopeSchema = z.object({
+  known: z.boolean(),
+  source: z.string(),
+  values: CreateOrderCountersSchema,
+}).strict();
+export type CreateOrderCountersEnvelope = z.infer<typeof CreateOrderCountersEnvelopeSchema>;
+
 export const DesktopStatusResponseSchema = z.object({
   desktopVersion: z.string(),
   buildCommit: z.string(),
@@ -59,11 +76,14 @@ export const DesktopStatusResponseSchema = z.object({
   databaseMode: z.enum(['managed_docker', 'external_services']),
   redisMode: z.enum(['managed_docker', 'external_services']),
   liveOrderSubmissionDisabled: z.literal(true),
-  createOrderCounters: z.object({
-    functionInvocations: z.number().int().nonnegative(),
-    attemptCount: z.number().int().nonnegative(),
-    networkCount: z.number().int().nonnegative(),
-  }).strict(),
+  // Kept for renderer backward-compat; ALWAYS mirrors `counters.values`.
+  createOrderCounters: CreateOrderCountersSchema,
+  // Stage 1: authoritative counter envelope.
+  counters: CreateOrderCountersEnvelopeSchema.optional(),
+  scannerReadiness: z.object({
+    state: z.enum(['ready', 'blocked', 'unknown']),
+    blockingReasons: z.array(z.string()),
+  }).strict().optional(),
 }).strict();
 export type DesktopStatusResponse = z.infer<typeof DesktopStatusResponseSchema>;
 

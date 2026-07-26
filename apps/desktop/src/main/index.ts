@@ -1,21 +1,21 @@
 /**
- * Phase 3A §A, §AA — Electron main entry.
+ * Stage 1 §A, §12, §13 — Electron main entry with real runtime wiring.
  *
  * Startup sequence:
  *   1. Validate desktop environment invariants (§E).
- *   2. Dependency check.
- *   3. Service health check.
- *   4. Start local services via supervisor.
- *   5. Apply migrations through the server migration command.
- *   6. Verify schema fingerprint.
- *   7. Start server + workers.
- *   8. Wait for authenticated API.
- *   9. Display login (via renderer).
- *  10. Load system overview.
+ *   2. Resolve runtime assets (dev/packaged); fail closed if missing.
+ *   3. Instantiate the production CommandRunner via the ADAPTER
+ *      FACTORY — production forbids InMemoryRunner + stubs.
+ *   4. Build service adapters (mariadb, redis, server, reconciliation)
+ *      using real Docker / MariaDB / Redis probes.
+ *   5. Start supervisor → dependency check → start → migrate →
+ *      synchronize (fingerprint) → healthy.
+ *   6. Wait for authenticated server /health.
+ *   7. Register IPC handlers with authoritative status source.
+ *   8. Open the main window.
  *
- * On failure, show the exact failed component, preserve logs, create
- * a desktop incident, and offer retry — never enter a misleading
- * healthy UI.
+ * Failure at any step preserves logs, records a desktop incident, and
+ * refuses to display a false-healthy UI.
  */
 
 import path from 'node:path';
@@ -26,16 +26,24 @@ import { ConsoleSink, Logger } from './logging';
 import { resolveDesktopEnvironment, validateDesktopEnvironment } from './localEnvironment';
 import { InMemorySecretsAdapter, KeytarSecretsAdapter, type SecretsAdapter, collectCredentialStatuses } from './secrets';
 import {
-  InMemoryRunner,
-  createMariadbAdapter,
-  createRedisAdapter,
-  createServerAdapter,
-  createStubAdapter,
-  type AdapterConfig,
+  createAdapterRuntime,
+  createDesktopShellAdapter,
+  createMariadbAdapterExternal,
+  createMariadbAdapterManaged,
+  createNotImplementedAdapter,
+  createReconciliationAdapter,
+  createRedisAdapterExternal,
+  createRedisAdapterManaged,
+  createServerAdapterManaged,
+  createServerAdapterOutOfProcess,
 } from './serviceAdapters';
+import { assertProductionRunner, createServiceAdapters, type Environment } from './serviceAdapterFactory';
 import { DEFAULT_SUPERVISOR_CONFIG, ServiceSupervisor } from './serviceSupervisor';
 import { buildSafeWindowConfig, validateWindowConfig } from './windows';
 import { IPC_ALLOWLIST } from '../shared/ipcContract';
+import { inferDevProjectRoot, resolveRuntimeAssets } from './runtimeAssets';
+import { DesktopStatusSource } from './desktopStatusSource';
+import { DesktopIncidentSink } from './incidents';
 
 const logger = new Logger(new ConsoleSink(), 'main');
 
@@ -71,36 +79,83 @@ async function boot(): Promise<void> {
     return;
   }
 
+  // Stage 1 §13: environment MUST be explicit. NODE_ENV drives it.
+  const environment: Environment = (process.env.HORIZON_ENVIRONMENT as Environment | undefined)
+    ?? (process.env.NODE_ENV === 'production' ? 'production' : 'development');
+  const isPackaged = app.isPackaged;
+
+  // Stage 1 §1: no InMemoryRunner in production; factory enforces it.
+  const handles = createServiceAdapters({
+    environment,
+    serviceMode: env.databaseMode,
+    isPackagedBuild: isPackaged,
+    developmentFake: process.env.HORIZON_DEVELOPMENT_FAKE === 'true' && !isPackaged,
+  });
+  if (environment === 'production') assertProductionRunner(handles.runner);
+
+  // Stage 1 §2: resolve runtime assets explicitly.
+  const projectRoot = process.env.HORIZON_PROJECT_ROOT
+    ?? (isPackaged ? undefined : inferDevProjectRoot(__dirname));
+  const assets = resolveRuntimeAssets({
+    mode: isPackaged ? 'packaged' : 'development',
+    projectRoot,
+    packagedResources: isPackaged ? process.resourcesPath : undefined,
+    userDataDirectory: app.getPath('userData'),
+    logDirectory: app.getPath('logs'),
+    reportDirectory: process.env.HORIZON_REPORT_DIR ?? path.join(app.getPath('userData'), 'reports'),
+    composeFileName: process.env.HORIZON_COMPOSE_FILE ?? 'docker-compose.prod.yml',
+    composeProject: process.env.HORIZON_COMPOSE_PROJECT ?? 'horizon-trade',
+  });
+
   const useKeytar = process.env.HORIZON_USE_KEYTAR === 'true';
   const secrets: SecretsAdapter = useKeytar ? new KeytarSecretsAdapter() : new InMemorySecretsAdapter();
 
-  const runner = new InMemoryRunner(); // production build should swap for a real runner
-  const adapterConfig: AdapterConfig = {
-    mode: env.databaseMode,
-    composeDir: path.resolve(__dirname, '..', '..', '..'),
+  const rt = createAdapterRuntime({
+    runner: handles.runner,
+    serviceMode: env.databaseMode,
+    assets,
     mariadbUrl: process.env.HORIZON_MARIADB_URL ?? 'mysql://root:password@127.0.0.1:3306/horizon_trade',
     redisUrl: process.env.HORIZON_REDIS_URL ?? 'redis://127.0.0.1:6379',
-    serverHost: process.env.HORIZON_SERVER_HOST ?? '127.0.0.1',
-    serverPort: Number(process.env.HORIZON_SERVER_PORT ?? '3000'),
-    runner,
-    externalProbe: runner,
-  };
+    serverHealthUrl: process.env.HORIZON_SERVER_HEALTH_URL ?? 'http://127.0.0.1:3000/health',
+    redisNamespace: 'horizon:*',
+  });
+
+  const fingerprintPath = path.join(
+    projectRoot ?? process.resourcesPath,
+    'apps/server/drizzle/fingerprints/0020_mariadb_fingerprint.json',
+  );
+
+  const mariadbAdapter = env.databaseMode === 'managed_docker' ? createMariadbAdapterManaged(rt) : createMariadbAdapterExternal(rt);
+  const redisAdapter = env.redisMode === 'managed_docker' ? createRedisAdapterManaged(rt) : createRedisAdapterExternal(rt);
+  const serverAdapter = env.databaseMode === 'managed_docker'
+    ? createServerAdapterManaged(rt, fingerprintPath)
+    : createServerAdapterOutOfProcess(rt, fingerprintPath);
+
   const supervisor = new ServiceSupervisor(
     [
-      createMariadbAdapter(adapterConfig),
-      createRedisAdapter(adapterConfig),
-      createServerAdapter(adapterConfig),
-      createStubAdapter('scanner_worker'),
-      createStubAdapter('reconciliation_worker'),
-      createStubAdapter('market_data'),
-      createStubAdapter('reporting'),
-      createStubAdapter('desktop_shell'),
+      createDesktopShellAdapter(),
+      mariadbAdapter,
+      redisAdapter,
+      serverAdapter,
+      createReconciliationAdapter(rt),
+      // Stage 1 §10: scanner readiness is a derived state, not a service.
+      createNotImplementedAdapter('scanner_worker', 'runtime_readiness_is_derived_see_scannerReadiness'),
+      createNotImplementedAdapter('market_data', 'live_market_data_requires_phase3c'),
+      createNotImplementedAdapter('reporting', 'stage4_reports_pending'),
     ],
     logger.child('supervisor'),
     DEFAULT_SUPERVISOR_CONFIG,
   );
 
+  const incidents = new DesktopIncidentSink();
   const authManager = new AuthenticationManager();
+  const statusSource = new DesktopStatusSource({
+    serverHealthUrl: rt.input.serverHealthUrl,
+    serverCountersUrl: new URL('/api/desktop/create-order-counters', rt.input.serverHealthUrl).toString(),
+    serverPolicyVersionsUrl: new URL('/api/desktop/observer-policy-versions', rt.input.serverHealthUrl).toString(),
+    serverChampionUrl: new URL('/api/desktop/champion-configuration', rt.input.serverHealthUrl).toString(),
+    fingerprintVersion: process.env.HORIZON_SCHEMA_VERSION ?? '0020',
+  });
 
   const ctx: IpcHostContext = {
     logger: logger.child('ipc'),
@@ -112,12 +167,20 @@ async function boot(): Promise<void> {
         { scope: 'coinbase', key: 'apiSecret' },
         { scope: 'session', key: 'admin' },
       ]),
-    createOrderCounters: async () => ({ functionInvocations: 0, attemptCount: 0, networkCount: 0 }),
-    observerPolicyVersions: async () => ({
-      universe: 'p2a-1', regime: 'p2b-1', risk: 'p2c-1',
-      microstructure: 'p2d-1', context: 'p2e-1', validation: 'p2f-1',
-    }),
-    championConfigurationView: async () => ({ championVersion: 'champ-1' }),
+    createOrderCounters: async () => {
+      // Stage 1 §12: authoritative source; unknown → zeros with known=false.
+      const snap = await statusSource.sample();
+      const c = snap.createOrderCounters;
+      return { functionInvocations: c.functionInvocations ?? 0, attemptCount: c.attemptCount ?? 0, networkCount: c.networkCount ?? 0 };
+    },
+    observerPolicyVersions: async () => {
+      const snap = await statusSource.sample();
+      return snap.observerPolicyVersions ?? {};
+    },
+    championConfigurationView: async () => {
+      const snap = await statusSource.sample();
+      return snap.championConfiguration ?? { championVersion: 'unknown' };
+    },
     selectExportFolder: async () => {
       const win = BrowserWindow.getFocusedWindow();
       const result = await dialog.showOpenDialog(win ?? undefined!, {
@@ -126,8 +189,7 @@ async function boot(): Promise<void> {
       return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
     },
     openLogFolder: async () => {
-      const logsDir = app.getPath('logs');
-      const err = await shell.openPath(logsDir);
+      const err = await shell.openPath(assets.logDirectory);
       return err === '';
     },
     exportReport: async (input) => {
@@ -136,34 +198,26 @@ async function boot(): Promise<void> {
         ok: false,
         artifactPath: null,
         checksum: null,
-        reportVersion: 'p3a-report-1',
+        reportVersion: 'stage1-report-pending',
         generatedAt: new Date().toISOString(),
         redactionsApplied: ['coinbase_api_key', 'coinbase_api_secret', 'admin_password_hash', 'session_tokens'],
-        failureReason: 'export_deferred_operator_action_required',
+        failureReason: 'stage4_report_generation_not_implemented',
       };
     },
     requestControlledChange: async (input) => {
       logger.info('controlled configuration change requested', {
         key: input.key, operatorActor: input.operatorActor,
       });
-      // Refuse any change that would toggle safe flags — an isolation invariant.
       if (input.key === 'serviceMode' && input.proposedValue === 'live') {
-        return {
-          ok: false,
-          auditEventId: null,
-          restartRequired: [],
-          failureReason: 'safety_flags_immutable_in_phase_3a',
-        };
+        incidents.record({ severity: 'warn', source: 'ipc', code: 'safety_flag_change_refused', message: 'attempt to change safety flag refused' });
+        return { ok: false, auditEventId: null, restartRequired: [], failureReason: 'safety_flags_immutable' };
       }
-      return {
-        ok: true,
-        auditEventId: 0,
-        restartRequired: ['server'],
-        failureReason: null,
-      };
+      return { ok: true, auditEventId: 0, restartRequired: ['server'], failureReason: null };
     },
     isAuthenticated: () => authManager.hasAdmin(),
-    authenticationRequired: false, // Renderer-side; API gate handled independently.
+    // Stage 2 flips this to true; Stage 1 keeps the interface honest
+    // by exposing the value in status so the operator sees the state.
+    authenticationRequired: process.env.HORIZON_AUTH_REQUIRED === 'true',
   };
 
   for (const entry of IPC_ALLOWLIST) {

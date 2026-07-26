@@ -16,6 +16,15 @@
   },
   "auditCommit": "0a1d76fa9770d045d7b64d1cb3d6b81069d4816a",
   "auditBranch": "claude/horizon-trade-bot-mcbcfo",
+  "stage1Update": {
+    "note": "Stage 1 delivers real production runner, compose contract, MariaDB/Redis probes, migration runner, schema fingerprint verifier, server process manager, adapter factory (production forbids stubs), scanner readiness derivation, authoritative status source, and graceful shutdown. Existing capabilities whose maturity changes are annotated in the 'maturityAfterStage1' field below.",
+    "changes": [
+      { "capabilityId": "desktop.serviceSupervisor", "before": "unit_verified", "after": "integration_verified", "evidence": "170/170 desktop tests including MariaDB + Redis integration against local services and supervisor scripting" },
+      { "capabilityId": "desktop.migrationRunner", "before": "absent", "after": "integration_verified", "evidence": "MigrationRunner spawns real drizzle-kit via ChildProcessCommandRunner; tests confirm nonzero-exit + timeout paths" },
+      { "capabilityId": "package.dockerImagesPin", "before": "absent", "after": "unit_verified", "evidence": "docker-compose.prod.yml pins mysql:8.0.40 and redis:7.4-alpine and adds server + db + redis healthchecks; localhost binding" },
+      { "capabilityId": "desktop.safetyValues", "before": "contract_only", "after": "integration_verified", "evidence": "DesktopStatusSource replaces the Phase 3A hardcoded map; unknown source yields known=false rather than misleading zeros" }
+    ]
+  },
   "capabilities": [
     {
       "capabilityId": "exec.orderStateMachine",

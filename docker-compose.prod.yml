@@ -1,17 +1,22 @@
 # ---------------------------------------------------------------------------
-# Production compose — full stack (server + MySQL + Redis) for VPS deploys.
+# Production compose — canonical desktop production stack.
 #   docker-compose -f docker-compose.prod.yml up -d
-# Provide secrets via an .env file alongside this compose.
+# The desktop supervisor pins to this file via HORIZON_COMPOSE_FILE.
+# Canonical service names: `db`, `redis`, `server` — enforced by
+# apps/desktop/src/main/serviceAdapters.ts service-name contract.
+# Provide secrets via an .env file alongside this compose; never
+# commit .env.
 # ---------------------------------------------------------------------------
-version: '3.8'
 services:
   server:
     build:
       context: .
       dockerfile: apps/server/Dockerfile
-    restart: unless-stopped
+    restart: on-failure:5
+    stop_grace_period: 30s
     ports:
-      - '3000:3000'
+      # Bind to localhost only. Never publish 0.0.0.0.
+      - '127.0.0.1:3000:3000'
     environment:
       - NODE_ENV=production
       - PORT=3000
@@ -23,18 +28,31 @@ services:
       - COINBASE_PRIVATE_KEY=${COINBASE_PRIVATE_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - DRY_RUN=${DRY_RUN:-true}
+      - ORDER_SUBMISSION_ENABLED=${ORDER_SUBMISSION_ENABLED:-false}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/health >/dev/null 2>&1 || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     depends_on:
       db:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
 
   db:
-    image: mysql:8.0
-    restart: unless-stopped
+    image: mysql:8.0.40
+    restart: on-failure:5
+    stop_grace_period: 30s
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-password}
       MYSQL_DATABASE: horizon_trade
+    # Localhost-only binding; comment out the port block entirely to
+    # keep the DB internal to the compose network. Uncomment only
+    # when the operator explicitly needs a client from the host.
+    # ports:
+    #   - '127.0.0.1:3306:3306'
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -44,10 +62,17 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
-    restart: unless-stopped
+    image: redis:7.4-alpine
+    restart: on-failure:5
+    stop_grace_period: 10s
+    command: ['redis-server', '--appendonly', 'yes']
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   mysql_data:
