@@ -32,6 +32,16 @@ export const IPC_CHANNELS = {
   requestControlledConfigurationChange: 'config.requestChange',
   getApplicationVersion: 'desktop.getVersion',
   getServiceHealth: 'services.getHealth',
+  // Stage 2 §16 — authentication channels. Renderer NEVER sees raw
+  // tokens or password hashes; only SanitizedAuthState.
+  authGetState: 'auth.getState',
+  authSetup: 'auth.setup',
+  authLogin: 'auth.login',
+  authLogout: 'auth.logout',
+  authLock: 'auth.lock',
+  authRefresh: 'auth.refresh',
+  authChangePassword: 'auth.changePassword',
+  authRevokeAll: 'auth.revokeAll',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -224,6 +234,66 @@ export const AppVersionResponseSchema = z.object({
 export type AppVersionResponse = z.infer<typeof AppVersionResponseSchema>;
 
 // ---------------------------------------------------------------------------
+// Stage 2 §9 + §16 — Sanitized authentication surface.
+//
+// The renderer receives ONLY these fields. Access tokens, refresh
+// tokens, password hashes, salts, database credentials, environment
+// variables, the bootstrap token, and the session family id are NEVER
+// exposed. Every auth response payload passes through this schema
+// before being sent over the IPC bridge.
+// ---------------------------------------------------------------------------
+
+export const OPERATOR_AUTH_PHASES = [
+  'setup_required',      // no operator account exists
+  'unauthenticated',     // account exists; no active session
+  'authenticated',       // active access token
+  'locked',              // operator invoked lock — must re-enter credential
+  'session_expired',     // access token past absolute TTL
+  'session_revoked',     // family revoked (refresh reuse, revoke-all)
+  'account_locked',      // account status = locked (bad-login or admin)
+  'password_change_required',
+  'bootstrap_unavailable', // main process cannot reach server yet
+] as const;
+export type OperatorAuthPhase = (typeof OPERATOR_AUTH_PHASES)[number];
+
+export const SanitizedAuthStateSchema = z.object({
+  phase: z.enum(OPERATOR_AUTH_PHASES),
+  username: z.string().nullable(),
+  passwordChangedAt: z.string().nullable(),
+  accessExpiresAt: z.string().nullable(),
+  absoluteExpiresAt: z.string().nullable(),
+  lastActivityAt: z.string().nullable(),
+  failureReason: z.string().nullable(),
+}).strict();
+export type SanitizedAuthState = z.infer<typeof SanitizedAuthStateSchema>;
+
+export const AuthEmptyRequestSchema = z.object({}).strict();
+
+export const AuthSetupRequestSchema = z.object({
+  username: z.string().min(1).max(64),
+  password: z.string().min(1).max(256),
+  passwordConfirmation: z.string().min(1).max(256),
+}).strict();
+
+export const AuthLoginRequestSchema = z.object({
+  username: z.string().min(1).max(64),
+  password: z.string().min(1).max(256),
+}).strict();
+
+export const AuthChangePasswordRequestSchema = z.object({
+  currentPassword: z.string().min(1).max(256),
+  newPassword: z.string().min(1).max(256),
+  newPasswordConfirmation: z.string().min(1).max(256),
+}).strict();
+
+export const AuthOperationResponseSchema = z.object({
+  ok: z.boolean(),
+  state: SanitizedAuthStateSchema,
+  reason: z.string().nullable(),
+}).strict();
+export type AuthOperationResponse = z.infer<typeof AuthOperationResponseSchema>;
+
+// ---------------------------------------------------------------------------
 // Registry — the exhaustive allowlist
 // ---------------------------------------------------------------------------
 
@@ -244,6 +314,16 @@ export const IPC_ALLOWLIST: readonly {
   { channel: IPC_CHANNELS.requestControlledConfigurationChange, requestSchema: RequestControlledChangeSchema, responseSchema: ControlledChangeResponseSchema, requiresAuthenticatedSession: true },
   { channel: IPC_CHANNELS.getApplicationVersion, requestSchema: z.object({}).strict(), responseSchema: AppVersionResponseSchema, requiresAuthenticatedSession: false },
   { channel: IPC_CHANNELS.getServiceHealth, requestSchema: z.object({}).strict(), responseSchema: z.object({ services: z.array(ServiceHealthSchema) }).strict(), requiresAuthenticatedSession: false },
+  // Stage 2 §16 — auth. All bootstrap-safe (no session required) so
+  // the renderer can call them from the setup/login screens.
+  { channel: IPC_CHANNELS.authGetState, requestSchema: AuthEmptyRequestSchema, responseSchema: SanitizedAuthStateSchema, requiresAuthenticatedSession: false },
+  { channel: IPC_CHANNELS.authSetup, requestSchema: AuthSetupRequestSchema, responseSchema: AuthOperationResponseSchema, requiresAuthenticatedSession: false },
+  { channel: IPC_CHANNELS.authLogin, requestSchema: AuthLoginRequestSchema, responseSchema: AuthOperationResponseSchema, requiresAuthenticatedSession: false },
+  { channel: IPC_CHANNELS.authLogout, requestSchema: AuthEmptyRequestSchema, responseSchema: AuthOperationResponseSchema, requiresAuthenticatedSession: true },
+  { channel: IPC_CHANNELS.authLock, requestSchema: AuthEmptyRequestSchema, responseSchema: AuthOperationResponseSchema, requiresAuthenticatedSession: true },
+  { channel: IPC_CHANNELS.authRefresh, requestSchema: AuthEmptyRequestSchema, responseSchema: AuthOperationResponseSchema, requiresAuthenticatedSession: false },
+  { channel: IPC_CHANNELS.authChangePassword, requestSchema: AuthChangePasswordRequestSchema, responseSchema: AuthOperationResponseSchema, requiresAuthenticatedSession: true },
+  { channel: IPC_CHANNELS.authRevokeAll, requestSchema: AuthEmptyRequestSchema, responseSchema: AuthOperationResponseSchema, requiresAuthenticatedSession: true },
 ];
 
 export function isAllowlistedChannel(channel: string): channel is IpcChannel {

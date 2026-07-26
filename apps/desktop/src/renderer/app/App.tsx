@@ -1,6 +1,7 @@
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { HealthBar } from '../components/HealthBar';
 import { Sidebar } from '../components/Sidebar';
+import { AuthGate } from '../screens/AuthGate';
 import { OverviewScreen } from '../screens/Overview';
 import { ShadowPortfolioScreen } from '../screens/ShadowPortfolio';
 import { PositionsScreen } from '../screens/Positions';
@@ -31,12 +32,13 @@ import { SafetyScreen } from '../screens/Safety';
 
 export function App() {
   return (
-    <HashRouter>
-      <div className="app">
-        <HealthBar />
-        <Sidebar />
-        <main className="content">
-          <Routes>
+    <AuthGate>
+      <HashRouter>
+        <div className="app">
+          <HealthBar />
+          <Sidebar />
+          <main className="content">
+            <Routes>
             <Route path="/" element={<Navigate to="/overview" replace />} />
             <Route path="/overview" element={<OverviewScreen />} />
             <Route path="/shadow-portfolio" element={<ShadowPortfolioScreen />} />
@@ -58,9 +60,10 @@ export function App() {
             <Route path="/system" element={<SystemScreen />} />
             <Route path="/safety" element={<SafetyScreen />} />
             <Route path="*" element={<Navigate to="/overview" replace />} />
-          </Routes>
-        </main>
-      </div>
-    </HashRouter>
+            </Routes>
+          </main>
+        </div>
+      </HashRouter>
+    </AuthGate>
   );
 }

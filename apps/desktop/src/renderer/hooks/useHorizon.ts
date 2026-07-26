@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import type {
   AppVersionResponse,
+  AuthOperationResponse,
   DesktopStatusResponse,
   SafeConfigResponse,
+  SanitizedAuthState,
   ServiceHealth,
 } from '../../shared/ipcContract';
 
@@ -24,6 +26,18 @@ declare global {
       getServiceHealth(): Promise<{ services: ServiceHealth[] }>;
       getApplicationVersion(): Promise<AppVersionResponse>;
       selectExportFolder(): Promise<{ folder: string | null }>;
+      // Stage 2 §16 — sanitized auth surface. Every method returns
+      // ONLY the sanitized state envelope (no raw tokens).
+      auth?: {
+        getState(): Promise<SanitizedAuthState>;
+        setup(input: { username: string; password: string; passwordConfirmation: string }): Promise<AuthOperationResponse>;
+        login(input: { username: string; password: string }): Promise<AuthOperationResponse>;
+        logout(): Promise<AuthOperationResponse>;
+        lock(): Promise<AuthOperationResponse>;
+        refresh(): Promise<AuthOperationResponse>;
+        changePassword(input: { currentPassword: string; newPassword: string; newPasswordConfirmation: string }): Promise<AuthOperationResponse>;
+        revokeAll(): Promise<AuthOperationResponse>;
+      };
     };
   }
 }

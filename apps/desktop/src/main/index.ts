@@ -20,11 +20,14 @@
 
 import path from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { AuthenticationManager } from './authentication';
 import { handleIpcCall, type IpcHostContext } from './ipc';
 import { ConsoleSink, Logger } from './logging';
 import { resolveDesktopEnvironment, validateDesktopEnvironment } from './localEnvironment';
 import { InMemorySecretsAdapter, KeytarSecretsAdapter, type SecretsAdapter, collectCredentialStatuses } from './secrets';
+import { mintBootstrapToken } from './bootstrapToken';
+import { createAuthTokenStorage } from './secureStorage';
+import { AuthenticatedApiClient } from './authenticatedApiClient';
+import { DesktopAuthManager } from './desktopAuthManager';
 import {
   createAdapterRuntime,
   createDesktopShellAdapter,
@@ -107,8 +110,38 @@ async function boot(): Promise<void> {
     composeProject: process.env.HORIZON_COMPOSE_PROJECT ?? 'horizon-trade',
   });
 
-  const useKeytar = process.env.HORIZON_USE_KEYTAR === 'true';
+  // Stage 2 §2: mint a fresh bootstrap token for this server lifecycle.
+  const bootstrap = mintBootstrapToken();
+
+  const useKeytar = process.env.HORIZON_USE_KEYTAR === 'true' || isPackaged;
   const secrets: SecretsAdapter = useKeytar ? new KeytarSecretsAdapter() : new InMemorySecretsAdapter();
+
+  // Reader used by the token storage — reads the OS credential value
+  // for the given (scope, key) pair; returns null if absent. Kept
+  // separate so the SecretsAdapter API doesn't need to leak values.
+  const readSecretValue = useKeytar
+    ? async (scope: string, key: string): Promise<string | null> => {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const kt = await import('keytar').then((m) => m.default ?? m);
+        return await (kt as { getPassword: (s: string, a: string) => Promise<string | null> })
+          .getPassword('horizon-trade-desktop', `${scope}::${key}`);
+      }
+    : (() => {
+        const memory = new Map<string, string>();
+        // In-memory token reader shares state with InMemorySecretsAdapter
+        // by intercepting writes.
+        const originalStore = secrets.storeCredential.bind(secrets);
+        const originalDelete = secrets.deleteCredential.bind(secrets);
+        secrets.storeCredential = async (s, k, v) => {
+          memory.set(`${s}::${k}`, v);
+          return originalStore(s, k, v);
+        };
+        secrets.deleteCredential = async (s, k) => {
+          memory.delete(`${s}::${k}`);
+          return originalDelete(s, k);
+        };
+        return async (scope: string, key: string): Promise<string | null> => memory.get(`${scope}::${key}`) ?? null;
+      })();
 
   const rt = createAdapterRuntime({
     runner: handles.runner,
@@ -125,14 +158,19 @@ async function boot(): Promise<void> {
 
   const fingerprintPath = path.join(
     projectRoot ?? process.resourcesPath,
-    'apps/server/drizzle/fingerprints/0020_mariadb_fingerprint.json',
+    'apps/server/drizzle/fingerprints/0021_mariadb_fingerprint.json',
   );
 
   const mariadbAdapter = env.databaseMode === 'managed_docker' ? createMariadbAdapterManaged(rt) : createMariadbAdapterExternal(rt);
   const redisAdapter = env.redisMode === 'managed_docker' ? createRedisAdapterManaged(rt) : createRedisAdapterExternal(rt);
+  // Stage 2 §2: pass the bootstrap token to the out-of-process server
+  // via its env. (managed_docker: token must be supplied through compose
+  // env — deferred to managed_docker_runtime_verification.)
   const serverAdapter = env.databaseMode === 'managed_docker'
     ? createServerAdapterManaged(rt, fingerprintPath)
-    : createServerAdapterOutOfProcess(rt, fingerprintPath);
+    : createServerAdapterOutOfProcess(rt, fingerprintPath, {
+        HORIZON_BOOTSTRAP_TOKEN: bootstrap.envValue,
+      });
 
   const supervisor = new ServiceSupervisor(
     [
@@ -151,13 +189,43 @@ async function boot(): Promise<void> {
   );
 
   const incidents = new DesktopIncidentSink();
-  const authManager = new AuthenticationManager();
+
+  // Stage 2 §10: authenticated API client + auth manager.
+  const serverBaseUrl = new URL('/', rt.input.serverHealthUrl).toString().replace(/\/$/, '');
+  const tokenStorage = createAuthTokenStorage({
+    adapter: secrets,
+    reader: readSecretValue,
+    packagedRequiresKeytar: isPackaged,
+    isKeytar: useKeytar,
+  });
+
+  // eslint-disable-next-line prefer-const
+  let authManager!: DesktopAuthManager;
+  const apiClient = new AuthenticatedApiClient({
+    serverBaseUrl,
+    getBootstrapToken: () => bootstrap.headerValue,
+    getAccessToken: () => authManager?.currentAccessToken() ?? null,
+    onRefreshNeeded: async () => authManager.refreshCallback(),
+  });
+  authManager = new DesktopAuthManager({
+    api: apiClient,
+    tokenStorage,
+    clientVersion: 'stage2-desktop',
+  });
+  // Fire-and-forget initialization; failures are captured in the
+  // sanitized state and surfaced to the renderer via getState.
+  void authManager.initialize().catch((err) => {
+    logger.error('auth initialize failed', { err: String(err) });
+  });
+
   const statusSource = new DesktopStatusSource({
     serverHealthUrl: rt.input.serverHealthUrl,
     serverCountersUrl: new URL('/api/desktop/create-order-counters', rt.input.serverHealthUrl).toString(),
     serverPolicyVersionsUrl: new URL('/api/desktop/observer-policy-versions', rt.input.serverHealthUrl).toString(),
     serverChampionUrl: new URL('/api/desktop/champion-configuration', rt.input.serverHealthUrl).toString(),
-    fingerprintVersion: process.env.HORIZON_SCHEMA_VERSION ?? '0020',
+    fingerprintVersion: process.env.HORIZON_SCHEMA_VERSION ?? '0021',
+    getBootstrapToken: () => bootstrap.headerValue,
+    getAccessToken: () => authManager.currentAccessToken(),
   });
 
   const ctx: IpcHostContext = {
@@ -217,10 +285,10 @@ async function boot(): Promise<void> {
       }
       return { ok: true, auditEventId: 0, restartRequired: ['server'], failureReason: null };
     },
-    isAuthenticated: () => authManager.hasAdmin(),
-    // Stage 2 flips this to true; Stage 1 keeps the interface honest
-    // by exposing the value in status so the operator sees the state.
-    authenticationRequired: process.env.HORIZON_AUTH_REQUIRED === 'true',
+    authManager,
+    // Stage 2 §17: authentication is required by default. The env
+    // override may DISABLE it only in explicit development/test runs.
+    authenticationRequired: process.env.HORIZON_AUTH_REQUIRED === 'false' && !isPackaged ? false : true,
   };
 
   for (const entry of IPC_ALLOWLIST) {

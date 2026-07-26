@@ -71,6 +71,12 @@ const schema = z.object({
   SIMULATION_MODE: z
     .enum(['STANDARD_DRY_RUN', 'SHADOW_LIVE'])
     .default('STANDARD_DRY_RUN'),
+
+  // Stage 2 §2 — bootstrap channel token. Hex-encoded, ≥256 bits. The
+  // desktop supervisor generates one per server-process lifecycle and
+  // passes it via env; production boot rejects any request to bootstrap
+  // endpoints without it (loopback binding alone is insufficient).
+  HORIZON_BOOTSTRAP_TOKEN: z.string().optional(),
 });
 
 const KNOWN_WEAK_SECRETS = new Set([
@@ -157,6 +163,7 @@ function loadEnv() {
     coinbaseConfigured,
     anthropicConfigured,
     simulationMode: e.SIMULATION_MODE,
+    bootstrapToken: e.HORIZON_BOOTSTRAP_TOKEN,
   };
 }
 

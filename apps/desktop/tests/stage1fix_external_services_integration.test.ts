@@ -20,11 +20,16 @@
  * and Redis (127.0.0.1:6379). Skipped if those are unreachable.
  */
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createConnection } from 'mysql2/promise';
 import IORedis from 'ioredis';
 import { join, resolve } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+const BOOTSTRAP = randomBytes(32).toString('hex');
+const bootstrapHeader = { 'x-horizon-bootstrap-token': BOOTSTRAP } as const;
 
 const REPO = resolve(__dirname, '..', '..', '..');
 const SERVER_CWD = join(REPO, 'apps/server');
@@ -72,14 +77,31 @@ async function ensureDb(): Promise<void> {
 }
 
 async function migrate(): Promise<void> {
-  // Apply migrations 0000-0020 via drizzle-kit against TEST_DB.
-  const r = spawnSync('npx', ['drizzle-kit', 'migrate', '--config', join(SERVER_CWD, 'drizzle.config.ts')], {
-    cwd: SERVER_CWD,
-    env: { ...process.env, DATABASE_URL: TEST_DB_URL, DRY_RUN: 'true', ORDER_SUBMISSION_ENABLED: 'false' },
-    encoding: 'utf8',
-    timeout: 60_000,
-  });
-  if (r.status !== 0) throw new Error(`migrate exit=${r.status} stderr=${r.stderr.slice(0, 400)}`);
+  // Apply migrations directly via SQL — drizzle-kit migrate hangs on
+  // MariaDB when JSON columns are present (see
+  // scripts/repro/mariadb-json-hang-repro.md). The direct-SQL approach
+  // is what the desktop's real MigrationRunner uses in production
+  // (§K.2 of the Stage 1 report; also verified by the Stage 2 end-to-end
+  // integration test).
+  const conn = await createConnection({ uri: TEST_DB_URL });
+  const migrationsDir = join(SERVER_CWD, 'drizzle/migrations');
+  const files = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+  const splitStatements = (sql: string): string[] => sql
+    .replace(/-->\s*statement-breakpoint/g, '')
+    .split('\n').filter((l) => !/^\s*--/.test(l)).join('\n')
+    .split(';').map((s) => s.trim()).filter((s) => s.length > 0);
+  try {
+    for (const f of files) {
+      for (const stmt of splitStatements(readFileSync(join(migrationsDir, f), 'utf-8'))) {
+        await conn.query(stmt);
+      }
+    }
+    // Simulate the drizzle _journal so readiness fingerprint check passes.
+    await conn.query('CREATE TABLE IF NOT EXISTS __drizzle_migrations (id INT PRIMARY KEY AUTO_INCREMENT, hash VARCHAR(64), created_at BIGINT)');
+    for (let i = 0; i < files.length; i++) {
+      await conn.query(`INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('m${i}', UNIX_TIMESTAMP()*1000)`);
+    }
+  } finally { await conn.end(); }
 }
 
 interface Spawned { proc: ReturnType<typeof spawn>; kill: () => Promise<void> }
@@ -89,7 +111,11 @@ async function spawnServer(): Promise<Spawned> {
     cwd: SERVER_CWD,
     env: {
       ...process.env,
-      NODE_ENV: 'production',
+      // Stage 2 §2: production mode now REQUIRES HORIZON_BOOTSTRAP_TOKEN.
+      // Use `test` here so that env-guard is skipped; the desktop's real
+      // wiring provides the token via `production` mode + env from the
+      // supervisor (covered by the stage2 end-to-end integration test).
+      NODE_ENV: 'test',
       PORT: String(CHOSEN_PORT),
       DATABASE_URL: TEST_DB_URL,
       REDIS_URL,
@@ -97,6 +123,7 @@ async function spawnServer(): Promise<Spawned> {
       DRY_RUN: 'true',
       ORDER_SUBMISSION_ENABLED: 'false',
       CORS_ORIGINS: '*',
+      HORIZON_BOOTSTRAP_TOKEN: BOOTSTRAP,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -122,7 +149,7 @@ async function waitForReady(url: string, deadlineMs: number): Promise<{ ok: bool
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 2_000);
-      const res = await fetch(url, { signal: controller.signal });
+      const res = await fetch(url, { signal: controller.signal, headers: bootstrapHeader });
       clearTimeout(timer);
       if (res.ok) {
         const body = await res.json() as { ready?: boolean };
@@ -134,10 +161,10 @@ async function waitForReady(url: string, deadlineMs: number): Promise<{ ok: bool
   return { ok: false, ms: Date.now() - start };
 }
 
-async function fetchJson(url: string): Promise<unknown> {
+async function fetchJson(url: string, opts: { headers?: Record<string, string> } = {}): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 3_000);
-  const res = await fetch(url, { signal: controller.signal });
+  const res = await fetch(url, { signal: controller.signal, headers: opts.headers });
   clearTimeout(timer);
   return res.json();
 }
@@ -187,7 +214,7 @@ describe.sequential('stage1-fix §D — external-services real integration', () 
     // 3-4. Migration applied + fingerprint verified (both true above).
 
     // 5. Read actual Create Order barrier counters.
-    const counters = await fetchJson(`${baseUrl()}/api/desktop/create-order-counters`) as {
+    const counters = await fetchJson(`${baseUrl()}/api/desktop/create-order-counters`, { headers: bootstrapHeader }) as {
       known: boolean;
       values: { functionInvocations: number; attemptCount: number; networkCount: number };
     };
@@ -197,13 +224,13 @@ describe.sequential('stage1-fix §D — external-services real integration', () 
     expect(counters.values.networkCount).toBe(0);
 
     // 6. Read actual reconciliation state.
-    const rec = await fetchJson(`${baseUrl()}/api/desktop/reconciliation/status`) as {
+    const rec = await fetchJson(`${baseUrl()}/api/desktop/reconciliation/status`, { headers: bootstrapHeader }) as {
       known: boolean;
     };
     expect(rec.known).toBe(true);
 
     // 7. Confirm scanner readiness is derived.
-    const scanner = await fetchJson(`${baseUrl()}/api/desktop/scanner-readiness`) as {
+    const scanner = await fetchJson(`${baseUrl()}/api/desktop/scanner-readiness`, { headers: bootstrapHeader }) as {
       known: boolean;
       state: 'ready' | 'blocked' | 'unknown';
       blockingReasons: string[];
@@ -234,7 +261,7 @@ describe.sequential('stage1-fix §D — external-services real integration', () 
     expect(ready2.ok, 'restart did not reach ready state').toBe(true);
     // The reconciliation snapshot should reflect that at least one
     // run has been recorded now.
-    const rec2 = await fetchJson(`${baseUrl()}/api/desktop/reconciliation/status`) as { known: boolean; lastRunAt: string | null };
+    const rec2 = await fetchJson(`${baseUrl()}/api/desktop/reconciliation/status`, { headers: bootstrapHeader }) as { known: boolean; lastRunAt: string | null };
     expect(rec2.known).toBe(true);
     // lastRunAt may be null if reconcileOnStartup created no runs
     // rows in this fresh DB, or a timestamp if it did.

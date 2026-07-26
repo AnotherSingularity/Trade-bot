@@ -13,7 +13,9 @@ import { requireAuth } from './middleware/auth';
 import { closeDb } from './db';
 import { reconcileOnStartup } from './trading/reconciler';
 import { withLease, RECONCILE_LEASE_KEY } from './jobs/lease';
-import { desktopRouter, systemReadinessRouter } from './routes/desktop';
+import { desktopOperatorRouter, desktopRouter, systemReadinessRouter } from './routes/desktop';
+import { operatorAuthRouter } from './routes/auth';
+import { configureBootstrapToken } from './auth/bootstrap';
 
 /**
  * Express server entry point — Phase 0.
@@ -26,6 +28,17 @@ import { desktopRouter, systemReadinessRouter } from './routes/desktop';
  *      re-armed (risk management + entries as per the reconciled state).
  */
 async function main() {
+  // Stage 2 §2 — configure bootstrap channel BEFORE any router is
+  // mounted. Production boot refuses to serve bootstrap endpoints
+  // without a valid token; tests may skip if unset (routes will
+  // return 503 for bootstrap-scoped calls until configured).
+  configureBootstrapToken(ENV.bootstrapToken);
+  if (ENV.isProduction && !ENV.bootstrapToken) {
+    throw new Error(
+      'HORIZON_BOOTSTRAP_TOKEN is required in production — the desktop supervisor issues one at spawn.',
+    );
+  }
+
   const app = express();
 
   // ── CORS: explicit allowlist. Dev falls back to '*'; prod refuses unknown.
@@ -94,6 +107,15 @@ async function main() {
   app.set('trust proxy', 'loopback');
   app.use('/api', systemReadinessRouter());
   app.use('/api/desktop', desktopRouter());
+
+  // ── Stage 2: operator-authenticated desktop surfaces (mounted at
+  //    the SAME base path — Express routes fall through to the
+  //    session-guarded router when the bootstrap router doesn't match).
+  app.use('/api/desktop', desktopOperatorRouter());
+
+  // ── Stage 2 §13: operator authentication endpoints (setup, login,
+  //    refresh, logout, lock, change-password, revoke-all, session).
+  app.use('/api/operator-auth', operatorAuthRouter());
 
   // ── tRPC
   app.use(

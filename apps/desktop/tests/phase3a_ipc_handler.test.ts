@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { handleIpcCall, type IpcHostContext } from '../src/main/ipc';
-import { IPC_CHANNELS } from '../src/shared/ipcContract';
+import { IPC_CHANNELS, type SanitizedAuthState } from '../src/shared/ipcContract';
 import { Logger, MemorySink } from '../src/main/logging';
 import { resolveDesktopEnvironment } from '../src/main/localEnvironment';
 import {
@@ -8,6 +8,30 @@ import {
   ServiceSupervisor,
   type ServiceAdapter,
 } from '../src/main/serviceSupervisor';
+import type { DesktopAuthManager } from '../src/main/desktopAuthManager';
+
+function fakeAuthManager(phase: SanitizedAuthState['phase']): DesktopAuthManager {
+  const state: SanitizedAuthState = {
+    phase,
+    username: phase === 'authenticated' ? 'operator' : null,
+    passwordChangedAt: null,
+    accessExpiresAt: null,
+    absoluteExpiresAt: null,
+    lastActivityAt: null,
+    failureReason: null,
+  };
+  const noop = async () => ({ ok: true as const, state, reason: null });
+  return {
+    sanitize: () => state,
+    getState: async () => state,
+    setup: noop, login: noop, logout: noop, lock: noop, refresh: noop,
+    changePassword: noop, revokeAll: noop,
+    currentAccessToken: () => null,
+    refreshCallback: async () => ({ ok: false as const, reason: 'test' }),
+    initialize: async () => state,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as unknown as DesktopAuthManager;
+}
 
 function makeStubAdapter(kind: ServiceAdapter['kind']): ServiceAdapter {
   return {
@@ -42,7 +66,7 @@ function buildContext(overrides: Partial<IpcHostContext> = {}): IpcHostContext {
       generatedAt: '2026-07-26T00:00:00.000Z', redactionsApplied: ['coinbase_api_key'], failureReason: 'deferred',
     }),
     requestControlledChange: async () => ({ ok: true, auditEventId: 0, restartRequired: [], failureReason: null }),
-    isAuthenticated: () => true,
+    authManager: fakeAuthManager('authenticated'),
     authenticationRequired: true,
     ...overrides,
   };
@@ -65,7 +89,7 @@ describe('phase3a §B — IPC handler behavior', () => {
   });
 
   it('T21: blocks authenticated channels when session missing', async () => {
-    ctx = buildContext({ isAuthenticated: () => false, authenticationRequired: true });
+    ctx = buildContext({ authManager: fakeAuthManager('unauthenticated'), authenticationRequired: true });
     const res = await handleIpcCall(ctx, IPC_CHANNELS.exportReport, {
       kind: 'daily_shadow', format: 'json', targetFolder: '/tmp', referenceId: null,
     });

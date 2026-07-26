@@ -44,20 +44,27 @@ are in `revised_roadmap.md`.
 9. **Rev `localEnvironment.ts` schema default from `0019` to
    `0020`.** Stale default causes Overview to lie.
 
-## Category C — Authentication (blocks safety-critical IPC)
+## Category C — Authentication (blocks safety-critical IPC) — CLOSED IN STAGE 2
 
-10. **Enable `authenticationRequired: true` in production boot.**
-    Retain `false` only for the vitest harness (env-driven).
-11. **Add setup/login screens.** New routes `/setup` (first-run
-    admin creation) and `/login`. Renderer must post credentials to
-    a `setupAdmin` / `login` IPC channel that DOES NOT expose the
-    password anywhere.
-12. **Extend IPC contract with a session token.** Every IPC call
-    from the renderer includes a session token; the handler
-    validates via `AuthenticationManager.verifySession(token)`
-    before dispatching.
-13. **Persist sessions.** `desktop_sessions` is schema-only. Persist
-    with expiry + revocation.
+10. ✅ **`authenticationRequired: true` in production boot.** Flipped to
+    true by default in `apps/desktop/src/main/index.ts`; only overridable
+    via `HORIZON_AUTH_REQUIRED=false` in non-packaged builds.
+11. ✅ **Setup/login screens** — `AuthGate.tsx` renders Setup / Login /
+    Locked / PasswordChange / SessionExpired / SessionRevoked. Renderer
+    posts to typed IPC channels; passwords never appear in any IPC
+    response or log.
+12. ✅ **IPC contract carries auth phase.** Every IPC channel with
+    `requiresAuthenticatedSession: true` is blocked when
+    `authManager.sanitize().phase !== 'authenticated'`. Auth failure
+    NEVER falls back to anonymous.
+13. ✅ **Sessions persisted.** New tables via migration 0021
+    (`operator_auth_sessions`, `operator_auth_events`,
+    `operator_login_limits`, `operator_recovery_records`,
+    `local_operator_accounts`) — separate from `desktop_sessions`
+    (application-runtime scope).
+14. ✅ **Bootstrap channel secured.** 256-bit
+    `X-Horizon-Bootstrap-Token` header + constant-time verify.
+    Loopback binding is a secondary control only.
 
 ## Category D — Real safety values (blocks Overview + Safety + Configuration)
 

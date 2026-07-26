@@ -4,12 +4,14 @@ import {
   IPC_CHANNELS,
   isAllowlistedChannel,
   type AppVersionResponse,
+  type AuthOperationResponse,
   type ControlledChangeResponse,
   type DesktopStatusResponse,
   type ExportReportRequest,
   type ExportReportResponse,
   type RequestControlledChange,
   type SafeConfigResponse,
+  type SanitizedAuthState,
   type ServiceHealth,
   type ServicesGenericResponse,
   type ServicesStartRequest,
@@ -19,6 +21,7 @@ import type { Logger } from './logging';
 import type { CredentialStatusMap } from './secrets';
 import { toSanitizedSnapshot, type DesktopEnvironment } from './localEnvironment';
 import type { ServiceKind, ServiceRecord, ServiceSupervisor } from './serviceSupervisor';
+import type { DesktopAuthManager } from './desktopAuthManager';
 
 /**
  * Phase 3A §B — IPC handler.
@@ -44,7 +47,7 @@ export interface IpcHostContext {
   openLogFolder: () => Promise<boolean>;
   exportReport: (input: ExportReportRequest) => Promise<ExportReportResponse>;
   requestControlledChange: (input: RequestControlledChange) => Promise<ControlledChangeResponse>;
-  isAuthenticated: () => boolean;
+  authManager: DesktopAuthManager;
   authenticationRequired: boolean;
 }
 
@@ -76,9 +79,12 @@ export async function handleIpcCall(
     return { ok: false, channel, data: null, error: 'channel_not_allowlisted' };
   }
   const entry = IPC_ALLOWLIST.find((e) => e.channel === channel)!;
-  if (entry.requiresAuthenticatedSession && ctx.authenticationRequired && !ctx.isAuthenticated()) {
-    ctx.logger.warn('ipc call blocked — authentication required', { channel });
-    return { ok: false, channel, data: null, error: 'authentication_required' };
+  if (entry.requiresAuthenticatedSession && ctx.authenticationRequired) {
+    const phase = ctx.authManager.sanitize().phase;
+    if (phase !== 'authenticated') {
+      ctx.logger.warn('ipc call blocked — authentication required', { channel, phase });
+      return { ok: false, channel, data: null, error: 'authentication_required' };
+    }
   }
   let parsed: z.SafeParseReturnType<unknown, unknown>;
   try {
@@ -225,6 +231,47 @@ export async function handleIpcCall(
       case IPC_CHANNELS.getServiceHealth: {
         const records = ctx.supervisor.snapshot().map(serviceRecordToHealth);
         data = { services: records };
+        break;
+      }
+      case IPC_CHANNELS.authGetState: {
+        const state: SanitizedAuthState = await ctx.authManager.getState();
+        data = state;
+        break;
+      }
+      case IPC_CHANNELS.authSetup: {
+        const resp: AuthOperationResponse = await ctx.authManager.setup(parsed.data as {
+          username: string; password: string; passwordConfirmation: string;
+        });
+        data = resp;
+        break;
+      }
+      case IPC_CHANNELS.authLogin: {
+        const resp: AuthOperationResponse = await ctx.authManager.login(parsed.data as {
+          username: string; password: string;
+        });
+        data = resp;
+        break;
+      }
+      case IPC_CHANNELS.authLogout: {
+        data = await ctx.authManager.logout();
+        break;
+      }
+      case IPC_CHANNELS.authLock: {
+        data = await ctx.authManager.lock();
+        break;
+      }
+      case IPC_CHANNELS.authRefresh: {
+        data = await ctx.authManager.refresh();
+        break;
+      }
+      case IPC_CHANNELS.authChangePassword: {
+        data = await ctx.authManager.changePassword(parsed.data as {
+          currentPassword: string; newPassword: string; newPasswordConfirmation: string;
+        });
+        break;
+      }
+      case IPC_CHANNELS.authRevokeAll: {
+        data = await ctx.authManager.revokeAll();
         break;
       }
       default:

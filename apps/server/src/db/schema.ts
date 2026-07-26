@@ -6286,6 +6286,143 @@ export const desktopBuildManifests = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Stage 2 — desktop operator authentication (migration 0021)
+//
+// Additive tables. Kept separate from `desktop_sessions` (application-runtime
+// scoped, migration 0020) — this cluster models the single-operator
+// authentication boundary: local admin credentials, opaque server-issued
+// session tokens with rotation families, append-only auth events, composite
+// rate-limit state, and recovery audit trail.
+// ---------------------------------------------------------------------------
+export const OPERATOR_ACCOUNT_STATUSES = [
+  'active',
+  'locked',
+  'disabled',
+  'recovery_required',
+] as const;
+export type OperatorAccountStatus = (typeof OPERATOR_ACCOUNT_STATUSES)[number];
+
+export const OPERATOR_LOGIN_LIMIT_KEY_TYPES = [
+  'username',
+  'installation',
+  'composite',
+] as const;
+export type OperatorLoginLimitKeyType = (typeof OPERATOR_LOGIN_LIMIT_KEY_TYPES)[number];
+
+export const localOperatorAccounts = mysqlTable(
+  'local_operator_accounts',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    username: varchar('username', { length: 128 }).notNull(),
+    usernameNormalized: varchar('usernameNormalized', { length: 128 }).notNull(),
+    passwordHashHex: varchar('passwordHashHex', { length: 256 }).notNull(),
+    passwordSaltHex: varchar('passwordSaltHex', { length: 128 }).notNull(),
+    passwordAlgorithm: varchar('passwordAlgorithm', { length: 32 }).notNull(),
+    passwordParameters: json('passwordParameters').notNull(),
+    credentialVersion: int('credentialVersion').notNull().default(1),
+    status: mysqlEnum('status', OPERATOR_ACCOUNT_STATUSES).notNull().default('active'),
+    failedLoginCount: int('failedLoginCount').notNull().default(0),
+    lockedUntil: timestamp('lockedUntil', { fsp: 3 }),
+    passwordChangedAt: timestamp('passwordChangedAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow().onUpdateNow(),
+  },
+  (t) => ({
+    usernameNormUq: uniqueIndex('loa_username_norm_uq').on(t.usernameNormalized),
+  }),
+);
+
+export const operatorAuthSessions = mysqlTable(
+  'operator_auth_sessions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    accountId: int('accountId').notNull(),
+    installationId: int('installationId'),
+    sessionFamilyId: varchar('sessionFamilyId', { length: 36 }).notNull(),
+    accessTokenHash: varchar('accessTokenHash', { length: 128 }).notNull(),
+    refreshTokenHash: varchar('refreshTokenHash', { length: 128 }).notNull(),
+    accessExpiresAt: timestamp('accessExpiresAt', { fsp: 3 }).notNull(),
+    refreshExpiresAt: timestamp('refreshExpiresAt', { fsp: 3 }).notNull(),
+    absoluteExpiresAt: timestamp('absoluteExpiresAt', { fsp: 3 }).notNull(),
+    rotatedFromTokenId: int('rotatedFromTokenId'),
+    revokedAt: timestamp('revokedAt', { fsp: 3 }),
+    revocationReason: varchar('revocationReason', { length: 64 }),
+    createdAt: timestamp('createdAt', { fsp: 3 }).notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+    lastUsedAt: timestamp('lastUsedAt', { fsp: 3 }),
+    clientVersion: varchar('clientVersion', { length: 64 }),
+  },
+  (t) => ({
+    accessUq: uniqueIndex('oas_access_uq').on(t.accessTokenHash),
+    refreshUq: uniqueIndex('oas_refresh_uq').on(t.refreshTokenHash),
+    familyIdx: index('oas_family_idx').on(t.sessionFamilyId, t.createdAt),
+    accountIdx: index('oas_account_idx').on(t.accountId, t.createdAt),
+    accountFk: foreignKey({
+      name: 'oas_account_fk',
+      columns: [t.accountId],
+      foreignColumns: [localOperatorAccounts.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const operatorAuthEvents = mysqlTable(
+  'operator_auth_events',
+  {
+    id: bigint('id', { mode: 'number' }).autoincrement().primaryKey(),
+    eventType: varchar('eventType', { length: 64 }).notNull(),
+    accountId: int('accountId'),
+    sessionId: int('sessionId'),
+    installationId: int('installationId'),
+    occurredAt: timestamp('occurredAt', { fsp: 3 }).notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+    source: varchar('source', { length: 32 }).notNull(),
+    reasonCode: varchar('reasonCode', { length: 64 }),
+    sanitizedMetadata: json('sanitizedMetadata'),
+  },
+  (t) => ({
+    timeIdx: index('oae_time_idx').on(t.occurredAt),
+    typeIdx: index('oae_type_idx').on(t.eventType, t.occurredAt),
+    accountIdx: index('oae_account_idx').on(t.accountId, t.occurredAt),
+  }),
+);
+
+export const operatorLoginLimits = mysqlTable(
+  'operator_login_limits',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    keyType: mysqlEnum('keyType', OPERATOR_LOGIN_LIMIT_KEY_TYPES).notNull(),
+    compositeKey: varchar('compositeKey', { length: 255 }).notNull(),
+    failedAttempts: int('failedAttempts').notNull().default(0),
+    firstAttemptAt: timestamp('firstAttemptAt', { fsp: 3 }),
+    lastAttemptAt: timestamp('lastAttemptAt', { fsp: 3 }),
+    lockedUntil: timestamp('lockedUntil', { fsp: 3 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow().onUpdateNow(),
+  },
+  (t) => ({
+    keyUq: uniqueIndex('oll_key_uq').on(t.keyType, t.compositeKey),
+  }),
+);
+
+export const operatorRecoveryRecords = mysqlTable(
+  'operator_recovery_records',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    accountId: int('accountId').notNull(),
+    method: varchar('method', { length: 64 }).notNull(),
+    requestedAt: timestamp('requestedAt', { fsp: 3 }).notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+    performedAt: timestamp('performedAt', { fsp: 3 }),
+    operatorNote: varchar('operatorNote', { length: 500 }),
+  },
+  (t) => ({
+    accountIdx: index('orr_account_idx').on(t.accountId, t.requestedAt),
+    accountFk: foreignKey({
+      name: 'orr_account_fk',
+      columns: [t.accountId],
+      foreignColumns: [localOperatorAccounts.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -6645,3 +6782,13 @@ export type DesktopIncidentRow = typeof desktopIncidents.$inferSelect;
 export type DesktopIncidentInsert = typeof desktopIncidents.$inferInsert;
 export type DesktopBuildManifestRow = typeof desktopBuildManifests.$inferSelect;
 export type DesktopBuildManifestInsert = typeof desktopBuildManifests.$inferInsert;
+export type LocalOperatorAccountRow = typeof localOperatorAccounts.$inferSelect;
+export type LocalOperatorAccountInsert = typeof localOperatorAccounts.$inferInsert;
+export type OperatorAuthSessionRow = typeof operatorAuthSessions.$inferSelect;
+export type OperatorAuthSessionInsert = typeof operatorAuthSessions.$inferInsert;
+export type OperatorAuthEventRow = typeof operatorAuthEvents.$inferSelect;
+export type OperatorAuthEventInsert = typeof operatorAuthEvents.$inferInsert;
+export type OperatorLoginLimitRow = typeof operatorLoginLimits.$inferSelect;
+export type OperatorLoginLimitInsert = typeof operatorLoginLimits.$inferInsert;
+export type OperatorRecoveryRecordRow = typeof operatorRecoveryRecords.$inferSelect;
+export type OperatorRecoveryRecordInsert = typeof operatorRecoveryRecords.$inferInsert;

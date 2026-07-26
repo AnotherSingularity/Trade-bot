@@ -13,6 +13,12 @@ export interface DesktopStatusSourceInput {
   serverPolicyVersionsUrl?: string;   // e.g. `${server}/api/desktop/observer-versions`
   serverChampionUrl?: string;         // e.g. `${server}/api/desktop/champion`
   fingerprintVersion?: string;        // computed by SchemaFingerprintVerifier
+  // Stage 2 §3: bootstrap-scoped calls (counters) use the token; operator-
+  // scoped calls (policy versions, champion) use the bearer access token.
+  // Either function may return null/undefined; the call is then omitted
+  // and the source shows as `unknown` — never fabricated.
+  getBootstrapToken?: () => string | null | undefined;
+  getAccessToken?: () => string | null | undefined;
 }
 
 export interface AuthoritativeCounters {
@@ -37,31 +43,57 @@ export class DesktopStatusSource {
   async sample(): Promise<AuthoritativeStatusSnapshot> {
     const [counters, policyVersions, champion] = await Promise.all([
       this.fetchCounters(),
-      this.fetchJson(this.input.serverPolicyVersionsUrl),
-      this.fetchJson(this.input.serverChampionUrl),
+      this.fetchJson(this.input.serverPolicyVersionsUrl, this.buildAuthorizedHeaders('operator')),
+      this.fetchJson(this.input.serverChampionUrl, this.buildAuthorizedHeaders('operator')),
     ]);
     return {
       createOrderCounters: counters,
       schemaVersion: this.input.fingerprintVersion ?? 'unknown',
-      observerPolicyVersions: (policyVersions as Record<string, string>) ?? null,
-      championConfiguration: (champion as Record<string, unknown>) ?? null,
+      observerPolicyVersions: this.projectPolicyVersions(policyVersions),
+      championConfiguration: this.projectChampion(champion),
       lastSampledAt: new Date(),
     };
+  }
+
+  private buildAuthorizedHeaders(scope: 'bootstrap' | 'operator'): Record<string, string> {
+    if (scope === 'bootstrap') {
+      const t = this.input.getBootstrapToken?.();
+      return t ? { 'x-horizon-bootstrap-token': t } : {};
+    }
+    const t = this.input.getAccessToken?.();
+    return t ? { authorization: `Bearer ${t}` } : {};
+  }
+
+  private projectPolicyVersions(raw: unknown): Record<string, string> | null {
+    if (!raw || typeof raw !== 'object') return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const v = (raw as any).values ?? raw;
+    return v as Record<string, string>;
+  }
+
+  private projectChampion(raw: unknown): Record<string, unknown> | null {
+    if (!raw || typeof raw !== 'object') return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const v = (raw as any).values ?? raw;
+    return v as Record<string, unknown>;
   }
 
   private async fetchCounters(): Promise<AuthoritativeCounters> {
     const url = this.input.serverCountersUrl;
     if (!url) return { known: false, functionInvocations: null, attemptCount: null, networkCount: null, source: 'not_configured' };
     try {
-      const data = await this.fetchJson(url);
+      const data = await this.fetchJson(url, this.buildAuthorizedHeaders('bootstrap'));
       if (!data || typeof data !== 'object') {
         return { known: false, functionInvocations: null, attemptCount: null, networkCount: null, source: 'invalid_response' };
       }
+      // Stage 1-FIX §B: server envelope is `{ known, source, values: {...} }`.
+      // Accept either the envelope or a legacy flat shape.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const d = data as any;
-      const f = Number(d.functionInvocations);
-      const a = Number(d.attemptCount);
-      const n = Number(d.networkCount);
+      const v = d.values ?? d;
+      const f = Number(v.functionInvocations);
+      const a = Number(v.attemptCount);
+      const n = Number(v.networkCount);
       if (!Number.isFinite(f) || !Number.isFinite(a) || !Number.isFinite(n) || f < 0 || a < 0 || n < 0) {
         return { known: false, functionInvocations: null, attemptCount: null, networkCount: null, source: 'invalid_values' };
       }
@@ -71,12 +103,12 @@ export class DesktopStatusSource {
     }
   }
 
-  private async fetchJson(url: string | undefined): Promise<unknown | null> {
+  private async fetchJson(url: string | undefined, headers?: Record<string, string>): Promise<unknown | null> {
     if (!url) return null;
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 3_000);
-      const res = await fetch(url, { signal: controller.signal });
+      const res = await fetch(url, { signal: controller.signal, headers });
       clearTimeout(timer);
       if (!res.ok) return null;
       return await res.json();

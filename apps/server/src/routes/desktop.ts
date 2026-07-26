@@ -1,17 +1,22 @@
 /**
- * Stage 1-FIX §B, §C — Authoritative server endpoints for the desktop
- * supervisor.
+ * Stage 1-FIX §B, §C + Stage 2 §3 — Desktop supervisor endpoints,
+ * split into two trust surfaces.
  *
- * These endpoints expose ONLY bootstrap-safe values (counters,
- * versions, dependency probes, reconciliation counts). They contain
- * no secrets, no trader state, no PII. Access is gated to
- * `127.0.0.1`-origin requests so a browser cannot reach them from
- * an external network even if the operator has bound the server to
- * `0.0.0.0` by mistake.
+ *   BOOTSTRAP-SAFE (require loopback + X-Horizon-Bootstrap-Token):
+ *     /create-order-counters
+ *     /scanner-readiness
+ *     /reconciliation/status
  *
- * The desktop's supervised runtime queries these endpoints BEFORE
- * user authentication (that's Stage 2). Business-data endpoints
- * remain authenticated.
+ *   OPERATOR-AUTHENTICATED (require Bearer access token):
+ *     /observer-policy-versions
+ *     /champion-configuration
+ *
+ * The desktop's supervised runtime hits the bootstrap-safe subset
+ * before user authentication (with its issued bootstrap token). The
+ * operator-authenticated subset is unreachable until the operator
+ * has logged in. Loopback binding is NEVER the sole authorization
+ * control — bootstrap requires the header token; the authenticated
+ * subset requires a real operator session.
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -22,20 +27,13 @@ import { db, getPool } from '../db';
 import * as schema from '../db/schema';
 import { ENV } from '../env';
 import { httpCounters } from '../lib/fetchBarrier';
+import { requireBootstrapAuthorization } from '../middleware/bootstrapAuth';
+import { requireOperatorSession } from '../middleware/operatorSession';
 
 export function desktopRouter(): Router {
   const router = Router();
 
-  router.use((req: Request, res: Response, next) => {
-    // Localhost-only bootstrap surface.
-    const ip = String(req.ip ?? req.socket.remoteAddress ?? '');
-    if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip.endsWith('127.0.0.1')) {
-      return next();
-    }
-    res.status(403).json({ error: 'desktop_bootstrap_endpoint_is_localhost_only' });
-  });
-
-  router.get('/create-order-counters', (_req, res) => {
+  router.get('/create-order-counters', requireBootstrapAuthorization, (_req, res) => {
     const c = httpCounters();
     res.json({
       known: true,
@@ -48,38 +46,7 @@ export function desktopRouter(): Router {
     });
   });
 
-  router.get('/observer-policy-versions', (_req, res) => {
-    res.json({
-      known: true,
-      source: 'compiled_in',
-      values: {
-        // These correspond to the shipped observer policy version
-        // labels — pinned per phase, never inferred from a database
-        // row (which would be a mutable source).
-        universe: 'p2a-1',
-        regime: 'p2b-1',
-        risk: 'p2c-1',
-        microstructure: 'p2d-1',
-        context: 'p2e-1',
-        validation: 'p2f-1',
-      },
-    });
-  });
-
-  router.get('/champion-configuration', (_req, res) => {
-    res.json({
-      known: true,
-      source: 'compiled_in',
-      values: {
-        championVersion: `strategy-${STRATEGY_VERSION}`,
-        strategyVersion: STRATEGY_VERSION,
-        dryRun: ENV.dryRun,
-        orderSubmissionEnabled: ENV.orderSubmissionEnabled,
-      },
-    });
-  });
-
-  router.get('/scanner-readiness', async (_req, res) => {
+  router.get('/scanner-readiness', requireBootstrapAuthorization, async (_req, res) => {
     try {
       const rec = await queryReconciliationSnapshot();
       const counters = httpCounters();
@@ -108,7 +75,7 @@ export function desktopRouter(): Router {
     }
   });
 
-  router.get('/reconciliation/status', async (_req, res) => {
+  router.get('/reconciliation/status', requireBootstrapAuthorization, async (_req, res) => {
     try {
       const rec = await queryReconciliationSnapshot();
       res.json({ known: true, ...rec });
@@ -119,6 +86,48 @@ export function desktopRouter(): Router {
         detail: String(e).slice(0, 200),
       });
     }
+  });
+
+  return router;
+}
+
+// ---------------------------------------------------------------------------
+// Stage 2 §3 — operator-authenticated desktop endpoints.
+//
+// These endpoints carry compiled-in identifiers and current
+// configuration flags that the desktop UI needs *after* the operator
+// has authenticated. They are not bootstrap-safe (they reveal
+// deployment identity) so the bootstrap channel cannot reach them.
+// ---------------------------------------------------------------------------
+export function desktopOperatorRouter(): Router {
+  const router = Router();
+
+  router.get('/observer-policy-versions', requireOperatorSession, (_req, res) => {
+    res.json({
+      known: true,
+      source: 'compiled_in',
+      values: {
+        universe: 'p2a-1',
+        regime: 'p2b-1',
+        risk: 'p2c-1',
+        microstructure: 'p2d-1',
+        context: 'p2e-1',
+        validation: 'p2f-1',
+      },
+    });
+  });
+
+  router.get('/champion-configuration', requireOperatorSession, (_req, res) => {
+    res.json({
+      known: true,
+      source: 'compiled_in',
+      values: {
+        championVersion: `strategy-${STRATEGY_VERSION}`,
+        strategyVersion: STRATEGY_VERSION,
+        dryRun: ENV.dryRun,
+        orderSubmissionEnabled: ENV.orderSubmissionEnabled,
+      },
+    });
   });
 
   return router;
@@ -152,13 +161,7 @@ export interface SystemReadinessResponse {
 
 export function systemReadinessRouter(): Router {
   const router = Router();
-  router.get('/system/readiness', async (req: Request, res: Response) => {
-    const ip = String(req.ip ?? req.socket.remoteAddress ?? '');
-    const localhostOnly = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip.endsWith('127.0.0.1');
-    if (!localhostOnly) {
-      res.status(403).json({ error: 'readiness_endpoint_is_localhost_only' });
-      return;
-    }
+  router.get('/system/readiness', requireBootstrapAuthorization, async (_req: Request, res: Response) => {
     const response = await computeReadiness();
     // Ready when all components are ok. Non-ready still returns 200
     // so the desktop can read the detail; the desktop's supervisor

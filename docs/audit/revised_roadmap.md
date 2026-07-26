@@ -31,20 +31,34 @@ which `blocking_gaps.md` categories it consumes.
 - **Verdict**: `desktop_service_supervisor: runtime_wired` for
   MariaDB + Redis + server on Linux.
 
-## Stage 2 — Authenticated desktop API integration
+## Stage 2 — Authenticated desktop API integration ✅ COMPLETE
 
-- **Entry**: Stage 1 committed.
-- **Exit**:
-  - `authenticationRequired: true` in production boot (Cat C 10)
-  - Setup/login screens + IPC channels (Cat C 11)
-  - Session token on every IPC call (Cat C 12)
-  - Sessions persisted (Cat C 13)
-  - Real safety-value endpoints + wiring (Cat D 14-15)
-  - Renderer: Overview + Safety + Configuration + System query real
-    endpoints (4 of 19 screens now `integration_verified`)
-- **Consumes**: Categories C + D.
-- **Verdict**: `desktop_authentication: runtime_wired`;
-  `desktop.safetyValues: runtime_wired`.
+- **Entry**: Stage 1-FIX committed.
+- **Delivered**:
+  - `authenticationRequired: true` by default in production boot.
+  - Cryptographic bootstrap channel — 256-bit token, constant-time
+    verify. Bootstrap endpoints require BOTH loopback + header token.
+  - Operator auth model: scrypt (versioned), composite rate limits,
+    session model (15 min / 7 d / 30 d + family rotation on refresh
+    with reuse-invalidation).
+  - Nine `/api/operator-auth/*` REST endpoints + append-only auth
+    event log.
+  - Desktop main-process auth manager owns tokens (RAM + keytar for
+    refresh). Renderer receives ONLY `SanitizedAuthState`.
+  - Renderer `<AuthGate>` handles setup / login / locked / expired /
+    revoked / password-change / bootstrap-unavailable.
+  - Additive migration 0021 (`local_operator_accounts`,
+    `operator_auth_sessions`, `operator_auth_events`,
+    `operator_login_limits`, `operator_recovery_records`).
+- **Not delivered** (Stage 3 scope): 19-screen data binding to
+  authenticated business APIs; report generation (Stage 4); Windows
+  installer (Stage 5).
+- **Verdict achieved**: `desktop_authentication_complete +
+  session_enforcement_integration_verified +
+  bootstrap_channel_secured` (see `stage2_report.md`).
+- **Old planned scope-binding**: was to bind 4 of 19 screens here.
+  Deferred to Stage 3 per the Stage 2 work order — Stage 2 restricts
+  the renderer to the auth flow.
 
 ## Stage 3 — Full screen binding
 
