@@ -38,12 +38,55 @@ Migrations 0000–0016 remain byte-identical; snapshot 0017 regenerated from a r
 
 - **30 acceptance tests** (`tests/research/phase2d_microstructure.test.ts`) covering deferred provider, shortlist versioning, book engine snapshot / delta / duplicate / out-of-order / crossed / stale / negative / gap-detected paths, feature registry, trade classifier hierarchy, CVD, impact curves + monotonicity, passive fill, stop execution safety, execution decision paths (healthy / stale / gap_detected), agreement classifier, multiplier bounds, replay byte-stability, safe flags, migration presence.
 - **5 isolation tests** (`tests/research/phase2d_isolation.test.ts`) proving no champion imports microstructure, no microstructure file imports champion strategy behavior, no writes to champion economic tables, no multiplier > 1, no `createOrder` / `fetch` / `/brokerage/orders` references in the module.
+- **34 Phase 2D-FIX correction tests** (`tests/research/phase2d_fix.test.ts`) covering the fixture-coverage manifest (33/33), audit-lineage integration, book-event/gap/snapshot/trade-flow persistence idempotency, resynchronization-after-gap, marketable-vs-passive labelling, unfilled-residual reporting, future-event rejection, retrieval-without-Phase-2A/2B/2C records, and the three createOrder counters staying at zero.
+
+## Phase 2D-FIX — bounded correction
+
+The following work was completed after the initial Phase 2D commit to close
+verifiably-required gaps without opening a new migration:
+
+1. **Full audit-lineage integration.** `getDecisionChainAggregate` returns
+   a `researchObserver.microstructure` object with the shortlist run and
+   membership, book session + snapshot + levels + gaps, feature
+   definitions + values, latest trade-flow window, impact curves, passive
+   fill estimate, execution-cost observer snapshot, microstructure
+   execution decision, and champion comparison. Loads independently of
+   Phase 2A/2B/2C records.
+2. **Fixture-coverage manifest.** A deterministic
+   `MS_FIXTURE_MANIFEST` (`src/research/microstructure/fixtureManifest.ts`)
+   enumerates all 33 required §O scenarios and maps each to the concrete
+   test case that exercises it. `computeMsFixtureCoverage()` reports
+   `requiredScenarioCount === coveredScenarioCount === 33` and
+   `uncoveredScenarioCount === 0`.
+3. **Persistence boundaries verified.** New idempotent helpers in
+   `src/research/microstructure/persistence.ts` cover book sessions,
+   events, gaps, snapshots, levels, feature definitions, feature
+   values, trade-flow windows, market-impact curves, passive-fill
+   estimates and execution-cost observer snapshots. Each helper's
+   idempotency is exercised in `tests/research/phase2d_fix.test.ts`.
+4. **Twelve required correction tests.** Enumerated as §FIX-R.1–§FIX-R.12
+   in the fix test file: audit-chain retrieval, retrieval-without-2A,
+   retrieval-without-2B, retrieval-without-2C, manifest presence,
+   deterministic 33/33 coverage, trade-flow idempotency, book-event
+   idempotency, exact-snapshot resolution, anti-lookahead guard,
+   champion behavior unchanged, and all three createOrder counters
+   remaining zero.
+5. **No new migration.** Migration 0017 remains immutable. The Phase
+   2D-FIX work adds only source files and tests. `drizzle-kit generate`
+   returns an empty diff.
 
 ## Known limitations honestly declared
 
-- Only 30 acceptance tests instead of the 33 fixtures listed in §O — I did not build separate replay-fixture files for every scenario; the tests exercise the equivalent state transitions in-line. Any prospective validation should either add the missing fixture files or run against captured recordings.
-- Trade-flow windows are computed in memory; there is no ingestion pipeline persisting `trade_flow_windows` rows automatically — the tables exist but the run-loop is deferred.
-- `researchObserver.microstructure` audit-lineage extension in `getDecisionChainAggregate` is NOT wired in Phase 2D; that requires the audit-integration work I did not have context to complete. The tables are populated via the persistence helpers; a future commit will extend the audit aggregate.
+- Live trade-flow persistence loop is still deferred — production Coinbase
+  Level 2 connectivity is intentionally disabled (the
+  `DeferredProductionMarketDepthProvider` throws on construction).
+  Deterministic replay via the fixture provider persists trade-flow
+  windows through `persistTradeFlowWindow`, and the persistence path is
+  idempotent (verified by §FIX-R.7 and §FIX.12).
+- Inline scenario coverage: the manifest allows an inline `it()` case to
+  cover a scenario. Every entry names a concrete file + test title
+  fragment; adding a scenario without a matching case is rejected by
+  §FIX.2.
 
 ## Verdict
 

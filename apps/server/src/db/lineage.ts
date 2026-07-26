@@ -5,18 +5,31 @@ import {
   candidateRiskDecisions,
   challengerRoutingDecisions,
   championChallengerRoutingComparisons,
+  championMicrostructureComparisons,
   championRiskComparisons,
   changePointEvents,
   decisionChains,
   eligibilityDecisions,
+  executionCostObserverSnapshots,
   fingerprintEvidence,
   fingerprintSnapshots,
   globalRegimeSnapshots,
   latentStateAssignments,
   latentStateMappings,
   lineageEvents,
+  marketImpactCurves,
   marketObservations,
+  microstructureExecutionDecisions,
+  microstructureFeatureDefinitions,
+  microstructureFeatureValues,
+  microstructureShortlistMemberships,
+  microstructureShortlistRuns,
+  orderBookGaps,
+  orderBookLevels,
+  orderBookSessions,
+  orderBookSnapshots,
   outcomeLabels,
+  passiveFillEstimates,
   portfolioRiskSnapshots,
   positionRiskSnapshots,
   postFillRevalidations,
@@ -39,14 +52,28 @@ import {
   strategyRoutingDecisions,
   stressTestResults,
   stressTestRuns,
+  tradeFlowWindows,
   universeSnapshots,
+  type ChampionMicrostructureComparisonRow,
   type DecisionChainRow,
   type EligibilityDecisionRow,
+  type ExecutionCostObserverSnapshotRow,
   type FingerprintEvidenceRow,
   type FingerprintSnapshotRow,
   type LineageEventInsert,
+  type MarketImpactCurveRow,
   type MarketObservationRow,
+  type MicrostructureExecutionDecisionRow,
+  type MicrostructureFeatureDefinitionRow,
+  type MicrostructureFeatureValueRow,
+  type MicrostructureShortlistMembershipRow,
+  type MicrostructureShortlistRunRow,
+  type OrderBookGapRow,
+  type OrderBookLevelRow,
+  type OrderBookSessionRow,
+  type OrderBookSnapshotRow,
   type OutcomeLabelRow,
+  type PassiveFillEstimateRow,
   type PostFillRevalidationRow,
   type CandidateRiskDecisionRow,
   type ChallengerRoutingDecisionRow,
@@ -77,6 +104,7 @@ import {
   type ShadowExecutionPlanRow,
   type ShortlistDecisionRow,
   type StrategyRoutingDecisionRow,
+  type TradeFlowWindowRow,
   type UniverseSnapshotRow,
 } from './schema';
 
@@ -785,6 +813,32 @@ export interface ResearchObserverAggregate {
     stressResults: StressTestResultRow[];
     championComparison: ChampionRiskComparisonRow | null;
   };
+  microstructure: MicrostructureAggregate;
+}
+
+/**
+ * Phase 2D-FIX §1 — Microstructure aggregate for the audit route.
+ *
+ * Loads INDEPENDENTLY of Phase 2A universe, Phase 2B regime and Phase 2C
+ * risk records. The audit route must be able to explain every observation
+ * of a chain even if the earlier observers wrote nothing.
+ */
+export interface MicrostructureAggregate {
+  shortlistRun: MicrostructureShortlistRunRow | null;
+  shortlistMembership: MicrostructureShortlistMembershipRow | null;
+  bookSession: OrderBookSessionRow | null;
+  bookSnapshot: OrderBookSnapshotRow | null;
+  bookLevels: OrderBookLevelRow[];
+  bookGaps: OrderBookGapRow[];
+  bookContinuityState: OrderBookSessionRow['state'] | null;
+  featureDefinitions: MicrostructureFeatureDefinitionRow[];
+  featureValues: MicrostructureFeatureValueRow[];
+  tradeFlowWindow: TradeFlowWindowRow | null;
+  marketImpactCurves: MarketImpactCurveRow[];
+  passiveFillEstimate: PassiveFillEstimateRow | null;
+  executionCostObserverSnapshot: ExecutionCostObserverSnapshotRow | null;
+  microstructureDecision: MicrostructureExecutionDecisionRow | null;
+  championComparison: ChampionMicrostructureComparisonRow | null;
 }
 
 async function loadResearchObserverChain(
@@ -797,9 +851,10 @@ async function loadResearchObserverChain(
     .orderBy(desc(universeSnapshots.observedAt))
     .limit(1);
   if (!snapshot) {
-    // No Phase 2A universe snapshot exists, but Phase 2C data may still be
-    // present. Load it independently.
+    // No Phase 2A universe snapshot exists, but Phase 2C/2D data may still
+    // be present. Load them independently.
     const portfolioRisk = await loadPortfolioRiskForChain(chain.id);
+    const microstructure = await loadMicrostructureForChain(chain.id);
     return {
       snapshot: null,
       hygiene: null,
@@ -818,6 +873,7 @@ async function loadResearchObserverChain(
       challengerRouting: null,
       championComparison: null,
       portfolioRisk,
+      microstructure,
     };
   }
   const [hygiene] = await db
@@ -956,6 +1012,7 @@ async function loadResearchObserverChain(
     .limit(1);
 
   const portfolioRisk = await loadPortfolioRiskForChain(chain.id);
+  const microstructure = await loadMicrostructureForChain(chain.id);
 
   return {
     snapshot,
@@ -975,6 +1032,160 @@ async function loadResearchObserverChain(
     challengerRouting,
     championComparison: championComparison ?? null,
     portfolioRisk,
+    microstructure,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2D-FIX §1 — Microstructure aggregate loader.
+//
+// Loads independently: the decision chain may exist without any Phase 2A/2B/2C
+// observer records. The loader returns what's present and nulls what isn't.
+// ---------------------------------------------------------------------------
+
+async function loadMicrostructureForChain(chainId: number): Promise<MicrostructureAggregate> {
+  const emptyAggregate: MicrostructureAggregate = {
+    shortlistRun: null,
+    shortlistMembership: null,
+    bookSession: null,
+    bookSnapshot: null,
+    bookLevels: [],
+    bookGaps: [],
+    bookContinuityState: null,
+    featureDefinitions: [],
+    featureValues: [],
+    tradeFlowWindow: null,
+    marketImpactCurves: [],
+    passiveFillEstimate: null,
+    executionCostObserverSnapshot: null,
+    microstructureDecision: null,
+    championComparison: null,
+  };
+  const [decision] = await db
+    .select()
+    .from(microstructureExecutionDecisions)
+    .where(eq(microstructureExecutionDecisions.decisionChainId, chainId))
+    .limit(1);
+  const [comparison] = await db
+    .select()
+    .from(championMicrostructureComparisons)
+    .where(eq(championMicrostructureComparisons.decisionChainId, chainId))
+    .limit(1);
+  if (!decision && !comparison) return emptyAggregate;
+  let shortlistMembership: MicrostructureShortlistMembershipRow | null = null;
+  let shortlistRun: MicrostructureShortlistRunRow | null = null;
+  if (decision?.shortlistMembershipId) {
+    const [membership] = await db
+      .select()
+      .from(microstructureShortlistMemberships)
+      .where(eq(microstructureShortlistMemberships.id, decision.shortlistMembershipId))
+      .limit(1);
+    shortlistMembership = membership ?? null;
+    if (membership) {
+      const [run] = await db
+        .select()
+        .from(microstructureShortlistRuns)
+        .where(eq(microstructureShortlistRuns.id, membership.runId))
+        .limit(1);
+      shortlistRun = run ?? null;
+    }
+  }
+  let bookSnapshot: OrderBookSnapshotRow | null = null;
+  let bookSession: OrderBookSessionRow | null = null;
+  let bookLevels: OrderBookLevelRow[] = [];
+  let bookGaps: OrderBookGapRow[] = [];
+  let bookContinuityState: OrderBookSessionRow['state'] | null = null;
+  if (decision?.bookSnapshotId) {
+    const [snap] = await db
+      .select()
+      .from(orderBookSnapshots)
+      .where(eq(orderBookSnapshots.id, decision.bookSnapshotId))
+      .limit(1);
+    bookSnapshot = snap ?? null;
+    if (snap) {
+      const [sess] = await db
+        .select()
+        .from(orderBookSessions)
+        .where(eq(orderBookSessions.id, snap.sessionId))
+        .limit(1);
+      bookSession = sess ?? null;
+      bookContinuityState = sess ? sess.state : null;
+      bookLevels = await db
+        .select()
+        .from(orderBookLevels)
+        .where(eq(orderBookLevels.snapshotId, snap.id))
+        .orderBy(orderBookLevels.side, orderBookLevels.levelIndex);
+      bookGaps = await db
+        .select()
+        .from(orderBookGaps)
+        .where(eq(orderBookGaps.sessionId, snap.sessionId))
+        .orderBy(orderBookGaps.detectedAt);
+    }
+  }
+  let featureValues: MicrostructureFeatureValueRow[] = [];
+  let featureDefinitions: MicrostructureFeatureDefinitionRow[] = [];
+  if (bookSnapshot) {
+    featureValues = await db
+      .select()
+      .from(microstructureFeatureValues)
+      .where(eq(microstructureFeatureValues.snapshotId, bookSnapshot.id))
+      .orderBy(microstructureFeatureValues.featureKey);
+    const usedKeys = new Set(featureValues.map((v) => `${v.featureKey}@${v.featureVersion}`));
+    if (usedKeys.size > 0) {
+      const defs = await db.select().from(microstructureFeatureDefinitions);
+      featureDefinitions = defs.filter((d) => usedKeys.has(`${d.featureKey}@${d.featureVersion}`));
+    }
+  }
+  let tradeFlowWindow: TradeFlowWindowRow | null = null;
+  if (bookSession) {
+    const flows = await db
+      .select()
+      .from(tradeFlowWindows)
+      .where(eq(tradeFlowWindows.sessionId, bookSession.id))
+      .orderBy(desc(tradeFlowWindows.windowEnd))
+      .limit(1);
+    tradeFlowWindow = flows[0] ?? null;
+  }
+  let marketImpactCurvesRows: MarketImpactCurveRow[] = [];
+  let passiveFillEstimate: PassiveFillEstimateRow | null = null;
+  let executionCostObserverSnapshot: ExecutionCostObserverSnapshotRow | null = null;
+  if (bookSnapshot) {
+    marketImpactCurvesRows = await db
+      .select()
+      .from(marketImpactCurves)
+      .where(eq(marketImpactCurves.bookSnapshotId, bookSnapshot.id))
+      .orderBy(marketImpactCurves.side, marketImpactCurves.notional);
+    const [pf] = await db
+      .select()
+      .from(passiveFillEstimates)
+      .where(eq(passiveFillEstimates.bookSnapshotId, bookSnapshot.id))
+      .orderBy(desc(passiveFillEstimates.createdAt))
+      .limit(1);
+    passiveFillEstimate = pf ?? null;
+    const [ec] = await db
+      .select()
+      .from(executionCostObserverSnapshots)
+      .where(eq(executionCostObserverSnapshots.bookSnapshotId, bookSnapshot.id))
+      .orderBy(desc(executionCostObserverSnapshots.createdAt))
+      .limit(1);
+    executionCostObserverSnapshot = ec ?? null;
+  }
+  return {
+    shortlistRun,
+    shortlistMembership,
+    bookSession,
+    bookSnapshot,
+    bookLevels,
+    bookGaps,
+    bookContinuityState,
+    featureDefinitions,
+    featureValues,
+    tradeFlowWindow,
+    marketImpactCurves: marketImpactCurvesRows,
+    passiveFillEstimate,
+    executionCostObserverSnapshot,
+    microstructureDecision: decision ?? null,
+    championComparison: comparison ?? null,
   };
 }
 
