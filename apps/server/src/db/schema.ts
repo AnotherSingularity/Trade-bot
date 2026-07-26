@@ -2210,6 +2210,371 @@ export const soakPreflightRuns = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Phase 2A — dynamic universe + quantitative fingerprint observer
+// ---------------------------------------------------------------------------
+export const universeSnapshots = mysqlTable(
+  'universe_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    snapshotVersion: varchar('snapshotVersion', { length: 32 }).notNull(),
+    providerName: varchar('providerName', { length: 64 }).notNull(),
+    providerVersion: varchar('providerVersion', { length: 32 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    productCount: int('productCount').notNull().default(0),
+    payloadHash: varchar('payloadHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    versionIdx: index('universe_snapshots_version_idx').on(t.snapshotVersion),
+    observedIdx: index('universe_snapshots_observed_idx').on(t.observedAt),
+  }),
+);
+
+export const universeProducts = mysqlTable(
+  'universe_products',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    snapshotId: int('snapshotId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    baseCurrency: varchar('baseCurrency', { length: 16 }).notNull(),
+    quoteCurrency: varchar('quoteCurrency', { length: 16 }).notNull(),
+    productType: varchar('productType', { length: 32 }).notNull().default('SPOT'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapProdUq: uniqueIndex('universe_products_snap_prod_uq').on(t.snapshotId, t.productId),
+    productIdx: index('universe_products_product_idx').on(t.productId),
+    snapshotFk: foreignKey({
+      name: 'universe_products_snapshot_fk',
+      columns: [t.snapshotId],
+      foreignColumns: [universeSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const productMetadataObservations = mysqlTable(
+  'product_metadata_observations',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    sourceVersion: varchar('sourceVersion', { length: 32 }).notNull(),
+    providerName: varchar('providerName', { length: 64 }).notNull(),
+    tradingStatus: varchar('tradingStatus', { length: 32 }).notNull(),
+    cancelOnly: boolean('cancelOnly').notNull().default(false),
+    limitOnly: boolean('limitOnly').notNull().default(false),
+    postOnly: boolean('postOnly').notNull().default(false),
+    auctionMode: boolean('auctionMode').notNull().default(false),
+    tradingDisabled: boolean('tradingDisabled').notNull().default(false),
+    baseIncrement: decimal('baseIncrement', { precision: 30, scale: 12 }).notNull(),
+    quoteIncrement: decimal('quoteIncrement', { precision: 30, scale: 12 }).notNull(),
+    baseMinimum: decimal('baseMinimum', { precision: 30, scale: 12 }).notNull(),
+    quoteMinimum: decimal('quoteMinimum', { precision: 30, scale: 12 }),
+    baseMaximum: decimal('baseMaximum', { precision: 30, scale: 12 }),
+    quoteMaximum: decimal('quoteMaximum', { precision: 30, scale: 12 }),
+    priceIncrement: decimal('priceIncrement', { precision: 30, scale: 12 }),
+    approximateVolume24h: decimal('approximateVolume24h', { precision: 30, scale: 8 }),
+    metadataObservedAt: timestamp('metadataObservedAt', { fsp: 3 }).notNull(),
+    metadataAvailableAt: timestamp('metadataAvailableAt', { fsp: 3 }).notNull(),
+    payloadHash: varchar('payloadHash', { length: 64 }).notNull(),
+    rawPayload: text('rawPayload'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    hashUq: uniqueIndex('product_metadata_hash_uq').on(t.payloadHash),
+    productIdx: index('product_metadata_product_idx').on(t.productId, t.metadataObservedAt),
+  }),
+);
+
+export const productHygieneDecisions = mysqlTable(
+  'product_hygiene_decisions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    snapshotId: int('snapshotId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    metadataId: int('metadataId'),
+    result: mysqlEnum('result', ['eligible', 'ineligible', 'quarantined', 'insufficient_data'])
+      .notNull(),
+    reasonCodes: varchar('reasonCodes', { length: 255 }).notNull(),
+    reasonDetail: text('reasonDetail'),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    decidedAt: timestamp('decidedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    reEvaluateAt: timestamp('reEvaluateAt', { fsp: 3 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapProdUq: uniqueIndex('hygiene_snap_prod_uq').on(t.snapshotId, t.productId),
+    resultIdx: index('hygiene_result_idx').on(t.result),
+    snapshotFk: foreignKey({
+      name: 'hygiene_snapshot_fk',
+      columns: [t.snapshotId],
+      foreignColumns: [universeSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const productQuarantines = mysqlTable(
+  'product_quarantines',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    reasonCode: varchar('reasonCode', { length: 64 }).notNull(),
+    reasonDetail: text('reasonDetail'),
+    severity: mysqlEnum('severity', ['observe_only', 'feature_blocked', 'research_blocked', 'manual_review'])
+      .notNull()
+      .default('research_blocked'),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    startedAt: timestamp('startedAt', { fsp: 3 }).notNull(),
+    expiresAt: timestamp('expiresAt', { fsp: 3 }),
+    clearedAt: timestamp('clearedAt', { fsp: 3 }),
+    clearedBy: varchar('clearedBy', { length: 64 }),
+    evidenceHash: varchar('evidenceHash', { length: 64 }),
+    manualOverride: boolean('manualOverride').notNull().default(false),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    productIdx: index('quarantine_product_idx').on(t.productId, t.startedAt),
+    severityIdx: index('quarantine_severity_idx').on(t.severity),
+  }),
+);
+
+export const featureDefinitions = mysqlTable(
+  'feature_definitions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    featureKey: varchar('featureKey', { length: 64 }).notNull(),
+    featureVersion: varchar('featureVersion', { length: 32 }).notNull(),
+    description: text('description').notNull(),
+    inputRequirements: text('inputRequirements').notNull(),
+    lookbackRequirement: int('lookbackRequirement').notNull(),
+    minimumSampleCount: int('minimumSampleCount').notNull(),
+    outputType: varchar('outputType', { length: 32 }).notNull(),
+    unit: varchar('unit', { length: 32 }),
+    validRangeMin: decimal('validRangeMin', { precision: 30, scale: 12 }),
+    validRangeMax: decimal('validRangeMax', { precision: 30, scale: 12 }),
+    missingDataPolicy: varchar('missingDataPolicy', { length: 64 }).notNull(),
+    stalenessPolicy: varchar('stalenessPolicy', { length: 64 }).notNull(),
+    calculationHash: varchar('calculationHash', { length: 64 }).notNull(),
+    implementationVersion: varchar('implementationVersion', { length: 32 }).notNull(),
+    status: mysqlEnum('status', ['draft', 'observer', 'validated_for_research', 'deprecated', 'disabled'])
+      .notNull()
+      .default('observer'),
+    stage: mysqlEnum('stage', ['stage_1', 'stage_2']).notNull().default('stage_1'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('feature_defs_key_version_uq').on(t.featureKey, t.featureVersion),
+    statusIdx: index('feature_defs_status_idx').on(t.status, t.stage),
+  }),
+);
+
+export const featureCalculationRuns = mysqlTable(
+  'feature_calculation_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    snapshotId: int('snapshotId').notNull(),
+    stage: mysqlEnum('stage', ['stage_1', 'stage_2']).notNull(),
+    startedAt: timestamp('startedAt', { fsp: 3 }).notNull(),
+    completedAt: timestamp('completedAt', { fsp: 3 }),
+    productCount: int('productCount').notNull().default(0),
+    computedValues: int('computedValues').notNull().default(0),
+    failedValues: int('failedValues').notNull().default(0),
+    runVersion: varchar('runVersion', { length: 32 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapStageIdx: index('feature_runs_snap_stage_idx').on(t.snapshotId, t.stage),
+    snapshotFk: foreignKey({
+      name: 'feature_runs_snapshot_fk',
+      columns: [t.snapshotId],
+      foreignColumns: [universeSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const featureValues = mysqlTable(
+  'feature_values',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    runId: int('runId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    featureKey: varchar('featureKey', { length: 64 }).notNull(),
+    featureVersion: varchar('featureVersion', { length: 32 }).notNull(),
+    status: mysqlEnum('status', [
+      'valid',
+      'insufficient_history',
+      'stale',
+      'invalid_input',
+      'numerical_failure',
+      'low_confidence',
+      'gap_detected',
+      'unsupported',
+      'quarantined',
+    ]).notNull(),
+    value: decimal('value', { precision: 30, scale: 12 }),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }),
+    sampleCount: int('sampleCount').notNull().default(0),
+    lookbackStart: timestamp('lookbackStart', { fsp: 3 }),
+    lookbackEnd: timestamp('lookbackEnd', { fsp: 3 }),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    failureReason: varchar('failureReason', { length: 255 }),
+    diagnostics: text('diagnostics'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runProdFeatUq: uniqueIndex('feature_values_run_prod_feat_uq').on(t.runId, t.productId, t.featureKey, t.featureVersion),
+    featIdx: index('feature_values_feat_idx').on(t.featureKey, t.status),
+    runFk: foreignKey({
+      name: 'feature_values_run_fk',
+      columns: [t.runId],
+      foreignColumns: [featureCalculationRuns.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const shortlistDecisions = mysqlTable(
+  'shortlist_decisions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    snapshotId: int('snapshotId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    shortlisted: boolean('shortlisted').notNull().default(false),
+    rank: int('rank'),
+    score: decimal('score', { precision: 10, scale: 6 }),
+    reasonCodes: varchar('reasonCodes', { length: 255 }).notNull(),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    decidedAt: timestamp('decidedAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapProdUq: uniqueIndex('shortlist_snap_prod_uq').on(t.snapshotId, t.productId),
+    selectedIdx: index('shortlist_selected_idx').on(t.shortlisted),
+  }),
+);
+
+export const fingerprintDefinitions = mysqlTable(
+  'fingerprint_definitions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    classificationVersion: varchar('classificationVersion', { length: 32 }).notNull(),
+    description: text('description').notNull(),
+    requiredFeatures: text('requiredFeatures').notNull(),
+    overrideRules: text('overrideRules').notNull(),
+    implementationVersion: varchar('implementationVersion', { length: 32 }).notNull(),
+    status: mysqlEnum('status', ['observer', 'validated_for_research', 'deprecated', 'disabled'])
+      .notNull()
+      .default('observer'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    versionUq: uniqueIndex('fingerprint_defs_version_uq').on(t.classificationVersion),
+  }),
+);
+
+export const fingerprintSnapshots = mysqlTable(
+  'fingerprint_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    snapshotId: int('snapshotId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    fingerprintClass: mysqlEnum('fingerprintClass', [
+      'REVERSION_CANDIDATE',
+      'BREAKOUT_CANDIDATE',
+      'MACRO_FLOOR_RESEARCH_CANDIDATE',
+      'RANDOM_OR_NOISY',
+      'ILLIQUID',
+      'DISORDERED',
+      'UNCLASSIFIED',
+    ]).notNull(),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }).notNull(),
+    qualityPenalty: decimal('qualityPenalty', { precision: 6, scale: 4 }).notNull().default('0'),
+    liquidityPenalty: decimal('liquidityPenalty', { precision: 6, scale: 4 }).notNull().default('0'),
+    classificationVersion: varchar('classificationVersion', { length: 32 }).notNull(),
+    metadataVersion: varchar('metadataVersion', { length: 32 }).notNull(),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    state: mysqlEnum('state', ['complete', 'degraded', 'unresolved']).notNull().default('complete'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapProdUq: uniqueIndex('fingerprints_snap_prod_uq').on(t.snapshotId, t.productId),
+    classIdx: index('fingerprints_class_idx').on(t.fingerprintClass),
+    snapshotFk: foreignKey({
+      name: 'fingerprints_snapshot_fk',
+      columns: [t.snapshotId],
+      foreignColumns: [universeSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const fingerprintEvidence = mysqlTable(
+  'fingerprint_evidence',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    fingerprintId: int('fingerprintId').notNull(),
+    featureKey: varchar('featureKey', { length: 64 }).notNull(),
+    featureVersion: varchar('featureVersion', { length: 32 }).notNull(),
+    role: mysqlEnum('role', ['supporting', 'conflicting', 'missing']).notNull(),
+    featureValueId: int('featureValueId'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    fpIdx: index('fingerprint_evidence_fp_idx').on(t.fingerprintId),
+    roleIdx: index('fingerprint_evidence_role_idx').on(t.role),
+    fpFk: foreignKey({
+      name: 'fingerprint_evidence_fp_fk',
+      columns: [t.fingerprintId],
+      foreignColumns: [fingerprintSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const researchObserverRuns = mysqlTable(
+  'research_observer_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    snapshotId: int('snapshotId').notNull(),
+    startedAt: timestamp('startedAt', { fsp: 3 }).notNull(),
+    completedAt: timestamp('completedAt', { fsp: 3 }),
+    productsConsidered: int('productsConsidered').notNull().default(0),
+    productsEligible: int('productsEligible').notNull().default(0),
+    productsQuarantined: int('productsQuarantined').notNull().default(0),
+    productsShortlisted: int('productsShortlisted').notNull().default(0),
+    fingerprintCounts: text('fingerprintCounts'),
+    runVersion: varchar('runVersion', { length: 32 }).notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    snapIdx: index('observer_runs_snap_idx').on(t.snapshotId),
+    snapshotFk: foreignKey({
+      name: 'observer_runs_snapshot_fk',
+      columns: [t.snapshotId],
+      foreignColumns: [universeSnapshots.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -2286,6 +2651,32 @@ export type AdapterSelectionRow = typeof adapterSelections.$inferSelect;
 export type AdapterSelectionInsert = typeof adapterSelections.$inferInsert;
 export type SoakPreflightRunRow = typeof soakPreflightRuns.$inferSelect;
 export type SoakPreflightRunInsert = typeof soakPreflightRuns.$inferInsert;
+export type UniverseSnapshotRow = typeof universeSnapshots.$inferSelect;
+export type UniverseSnapshotInsert = typeof universeSnapshots.$inferInsert;
+export type UniverseProductRow = typeof universeProducts.$inferSelect;
+export type UniverseProductInsert = typeof universeProducts.$inferInsert;
+export type ProductMetadataObservationRow = typeof productMetadataObservations.$inferSelect;
+export type ProductMetadataObservationInsert = typeof productMetadataObservations.$inferInsert;
+export type ProductHygieneDecisionRow = typeof productHygieneDecisions.$inferSelect;
+export type ProductHygieneDecisionInsert = typeof productHygieneDecisions.$inferInsert;
+export type ProductQuarantineRow = typeof productQuarantines.$inferSelect;
+export type ProductQuarantineInsert = typeof productQuarantines.$inferInsert;
+export type FeatureDefinitionRow = typeof featureDefinitions.$inferSelect;
+export type FeatureDefinitionInsert = typeof featureDefinitions.$inferInsert;
+export type FeatureCalculationRunRow = typeof featureCalculationRuns.$inferSelect;
+export type FeatureCalculationRunInsert = typeof featureCalculationRuns.$inferInsert;
+export type FeatureValueRow = typeof featureValues.$inferSelect;
+export type FeatureValueInsert = typeof featureValues.$inferInsert;
+export type ShortlistDecisionRow = typeof shortlistDecisions.$inferSelect;
+export type ShortlistDecisionInsert = typeof shortlistDecisions.$inferInsert;
+export type FingerprintDefinitionRow = typeof fingerprintDefinitions.$inferSelect;
+export type FingerprintDefinitionInsert = typeof fingerprintDefinitions.$inferInsert;
+export type FingerprintSnapshotRow = typeof fingerprintSnapshots.$inferSelect;
+export type FingerprintSnapshotInsert = typeof fingerprintSnapshots.$inferInsert;
+export type FingerprintEvidenceRow = typeof fingerprintEvidence.$inferSelect;
+export type FingerprintEvidenceInsert = typeof fingerprintEvidence.$inferInsert;
+export type ResearchObserverRunRow = typeof researchObserverRuns.$inferSelect;
+export type ResearchObserverRunInsert = typeof researchObserverRuns.$inferInsert;
 export type FillRow = typeof fills.$inferSelect;
 export type FillInsert = typeof fills.$inferInsert;
 export type PositionRow = typeof positions.$inferSelect;

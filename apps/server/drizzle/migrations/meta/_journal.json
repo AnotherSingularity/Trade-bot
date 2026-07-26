@@ -99,6 +99,13 @@
       "when": 1786500000000,
       "tag": "0013_phase1_2_ops_soak",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1786600000000,
+      "tag": "0014_phase2a_observer_framework",
+      "breakpoints": true
     }
   ]
 }

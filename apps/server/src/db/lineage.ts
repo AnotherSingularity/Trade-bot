@@ -1,13 +1,17 @@
 import { createHash } from 'node:crypto';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, lte } from 'drizzle-orm';
 import { db } from './index';
 import {
   decisionChains,
   eligibilityDecisions,
+  fingerprintEvidence,
+  fingerprintSnapshots,
   lineageEvents,
   marketObservations,
   outcomeLabels,
   postFillRevalidations,
+  productHygieneDecisions,
+  productQuarantines,
   protectionCapabilities,
   protectionEvents,
   protectionInstances,
@@ -16,13 +20,19 @@ import {
   scanRuns,
   setupEvaluations,
   shadowExecutionPlans,
+  shortlistDecisions,
   strategyRoutingDecisions,
+  universeSnapshots,
   type DecisionChainRow,
   type EligibilityDecisionRow,
+  type FingerprintEvidenceRow,
+  type FingerprintSnapshotRow,
   type LineageEventInsert,
   type MarketObservationRow,
   type OutcomeLabelRow,
   type PostFillRevalidationRow,
+  type ProductHygieneDecisionRow,
+  type ProductQuarantineRow,
   type ProtectionCapabilityRow,
   type ProtectionEventRow,
   type ProtectionInstanceRow,
@@ -31,7 +41,9 @@ import {
   type ScanRunRow,
   type SetupEvaluationRow,
   type ShadowExecutionPlanRow,
+  type ShortlistDecisionRow,
   type StrategyRoutingDecisionRow,
+  type UniverseSnapshotRow,
 } from './schema';
 
 /**
@@ -597,6 +609,7 @@ export async function getDecisionChainAggregate(chainId: number) {
     .orderBy(outcomeLabels.labelVersion);
   const protection = await loadProtectionChain(chainId);
   const shadow = await loadShadowChain(chainId);
+  const researchObserver = await loadResearchObserverChain(chain);
   return {
     chain,
     scan: scan ?? null,
@@ -608,6 +621,7 @@ export async function getDecisionChainAggregate(chainId: number) {
     outcomes,
     protection,
     shadow,
+    researchObserver,
   };
 }
 
@@ -699,6 +713,94 @@ async function loadProtectionChain(chainId: number): Promise<ProtectionChainAggr
       stopLoss: instance.stopLossLegState,
     },
     degradationReason: instance.state === 'degraded' ? instance.failureReason : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2A §L — Research observer aggregate for the audit route.
+//
+// Attaches the observer's view of the product AT the point in time
+// the champion decision chain was created. This is READ-ONLY and does
+// not influence the champion decision — the audit surface only reads
+// the most recent snapshot at or before `chain.observedAt`.
+// ---------------------------------------------------------------------------
+
+export interface ResearchObserverAggregate {
+  snapshot: UniverseSnapshotRow | null;
+  hygiene: ProductHygieneDecisionRow | null;
+  activeQuarantines: ProductQuarantineRow[];
+  shortlist: ShortlistDecisionRow | null;
+  fingerprint: FingerprintSnapshotRow | null;
+  fingerprintEvidence: FingerprintEvidenceRow[];
+}
+
+async function loadResearchObserverChain(
+  chain: DecisionChainRow,
+): Promise<ResearchObserverAggregate> {
+  const [snapshot] = await db
+    .select()
+    .from(universeSnapshots)
+    .where(lte(universeSnapshots.observedAt, chain.observedAt))
+    .orderBy(desc(universeSnapshots.observedAt))
+    .limit(1);
+  if (!snapshot) {
+    return {
+      snapshot: null,
+      hygiene: null,
+      activeQuarantines: [],
+      shortlist: null,
+      fingerprint: null,
+      fingerprintEvidence: [],
+    };
+  }
+  const [hygiene] = await db
+    .select()
+    .from(productHygieneDecisions)
+    .where(
+      and(
+        eq(productHygieneDecisions.snapshotId, snapshot.id),
+        eq(productHygieneDecisions.productId, chain.productId),
+      ),
+    )
+    .limit(1);
+  const [shortlist] = await db
+    .select()
+    .from(shortlistDecisions)
+    .where(
+      and(
+        eq(shortlistDecisions.snapshotId, snapshot.id),
+        eq(shortlistDecisions.productId, chain.productId),
+      ),
+    )
+    .limit(1);
+  const [fingerprint] = await db
+    .select()
+    .from(fingerprintSnapshots)
+    .where(
+      and(
+        eq(fingerprintSnapshots.snapshotId, snapshot.id),
+        eq(fingerprintSnapshots.productId, chain.productId),
+      ),
+    )
+    .limit(1);
+  const evidence = fingerprint
+    ? await db
+        .select()
+        .from(fingerprintEvidence)
+        .where(eq(fingerprintEvidence.fingerprintId, fingerprint.id))
+    : [];
+  const activeQuarantines = await db
+    .select()
+    .from(productQuarantines)
+    .where(eq(productQuarantines.productId, chain.productId))
+    .orderBy(desc(productQuarantines.startedAt));
+  return {
+    snapshot,
+    hygiene: hygiene ?? null,
+    activeQuarantines,
+    shortlist: shortlist ?? null,
+    fingerprint: fingerprint ?? null,
+    fingerprintEvidence: evidence,
   };
 }
 
