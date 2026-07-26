@@ -85,6 +85,13 @@
       "when": 1786300000000,
       "tag": "0011_phase1_gate3d_fix_runtime_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1786400000000,
+      "tag": "0012_phase1_2_live_data_plane",
+      "breakpoints": true
     }
   ]
 }

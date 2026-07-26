@@ -1651,6 +1651,376 @@ export const shadowCertificationRuns = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Phase 1.2 — live Coinbase data plane
+// ---------------------------------------------------------------------------
+export const marketStreamSessions = mysqlTable(
+  'market_stream_sessions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    endpoint: varchar('endpoint', { length: 255 }).notNull(),
+    connectionGroup: varchar('connectionGroup', { length: 32 }).notNull(),
+    startedAt: timestamp('startedAt').notNull(),
+    endedAt: timestamp('endedAt'),
+    state: mysqlEnum('state', [
+      'disconnected',
+      'connecting',
+      'subscribing',
+      'synchronizing',
+      'healthy',
+      'stale',
+      'degraded',
+      'reconnecting',
+      'failed',
+      'stopped',
+    ])
+      .notNull()
+      .default('disconnected'),
+    reconnectCount: int('reconnectCount').notNull().default(0),
+    lastHeartbeatAt: timestamp('lastHeartbeatAt'),
+    lastHeartbeatCounter: int('lastHeartbeatCounter'),
+    messagesReceived: int('messagesReceived').notNull().default(0),
+    messagesRejected: int('messagesRejected').notNull().default(0),
+    failureReason: varchar('failureReason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    stateIdx: index('stream_sessions_state_idx').on(t.state),
+    groupIdx: index('stream_sessions_group_idx').on(t.connectionGroup),
+  }),
+);
+
+export const marketStreamSubscriptions = mysqlTable(
+  'market_stream_subscriptions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    sessionId: int('sessionId').notNull(),
+    channel: varchar('channel', { length: 32 }).notNull(),
+    productId: varchar('productId', { length: 30 }),
+    state: mysqlEnum('state', ['requested', 'acknowledged', 'closed', 'rejected'])
+      .notNull()
+      .default('requested'),
+    requestedAt: timestamp('requestedAt').notNull(),
+    acknowledgedAt: timestamp('acknowledgedAt'),
+    closedAt: timestamp('closedAt'),
+    failureReason: varchar('failureReason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    sessionIdx: index('stream_subs_session_idx').on(t.sessionId),
+    channelIdx: index('stream_subs_channel_idx').on(t.channel, t.productId),
+    sessionFk: foreignKey({
+      name: 'stream_subs_session_fk',
+      columns: [t.sessionId],
+      foreignColumns: [marketStreamSessions.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+export const marketDataEvents = mysqlTable(
+  'market_data_events',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    eventId: varchar('eventId', { length: 96 }).notNull(),
+    source: varchar('source', { length: 32 }).notNull(),
+    channel: varchar('channel', { length: 32 }).notNull(),
+    productId: varchar('productId', { length: 30 }),
+    sourceTimestamp: timestamp('sourceTimestamp', { fsp: 3 }).notNull(),
+    receivedAt: timestamp('receivedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    connectionId: int('connectionId'),
+    sequenceNumber: int('sequenceNumber'),
+    eventType: varchar('eventType', { length: 48 }).notNull(),
+    schemaVersion: varchar('schemaVersion', { length: 32 }).notNull(),
+    payloadHash: varchar('payloadHash', { length: 64 }).notNull(),
+    normalizedPayload: text('normalizedPayload').notNull(),
+    validationStatus: mysqlEnum('validationStatus', [
+      'valid',
+      'rejected_malformed',
+      'rejected_unknown',
+      'duplicate',
+    ])
+      .notNull()
+      .default('valid'),
+    failureReason: varchar('failureReason', { length: 255 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    dedupUq: uniqueIndex('market_events_dedup_uq').on(t.payloadHash),
+    channelIdx: index('market_events_channel_idx').on(t.channel, t.productId, t.sourceTimestamp),
+    sessionIdx: index('market_events_session_idx').on(t.connectionId),
+  }),
+);
+
+export const marketDataGaps = mysqlTable(
+  'market_data_gaps',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    sessionId: int('sessionId'),
+    channel: varchar('channel', { length: 32 }).notNull(),
+    productId: varchar('productId', { length: 30 }),
+    detectedAt: timestamp('detectedAt').notNull(),
+    expectedSequence: int('expectedSequence'),
+    actualSequence: int('actualSequence'),
+    lastKnownEventAt: timestamp('lastKnownEventAt'),
+    gapType: mysqlEnum('gapType', [
+      'missing_sequence',
+      'missing_heartbeat',
+      'missing_candle_bucket',
+      'stale_ticker',
+      'connection_closed',
+      'bootstrap_missing_interval',
+    ]).notNull(),
+    recoveryMethod: varchar('recoveryMethod', { length: 64 }),
+    recoveredAt: timestamp('recoveredAt'),
+    state: mysqlEnum('state', ['open', 'recovered', 'degraded', 'failed'])
+      .notNull()
+      .default('open'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    sessionIdx: index('market_gaps_session_idx').on(t.sessionId),
+    stateIdx: index('market_gaps_state_idx').on(t.state),
+    channelIdx: index('market_gaps_channel_idx').on(t.channel, t.productId),
+  }),
+);
+
+export const productMarketStates = mysqlTable(
+  'product_market_states',
+  {
+    productId: varchar('productId', { length: 30 }).primaryKey(),
+    tickerState: mysqlEnum('tickerState', ['healthy', 'stale', 'unknown'])
+      .notNull()
+      .default('unknown'),
+    candleState: mysqlEnum('candleState', [
+      'healthy',
+      'stale',
+      'incomplete_history',
+      'gap_detected',
+      'unknown',
+    ])
+      .notNull()
+      .default('unknown'),
+    tradeState: mysqlEnum('tradeState', ['healthy', 'stale', 'unknown']).notNull().default('unknown'),
+    statusState: mysqlEnum('statusState', ['online', 'offline', 'delisted', 'unknown'])
+      .notNull()
+      .default('unknown'),
+    lastTickerAt: timestamp('lastTickerAt', { fsp: 3 }),
+    lastCandleAt: timestamp('lastCandleAt', { fsp: 3 }),
+    lastTradeAt: timestamp('lastTradeAt', { fsp: 3 }),
+    lastStatusAt: timestamp('lastStatusAt', { fsp: 3 }),
+    latestPrice: decimal('latestPrice', { precision: 20, scale: 8 }),
+    currentCandleStart: timestamp('currentCandleStart', { fsp: 3 }),
+    dataQualityState: mysqlEnum('dataQualityState', [
+      'healthy',
+      'stale',
+      'incomplete_history',
+      'gap_detected',
+      'desynchronized',
+      'invalid_value',
+      'product_unavailable',
+      'connection_degraded',
+    ])
+      .notNull()
+      .default('incomplete_history'),
+    dataVersion: varchar('dataVersion', { length: 32 }).notNull().default('p1_2-1'),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow().onUpdateNow(),
+  },
+  (t) => ({
+    qualityIdx: index('product_states_quality_idx').on(t.dataQualityState),
+  }),
+);
+
+export const candleObservations = mysqlTable(
+  'candle_observations',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    granularitySeconds: int('granularitySeconds').notNull().default(300),
+    bucketStart: timestamp('bucketStart', { fsp: 3 }).notNull(),
+    open: decimal('open', { precision: 20, scale: 8 }).notNull(),
+    high: decimal('high', { precision: 20, scale: 8 }).notNull(),
+    low: decimal('low', { precision: 20, scale: 8 }).notNull(),
+    close: decimal('close', { precision: 20, scale: 8 }).notNull(),
+    volume: decimal('volume', { precision: 30, scale: 8 }).notNull(),
+    finalized: boolean('finalized').notNull().default(false),
+    finalizedAt: timestamp('finalizedAt', { fsp: 3 }),
+    sourceEventId: int('sourceEventId'),
+    sourceTimestamp: timestamp('sourceTimestamp', { fsp: 3 }).notNull(),
+    receivedAt: timestamp('receivedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    version: int('version').notNull().default(1),
+    supersedesCandleId: int('supersedesCandleId'),
+    correctionReason: varchar('correctionReason', { length: 128 }),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    bucketVersionUq: uniqueIndex('candles_bucket_version_uq').on(
+      t.productId,
+      t.granularitySeconds,
+      t.bucketStart,
+      t.version,
+    ),
+    productBucketIdx: index('candles_product_bucket_idx').on(t.productId, t.bucketStart),
+  }),
+);
+
+export const tickerObservations = mysqlTable(
+  'ticker_observations',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    price: decimal('price', { precision: 20, scale: 8 }).notNull(),
+    bestBid: decimal('bestBid', { precision: 20, scale: 8 }),
+    bestAsk: decimal('bestAsk', { precision: 20, scale: 8 }),
+    spreadBps: decimal('spreadBps', { precision: 10, scale: 4 }),
+    sourceTimestamp: timestamp('sourceTimestamp', { fsp: 3 }).notNull(),
+    receivedAt: timestamp('receivedAt', { fsp: 3 }).notNull(),
+    sourceEventId: int('sourceEventId'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    productTimeIdx: index('ticker_product_time_idx').on(t.productId, t.sourceTimestamp),
+  }),
+);
+
+export const marketTradeObservations = mysqlTable(
+  'market_trade_observations',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    tradeId: varchar('tradeId', { length: 64 }).notNull(),
+    price: decimal('price', { precision: 20, scale: 8 }).notNull(),
+    size: decimal('size', { precision: 30, scale: 8 }).notNull(),
+    side: mysqlEnum('side', ['BUY', 'SELL']).notNull(),
+    sourceTimestamp: timestamp('sourceTimestamp', { fsp: 3 }).notNull(),
+    receivedAt: timestamp('receivedAt', { fsp: 3 }).notNull(),
+    sourceEventId: int('sourceEventId'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    dedupUq: uniqueIndex('market_trades_dedup_uq').on(t.productId, t.tradeId),
+    productTimeIdx: index('market_trades_product_time_idx').on(t.productId, t.sourceTimestamp),
+  }),
+);
+
+export const shadowOperationRuns = mysqlTable(
+  'shadow_operation_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    reportedAt: timestamp('reportedAt').notNull(),
+    windowStart: timestamp('windowStart').notNull(),
+    windowEnd: timestamp('windowEnd').notNull(),
+    activeConnections: int('activeConnections').notNull().default(0),
+    healthyConnections: int('healthyConnections').notNull().default(0),
+    reconnectCount: int('reconnectCount').notNull().default(0),
+    heartbeatGaps: int('heartbeatGaps').notNull().default(0),
+    healthyProductCount: int('healthyProductCount').notNull().default(0),
+    staleProductCount: int('staleProductCount').notNull().default(0),
+    scannerRuns: int('scannerRuns').notNull().default(0),
+    scannerFailures: int('scannerFailures').notNull().default(0),
+    candidateCount: int('candidateCount').notNull().default(0),
+    approvedPlanCount: int('approvedPlanCount').notNull().default(0),
+    openPositions: int('openPositions').notNull().default(0),
+    reconciliationStatus: varchar('reconciliationStatus', { length: 32 }).notNull(),
+    createOrderFunctionInvocations: int('createOrderFunctionInvocations').notNull().default(0),
+    createOrderAttemptCount: int('createOrderAttemptCount').notNull().default(0),
+    createOrderNetworkCount: int('createOrderNetworkCount').notNull().default(0),
+    notes: text('notes'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    timeIdx: index('shadow_operation_time_idx').on(t.reportedAt),
+  }),
+);
+
+export const shadowDailyReports = mysqlTable(
+  'shadow_daily_reports',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    reportDate: timestamp('reportDate').notNull(),
+    productsEvaluated: int('productsEvaluated').notNull().default(0),
+    completeChains: int('completeChains').notNull().default(0),
+    rejectedChains: int('rejectedChains').notNull().default(0),
+    candidatesReversion: int('candidatesReversion').notNull().default(0),
+    candidatesBreakout: int('candidatesBreakout').notNull().default(0),
+    candidatesMacro: int('candidatesMacro').notNull().default(0),
+    approvedPlans: int('approvedPlans').notNull().default(0),
+    simulatedFills: int('simulatedFills').notNull().default(0),
+    partialFills: int('partialFills').notNull().default(0),
+    completedRoundTrips: int('completedRoundTrips').notNull().default(0),
+    grossPnl: decimal('grossPnl', { precision: 20, scale: 8 }).notNull().default('0'),
+    feesPaid: decimal('feesPaid', { precision: 20, scale: 8 }).notNull().default('0'),
+    modeledSpread: decimal('modeledSpread', { precision: 20, scale: 8 }).notNull().default('0'),
+    modeledSlippage: decimal('modeledSlippage', { precision: 20, scale: 8 }).notNull().default('0'),
+    netPnl: decimal('netPnl', { precision: 20, scale: 8 }).notNull().default('0'),
+    forecastCostError: decimal('forecastCostError', { precision: 20, scale: 8 }).notNull().default('0'),
+    accountingDifference: decimal('accountingDifference', { precision: 20, scale: 8 }).notNull().default('0'),
+    unresolvedLineage: int('unresolvedLineage').notNull().default(0),
+    unprotectedExposure: int('unprotectedExposure').notNull().default(0),
+    missingAttribution: int('missingAttribution').notNull().default(0),
+    webSocketUptimePct: decimal('webSocketUptimePct', { precision: 6, scale: 3 }).notNull().default('0'),
+    detectedGaps: int('detectedGaps').notNull().default(0),
+    createOrderFunctionInvocations: int('createOrderFunctionInvocations').notNull().default(0),
+    createOrderAttemptCount: int('createOrderAttemptCount').notNull().default(0),
+    createOrderNetworkCount: int('createOrderNetworkCount').notNull().default(0),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    dateUq: uniqueIndex('shadow_daily_date_uq').on(t.reportDate),
+  }),
+);
+
+export const forwardOutcomeLabels = mysqlTable(
+  'forward_outcome_labels',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    mode: mysqlEnum('mode', ['reversion', 'breakout', 'macro']).notNull(),
+    decisionOutcome: mysqlEnum('decisionOutcome', ['accepted', 'rejected']).notNull(),
+    decisionCompletedAt: timestamp('decisionCompletedAt', { fsp: 3 }).notNull(),
+    targetPrice: decimal('targetPrice', { precision: 20, scale: 8 }).notNull(),
+    stopPrice: decimal('stopPrice', { precision: 20, scale: 8 }).notNull(),
+    hypotheticalBase: decimal('hypotheticalBase', { precision: 20, scale: 8 }).notNull(),
+    entryReference: decimal('entryReference', { precision: 20, scale: 8 }).notNull(),
+    tpFirst: boolean('tpFirst'),
+    slFirst: boolean('slFirst'),
+    timeout: boolean('timeout'),
+    ambiguous: boolean('ambiguous'),
+    maxFavorableExcursion: decimal('maxFavorableExcursion', { precision: 20, scale: 8 }),
+    maxAdverseExcursion: decimal('maxAdverseExcursion', { precision: 20, scale: 8 }),
+    timeToTpMs: int('timeToTpMs'),
+    timeToSlMs: int('timeToSlMs'),
+    grossHypotheticalResult: decimal('grossHypotheticalResult', { precision: 20, scale: 8 }),
+    netHypotheticalResult: decimal('netHypotheticalResult', { precision: 20, scale: 8 }),
+    forecastCost: decimal('forecastCost', { precision: 20, scale: 8 }),
+    realizedSimulatedCost: decimal('realizedSimulatedCost', { precision: 20, scale: 8 }),
+    labelStatus: mysqlEnum('labelStatus', ['pending', 'labeled', 'ambiguous', 'timeout', 'error'])
+      .notNull()
+      .default('pending'),
+    firstEventAt: timestamp('firstEventAt', { fsp: 3 }),
+    lastEventAt: timestamp('lastEventAt', { fsp: 3 }),
+    labelerVersion: varchar('labelerVersion', { length: 32 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow().onUpdateNow(),
+  },
+  (t) => ({
+    chainUq: uniqueIndex('forward_labels_chain_uq').on(t.decisionChainId),
+    statusIdx: index('forward_labels_status_idx').on(t.labelStatus),
+    productIdx: index('forward_labels_product_idx').on(t.productId, t.decisionCompletedAt),
+    chainFk: foreignKey({
+      name: 'forward_labels_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    })
+      .onDelete('restrict')
+      .onUpdate('restrict'),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -1695,6 +2065,28 @@ export type PostFillRevalidationRow = typeof postFillRevalidations.$inferSelect;
 export type PostFillRevalidationInsert = typeof postFillRevalidations.$inferInsert;
 export type ShadowCertificationRunRow = typeof shadowCertificationRuns.$inferSelect;
 export type ShadowCertificationRunInsert = typeof shadowCertificationRuns.$inferInsert;
+export type MarketStreamSessionRow = typeof marketStreamSessions.$inferSelect;
+export type MarketStreamSessionInsert = typeof marketStreamSessions.$inferInsert;
+export type MarketStreamSubscriptionRow = typeof marketStreamSubscriptions.$inferSelect;
+export type MarketStreamSubscriptionInsert = typeof marketStreamSubscriptions.$inferInsert;
+export type MarketDataEventRow = typeof marketDataEvents.$inferSelect;
+export type MarketDataEventInsert = typeof marketDataEvents.$inferInsert;
+export type MarketDataGapRow = typeof marketDataGaps.$inferSelect;
+export type MarketDataGapInsert = typeof marketDataGaps.$inferInsert;
+export type ProductMarketStateRow = typeof productMarketStates.$inferSelect;
+export type ProductMarketStateInsert = typeof productMarketStates.$inferInsert;
+export type CandleObservationRow = typeof candleObservations.$inferSelect;
+export type CandleObservationInsert = typeof candleObservations.$inferInsert;
+export type TickerObservationRow = typeof tickerObservations.$inferSelect;
+export type TickerObservationInsert = typeof tickerObservations.$inferInsert;
+export type MarketTradeObservationRow = typeof marketTradeObservations.$inferSelect;
+export type MarketTradeObservationInsert = typeof marketTradeObservations.$inferInsert;
+export type ShadowOperationRunRow = typeof shadowOperationRuns.$inferSelect;
+export type ShadowOperationRunInsert = typeof shadowOperationRuns.$inferInsert;
+export type ShadowDailyReportRow = typeof shadowDailyReports.$inferSelect;
+export type ShadowDailyReportInsert = typeof shadowDailyReports.$inferInsert;
+export type ForwardOutcomeLabelRow = typeof forwardOutcomeLabels.$inferSelect;
+export type ForwardOutcomeLabelInsert = typeof forwardOutcomeLabels.$inferInsert;
 export type FillRow = typeof fills.$inferSelect;
 export type FillInsert = typeof fills.$inferInsert;
 export type PositionRow = typeof positions.$inferSelect;

@@ -39,6 +39,18 @@ export async function resetDatabase(): Promise<void> {
       'shadow_certification_runs',
       'post_fill_revalidations',
       'shadow_execution_plans',
+      // Phase 1.2 additions — child first.
+      'shadow_daily_reports',
+      'shadow_operation_runs',
+      'forward_outcome_labels',
+      'market_trade_observations',
+      'ticker_observations',
+      'candle_observations',
+      'product_market_states',
+      'market_data_gaps',
+      'market_data_events',
+      'market_stream_subscriptions',
+      'market_stream_sessions',
       // Phase 1.1.b additions.
       'execution_fences',
       'reconciliation_runs',

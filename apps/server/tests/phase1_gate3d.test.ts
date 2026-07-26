@@ -937,7 +937,9 @@ describe('Gate 3D integrated shadow execution', () => {
         WHERE table_schema=DATABASE() AND table_name LIKE 'shadow_%'`,
     )) as unknown as [{ c: number }[], unknown];
     const arr = Array.isArray(rows[0]) ? rows[0] : (rows as unknown as { c: number }[]);
-    expect(Number(arr[0]?.c)).toBe(2);
+    // Gate 3D added shadow_execution_plans + shadow_certification_runs (2).
+    // Phase 1.2 added shadow_operation_runs + shadow_daily_reports.
+    expect(Number(arr[0]?.c)).toBeGreaterThanOrEqual(2);
   });
 
   it('36. DRY_RUN=true (test env default)', async () => {
