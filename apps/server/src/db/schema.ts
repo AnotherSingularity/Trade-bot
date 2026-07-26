@@ -4281,6 +4281,631 @@ export const championMicrostructureComparisons = mysqlTable(
 );
 
 // ---------------------------------------------------------------------------
+// Phase 2E — contextual risk + veto observer
+// ---------------------------------------------------------------------------
+
+const CTX_PROVIDER_FAMILIES = [
+  'funding',
+  'derivatives_positioning',
+  'cross_exchange_premium',
+  'exchange_flows',
+  'token_unlocks',
+  'etf_flows',
+  'stablecoin_flows',
+  'sentiment',
+  'sector_rotation',
+  'macro_calendar',
+  'market_risk_calendar',
+  'cross_exchange_dislocation',
+] as const;
+
+const CTX_STATUS_VALUES = ['draft', 'observer', 'validated_for_research', 'deprecated', 'disabled'] as const;
+const CTX_AUTHORITY_VALUES = ['informational', 'low', 'medium', 'high', 'hard_veto'] as const;
+const CTX_SCOPE_VALUES = ['global', 'sector', 'product', 'event'] as const;
+const CTX_HEALTH_VALUES = [
+  'healthy',
+  'degraded',
+  'stale',
+  'conflicted',
+  'unavailable',
+  'disabled',
+  'schema_mismatch',
+  'clock_skew',
+  'authentication_failure',
+  'rate_limited',
+] as const;
+const CTX_SIGNAL_STATUS_VALUES = [
+  'valid',
+  'low_confidence',
+  'insufficient_history',
+  'stale',
+  'unavailable',
+  'invalid_input',
+  'numerical_failure',
+  'provider_degraded',
+  'conflicted',
+  'unsupported',
+] as const;
+const CTX_DIRECTION_VALUES = ['supportive', 'neutral', 'adverse', 'conflicted', 'unknown'] as const;
+const CTX_DECISION_VALUES = ['no_op', 'reduce', 'reject', 'abstain', 'data_failure'] as const;
+const CTX_AGREEMENT_VALUES = [
+  'agree',
+  'context_reduced',
+  'context_rejected',
+  'context_abstained',
+  'context_failed',
+  'unresolved',
+] as const;
+const CTX_ENSEMBLE_VOTE_VALUES = ['supportive', 'neutral', 'adverse', 'veto', 'abstain', 'missing', 'conflicted'] as const;
+const CTX_INCIDENT_TYPES = [
+  'provider_outage',
+  'provider_stale',
+  'provider_conflict',
+  'schema_mismatch',
+  'clock_skew',
+  'unexpected_value',
+  'authentication_failure',
+  'rate_limit',
+  'manual_disable',
+  'signal_failure',
+  'policy_failure',
+] as const;
+const CTX_INCIDENT_SEVERITY = ['informational', 'degraded', 'high', 'blocking'] as const;
+const MACRO_EVENT_KINDS = ['fomc', 'cpi', 'jobs_report', 'regulatory_announcement', 'exchange_maintenance', 'other'] as const;
+const MACRO_EVENT_STATES = ['outside_window', 'pre_event_window', 'event_window', 'post_event_window', 'unknown'] as const;
+
+export const contextProviderDefinitions = mysqlTable(
+  'context_provider_definitions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    providerKey: varchar('providerKey', { length: 64 }).notNull(),
+    providerVersion: varchar('providerVersion', { length: 32 }).notNull(),
+    providerFamily: mysqlEnum('providerFamily', CTX_PROVIDER_FAMILIES).notNull(),
+    description: text('description').notNull(),
+    expectedSchemaVersion: varchar('expectedSchemaVersion', { length: 32 }).notNull(),
+    expectedUpdateIntervalMs: int('expectedUpdateIntervalMs').notNull(),
+    maximumStalenessMs: int('maximumStalenessMs').notNull(),
+    authorityLevel: mysqlEnum('authorityLevel', CTX_AUTHORITY_VALUES).notNull(),
+    supportedScopes: varchar('supportedScopes', { length: 255 }).notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', CTX_STATUS_VALUES).notNull().default('observer'),
+    supersedesProviderId: int('supersedesProviderId'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('ctx_prov_key_ver_uq').on(t.providerKey, t.providerVersion),
+    famIdx: index('ctx_prov_family_idx').on(t.providerFamily, t.status),
+    superFk: foreignKey({
+      name: 'ctx_prov_super_fk',
+      columns: [t.supersedesProviderId],
+      foreignColumns: [t.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const contextProviderHealth = mysqlTable(
+  'context_provider_health',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    providerDefinitionId: int('providerDefinitionId').notNull(),
+    healthState: mysqlEnum('healthState', CTX_HEALTH_VALUES).notNull(),
+    lastSuccessfulObservationAt: timestamp('lastSuccessfulObservationAt', { fsp: 3 }),
+    lastFailureAt: timestamp('lastFailureAt', { fsp: 3 }),
+    consecutiveFailures: int('consecutiveFailures').notNull().default(0),
+    stalenessAgeMs: int('stalenessAgeMs'),
+    clockSkewMs: int('clockSkewMs'),
+    observedSchemaVersion: varchar('observedSchemaVersion', { length: 32 }),
+    expectedUpdateIntervalMs: int('expectedUpdateIntervalMs'),
+    observedUpdateIntervalMs: int('observedUpdateIntervalMs'),
+    healthReason: varchar('healthReason', { length: 255 }),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    provIdx: index('ctx_prov_health_prov_idx').on(t.providerDefinitionId, t.observedAt),
+    stateIdx: index('ctx_prov_health_state_idx').on(t.healthState),
+    provFk: foreignKey({
+      name: 'ctx_prov_health_prov_fk',
+      columns: [t.providerDefinitionId],
+      foreignColumns: [contextProviderDefinitions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const contextSignalDefinitions = mysqlTable(
+  'context_signal_definitions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    signalKey: varchar('signalKey', { length: 64 }).notNull(),
+    signalVersion: varchar('signalVersion', { length: 32 }).notNull(),
+    providerDefinitionId: int('providerDefinitionId').notNull(),
+    scope: mysqlEnum('scope', CTX_SCOPE_VALUES).notNull(),
+    description: text('description').notNull(),
+    outputType: varchar('outputType', { length: 32 }).notNull(),
+    unit: varchar('unit', { length: 32 }).notNull(),
+    directionPolicy: varchar('directionPolicy', { length: 64 }).notNull(),
+    severityPolicy: varchar('severityPolicy', { length: 64 }).notNull(),
+    confidencePolicy: varchar('confidencePolicy', { length: 64 }).notNull(),
+    stalenessPolicy: varchar('stalenessPolicy', { length: 64 }).notNull(),
+    conflictPolicy: varchar('conflictPolicy', { length: 64 }).notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', CTX_STATUS_VALUES).notNull().default('observer'),
+    supersedesSignalId: int('supersedesSignalId'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('ctx_sig_key_ver_uq').on(t.signalKey, t.signalVersion),
+    provIdx: index('ctx_sig_prov_idx').on(t.providerDefinitionId),
+    provFk: foreignKey({
+      name: 'ctx_sig_prov_fk',
+      columns: [t.providerDefinitionId],
+      foreignColumns: [contextProviderDefinitions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    superFk: foreignKey({
+      name: 'ctx_sig_super_fk',
+      columns: [t.supersedesSignalId],
+      foreignColumns: [t.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const contextPolicyVersions = mysqlTable(
+  'context_policy_versions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyKey: varchar('policyKey', { length: 64 }).notNull(),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    description: text('description').notNull(),
+    status: mysqlEnum('status', CTX_STATUS_VALUES).notNull().default('observer'),
+    maximumCombinedReduction: decimal('maximumCombinedReduction', { precision: 6, scale: 4 }).notNull(),
+    hardVetoFamilies: varchar('hardVetoFamilies', { length: 1000 }).notNull(),
+    missingDataPolicy: varchar('missingDataPolicy', { length: 64 }).notNull(),
+    conflictPolicy: varchar('conflictPolicy', { length: 64 }).notNull(),
+    providerPriorityPolicy: varchar('providerPriorityPolicy', { length: 64 }).notNull(),
+    stalenessPolicy: varchar('stalenessPolicy', { length: 64 }).notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    configurationHash: varchar('configurationHash', { length: 64 }).notNull(),
+    supersedesPolicyId: int('supersedesPolicyId'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('ctx_pol_key_ver_uq').on(t.policyKey, t.policyVersion),
+    superFk: foreignKey({
+      name: 'ctx_pol_super_fk',
+      columns: [t.supersedesPolicyId],
+      foreignColumns: [t.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const contextObserverRuns = mysqlTable(
+  'context_observer_runs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    policyVersionId: int('policyVersionId').notNull(),
+    runnerVersion: varchar('runnerVersion', { length: 32 }).notNull(),
+    startedAt: timestamp('startedAt', { fsp: 3 }).notNull(),
+    completedAt: timestamp('completedAt', { fsp: 3 }),
+    productsConsidered: int('productsConsidered').notNull().default(0),
+    snapshotsPersisted: int('snapshotsPersisted').notNull().default(0),
+    notes: text('notes'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    polIdx: index('ctx_run_pol_idx').on(t.policyVersionId, t.startedAt),
+    polFk: foreignKey({
+      name: 'ctx_run_pol_fk',
+      columns: [t.policyVersionId],
+      foreignColumns: [contextPolicyVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const contextObservations = mysqlTable(
+  'context_observations',
+  {
+    id: bigint('id', { mode: 'number' }).autoincrement().primaryKey(),
+    providerDefinitionId: int('providerDefinitionId').notNull(),
+    productId: varchar('productId', { length: 30 }),
+    scope: mysqlEnum('scope', CTX_SCOPE_VALUES).notNull(),
+    sourceTimestamp: timestamp('sourceTimestamp', { fsp: 3 }).notNull(),
+    receivedAt: timestamp('receivedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    payloadHash: varchar('payloadHash', { length: 64 }).notNull(),
+    schemaVersion: varchar('schemaVersion', { length: 32 }).notNull(),
+    healthState: mysqlEnum('healthState', CTX_HEALTH_VALUES).notNull(),
+    normalizedPayload: text('normalizedPayload').notNull(),
+    rawPayloadSanitized: text('rawPayloadSanitized'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    provTsUq: uniqueIndex('ctx_obs_prov_ts_uq').on(t.providerDefinitionId, t.sourceTimestamp, t.payloadHash),
+    prodIdx: index('ctx_obs_prod_idx').on(t.productId, t.sourceTimestamp),
+    scopeIdx: index('ctx_obs_scope_idx').on(t.scope, t.sourceTimestamp),
+    provFk: foreignKey({
+      name: 'ctx_obs_prov_fk',
+      columns: [t.providerDefinitionId],
+      foreignColumns: [contextProviderDefinitions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const contextSignalValues = mysqlTable(
+  'context_signal_values',
+  {
+    id: bigint('id', { mode: 'number' }).autoincrement().primaryKey(),
+    signalDefinitionId: int('signalDefinitionId').notNull(),
+    observationId: bigint('observationId', { mode: 'number' }),
+    productId: varchar('productId', { length: 30 }),
+    scope: mysqlEnum('scope', CTX_SCOPE_VALUES).notNull(),
+    status: mysqlEnum('status', CTX_SIGNAL_STATUS_VALUES).notNull(),
+    value: decimal('value', { precision: 30, scale: 12 }),
+    unit: varchar('unit', { length: 32 }).notNull(),
+    direction: mysqlEnum('direction', CTX_DIRECTION_VALUES).notNull(),
+    severity: decimal('severity', { precision: 6, scale: 4 }).notNull(),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }).notNull(),
+    sampleCount: int('sampleCount'),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    expiresAt: timestamp('expiresAt', { fsp: 3 }),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    failureReason: varchar('failureReason', { length: 255 }),
+    diagnostics: text('diagnostics'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    sigIdx: index('ctx_sv_sig_idx').on(t.signalDefinitionId, t.observedAt),
+    prodIdx: index('ctx_sv_prod_idx').on(t.productId, t.observedAt),
+    statusIdx: index('ctx_sv_status_idx').on(t.status),
+    sigFk: foreignKey({
+      name: 'ctx_sv_sig_fk',
+      columns: [t.signalDefinitionId],
+      foreignColumns: [contextSignalDefinitions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    obsFk: foreignKey({
+      name: 'ctx_sv_obs_fk',
+      columns: [t.observationId],
+      foreignColumns: [contextObservations.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const sectorDefinitions = mysqlTable(
+  'sector_definitions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    sectorKey: varchar('sectorKey', { length: 64 }).notNull(),
+    sectorVersion: varchar('sectorVersion', { length: 32 }).notNull(),
+    description: text('description').notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', ['draft', 'observer', 'deprecated', 'disabled']).notNull().default('observer'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('sec_def_key_ver_uq').on(t.sectorKey, t.sectorVersion),
+  }),
+);
+
+export const sectorMemberships = mysqlTable(
+  'sector_memberships',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    sectorDefinitionId: int('sectorDefinitionId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    weight: decimal('weight', { precision: 10, scale: 6 }).notNull().default('1'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    memUq: uniqueIndex('sec_mem_uq').on(t.sectorDefinitionId, t.productId),
+    prodIdx: index('sec_mem_prod_idx').on(t.productId),
+    defFk: foreignKey({
+      name: 'sec_mem_def_fk',
+      columns: [t.sectorDefinitionId],
+      foreignColumns: [sectorDefinitions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const macroEventDefinitions = mysqlTable(
+  'macro_event_definitions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    eventKey: varchar('eventKey', { length: 64 }).notNull(),
+    eventVersion: varchar('eventVersion', { length: 32 }).notNull(),
+    eventKind: mysqlEnum('eventKind', MACRO_EVENT_KINDS).notNull(),
+    description: text('description').notNull(),
+    timeZone: varchar('timeZone', { length: 64 }).notNull(),
+    preWindowMs: int('preWindowMs').notNull(),
+    postWindowMs: int('postWindowMs').notNull(),
+    implementationHash: varchar('implementationHash', { length: 64 }).notNull(),
+    status: mysqlEnum('status', ['draft', 'observer', 'deprecated', 'disabled']).notNull().default('observer'),
+    supersedesEventId: int('supersedesEventId'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    keyVerUq: uniqueIndex('macro_def_key_ver_uq').on(t.eventKey, t.eventVersion),
+    superFk: foreignKey({
+      name: 'macro_def_super_fk',
+      columns: [t.supersedesEventId],
+      foreignColumns: [t.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const macroEventObservations = mysqlTable(
+  'macro_event_observations',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    eventDefinitionId: int('eventDefinitionId').notNull(),
+    scheduledAt: timestamp('scheduledAt', { fsp: 3 }).notNull(),
+    windowStart: timestamp('windowStart', { fsp: 3 }).notNull(),
+    windowEnd: timestamp('windowEnd', { fsp: 3 }).notNull(),
+    state: mysqlEnum('state', MACRO_EVENT_STATES).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    supersedesObservationId: int('supersedesObservationId'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    defIdx: index('macro_obs_def_idx').on(t.eventDefinitionId, t.observedAt),
+    defFk: foreignKey({
+      name: 'macro_obs_def_fk',
+      columns: [t.eventDefinitionId],
+      foreignColumns: [macroEventDefinitions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    superFk: foreignKey({
+      name: 'macro_obs_super_fk',
+      columns: [t.supersedesObservationId],
+      foreignColumns: [t.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const globalContextSnapshots = mysqlTable(
+  'global_context_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    observerRunId: int('observerRunId').notNull(),
+    policyVersionId: int('policyVersionId').notNull(),
+    marketRiskState: varchar('marketRiskState', { length: 64 }).notNull(),
+    macroWindowState: varchar('macroWindowState', { length: 64 }).notNull(),
+    fundingState: varchar('fundingState', { length: 64 }).notNull(),
+    premiumState: varchar('premiumState', { length: 64 }).notNull(),
+    etfFlowState: varchar('etfFlowState', { length: 64 }).notNull(),
+    stablecoinState: varchar('stablecoinState', { length: 64 }).notNull(),
+    sentimentState: varchar('sentimentState', { length: 64 }).notNull(),
+    providerHealthState: varchar('providerHealthState', { length: 64 }).notNull(),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    expiresAt: timestamp('expiresAt', { fsp: 3 }),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx: index('gctx_snap_run_idx').on(t.observerRunId, t.observedAt),
+    runFk: foreignKey({
+      name: 'gctx_snap_run_fk',
+      columns: [t.observerRunId],
+      foreignColumns: [contextObserverRuns.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    polFk: foreignKey({
+      name: 'gctx_snap_pol_fk',
+      columns: [t.policyVersionId],
+      foreignColumns: [contextPolicyVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const productContextSnapshots = mysqlTable(
+  'product_context_snapshots',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    observerRunId: int('observerRunId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    policyVersionId: int('policyVersionId').notNull(),
+    unlockState: varchar('unlockState', { length: 64 }).notNull(),
+    exchangeFlowState: varchar('exchangeFlowState', { length: 64 }).notNull(),
+    sectorState: varchar('sectorState', { length: 64 }).notNull(),
+    productPremiumState: varchar('productPremiumState', { length: 64 }).notNull(),
+    fundingState: varchar('fundingState', { length: 64 }).notNull(),
+    dislocationState: varchar('dislocationState', { length: 64 }).notNull(),
+    providerHealthState: varchar('providerHealthState', { length: 64 }).notNull(),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    expiresAt: timestamp('expiresAt', { fsp: 3 }),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    runProdUq: uniqueIndex('pctx_snap_run_prod_uq').on(t.observerRunId, t.productId),
+    prodIdx: index('pctx_snap_prod_idx').on(t.productId, t.observedAt),
+    runFk: foreignKey({
+      name: 'pctx_snap_run_fk',
+      columns: [t.observerRunId],
+      foreignColumns: [contextObserverRuns.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    polFk: foreignKey({
+      name: 'pctx_snap_pol_fk',
+      columns: [t.policyVersionId],
+      foreignColumns: [contextPolicyVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const contextEnsembleEvidence = mysqlTable(
+  'context_ensemble_evidence',
+  {
+    id: bigint('id', { mode: 'number' }).autoincrement().primaryKey(),
+    globalSnapshotId: int('globalSnapshotId'),
+    productSnapshotId: int('productSnapshotId'),
+    signalDefinitionId: int('signalDefinitionId').notNull(),
+    signalValueId: bigint('signalValueId', { mode: 'number' }),
+    vote: mysqlEnum('vote', CTX_ENSEMBLE_VOTE_VALUES).notNull(),
+    multiplierContribution: decimal('multiplierContribution', { precision: 6, scale: 4 }).notNull(),
+    authority: mysqlEnum('authority', CTX_AUTHORITY_VALUES).notNull(),
+    weight: decimal('weight', { precision: 6, scale: 4 }).notNull(),
+    reasonCode: varchar('reasonCode', { length: 64 }).notNull(),
+    diagnostics: text('diagnostics'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    globalIdx: index('ctx_ens_global_idx').on(t.globalSnapshotId),
+    productIdx: index('ctx_ens_product_idx').on(t.productSnapshotId),
+    sigIdx: index('ctx_ens_sig_idx').on(t.signalDefinitionId),
+    globalFk: foreignKey({
+      name: 'ctx_ens_global_fk',
+      columns: [t.globalSnapshotId],
+      foreignColumns: [globalContextSnapshots.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    productFk: foreignKey({
+      name: 'ctx_ens_product_fk',
+      columns: [t.productSnapshotId],
+      foreignColumns: [productContextSnapshots.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    sigFk: foreignKey({
+      name: 'ctx_ens_sig_fk',
+      columns: [t.signalDefinitionId],
+      foreignColumns: [contextSignalDefinitions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    svFk: foreignKey({
+      name: 'ctx_ens_sv_fk',
+      columns: [t.signalValueId],
+      foreignColumns: [contextSignalValues.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const candidateContextDecisions = mysqlTable(
+  'candidate_context_decisions',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    contextPolicyVersionId: int('contextPolicyVersionId').notNull(),
+    globalContextSnapshotId: int('globalContextSnapshotId'),
+    productContextSnapshotId: int('productContextSnapshotId'),
+    phase2cRiskDecisionId: int('phase2cRiskDecisionId'),
+    phase2dExecutionDecisionId: int('phase2dExecutionDecisionId'),
+    decision: mysqlEnum('decision', CTX_DECISION_VALUES).notNull(),
+    contextMultiplier: decimal('contextMultiplier', { precision: 6, scale: 4 }).notNull(),
+    warningSignals: text('warningSignals').notNull(),
+    vetoSignals: text('vetoSignals').notNull(),
+    missingSignals: text('missingSignals').notNull(),
+    conflictingSignals: text('conflictingSignals').notNull(),
+    providerHealthState: varchar('providerHealthState', { length: 64 }).notNull(),
+    confidence: decimal('confidence', { precision: 6, scale: 4 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    expiresAt: timestamp('expiresAt', { fsp: 3 }),
+    inputHash: varchar('inputHash', { length: 64 }).notNull(),
+    reasonCodes: varchar('reasonCodes', { length: 500 }).notNull(),
+    diagnostics: text('diagnostics'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainUq: uniqueIndex('cctx_dec_chain_uq').on(t.decisionChainId),
+    prodIdx: index('cctx_dec_prod_idx').on(t.productId, t.observedAt),
+    actionIdx: index('cctx_dec_action_idx').on(t.decision),
+    chainFk: foreignKey({
+      name: 'cctx_dec_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    polFk: foreignKey({
+      name: 'cctx_dec_pol_fk',
+      columns: [t.contextPolicyVersionId],
+      foreignColumns: [contextPolicyVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    globalFk: foreignKey({
+      name: 'cctx_dec_global_fk',
+      columns: [t.globalContextSnapshotId],
+      foreignColumns: [globalContextSnapshots.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    productFk: foreignKey({
+      name: 'cctx_dec_product_fk',
+      columns: [t.productContextSnapshotId],
+      foreignColumns: [productContextSnapshots.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const championContextComparisons = mysqlTable(
+  'champion_context_comparisons',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    decisionChainId: int('decisionChainId').notNull(),
+    candidateContextDecisionId: int('candidateContextDecisionId'),
+    productId: varchar('productId', { length: 30 }).notNull(),
+    championDecision: varchar('championDecision', { length: 64 }).notNull(),
+    championProposedSize: decimal('championProposedSize', { precision: 30, scale: 10 }).notNull(),
+    contextDecision: mysqlEnum('contextDecision', CTX_DECISION_VALUES).notNull(),
+    contextMultiplier: decimal('contextMultiplier', { precision: 6, scale: 4 }).notNull(),
+    observerRecommendedMaximumSize: decimal('observerRecommendedMaximumSize', { precision: 30, scale: 10 }).notNull(),
+    agreementState: mysqlEnum('agreementState', CTX_AGREEMENT_VALUES).notNull(),
+    reasonCodes: varchar('reasonCodes', { length: 500 }).notNull(),
+    policyVersion: varchar('policyVersion', { length: 32 }).notNull(),
+    observedAt: timestamp('observedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    chainUq: uniqueIndex('champ_cctx_chain_uq').on(t.decisionChainId),
+    agreeIdx: index('champ_cctx_agreement_idx').on(t.agreementState),
+    chainFk: foreignKey({
+      name: 'champ_cctx_chain_fk',
+      columns: [t.decisionChainId],
+      foreignColumns: [decisionChains.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    decFk: foreignKey({
+      name: 'champ_cctx_dec_fk',
+      columns: [t.candidateContextDecisionId],
+      foreignColumns: [candidateContextDecisions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+export const contextIncidents = mysqlTable(
+  'context_incidents',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    providerDefinitionId: int('providerDefinitionId'),
+    signalDefinitionId: int('signalDefinitionId'),
+    policyVersionId: int('policyVersionId'),
+    incidentType: mysqlEnum('incidentType', CTX_INCIDENT_TYPES).notNull(),
+    severity: mysqlEnum('severity', CTX_INCIDENT_SEVERITY).notNull(),
+    scope: mysqlEnum('scope', CTX_SCOPE_VALUES).notNull(),
+    productId: varchar('productId', { length: 30 }),
+    detectedAt: timestamp('detectedAt', { fsp: 3 }).notNull(),
+    dataAvailableAt: timestamp('dataAvailableAt', { fsp: 3 }).notNull(),
+    reasonCode: varchar('reasonCode', { length: 64 }).notNull(),
+    details: text('details'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => ({
+    typeIdx: index('ctx_inc_type_idx').on(t.incidentType, t.severity, t.detectedAt),
+    prodIdx: index('ctx_inc_prod_idx').on(t.productId, t.detectedAt),
+    provFk: foreignKey({
+      name: 'ctx_inc_prov_fk',
+      columns: [t.providerDefinitionId],
+      foreignColumns: [contextProviderDefinitions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    sigFk: foreignKey({
+      name: 'ctx_inc_sig_fk',
+      columns: [t.signalDefinitionId],
+      foreignColumns: [contextSignalDefinitions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+    polFk: foreignKey({
+      name: 'ctx_inc_pol_fk',
+      columns: [t.policyVersionId],
+      foreignColumns: [contextPolicyVersions.id],
+    }).onDelete('restrict').onUpdate('restrict'),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Type exports
 // ---------------------------------------------------------------------------
 export type BotConfigRow = typeof botConfig.$inferSelect;
@@ -4506,3 +5131,37 @@ export type MicrostructureExecutionDecisionRow = typeof microstructureExecutionD
 export type MicrostructureExecutionDecisionInsert = typeof microstructureExecutionDecisions.$inferInsert;
 export type ChampionMicrostructureComparisonRow = typeof championMicrostructureComparisons.$inferSelect;
 export type ChampionMicrostructureComparisonInsert = typeof championMicrostructureComparisons.$inferInsert;
+export type ContextProviderDefinitionRow = typeof contextProviderDefinitions.$inferSelect;
+export type ContextProviderDefinitionInsert = typeof contextProviderDefinitions.$inferInsert;
+export type ContextProviderHealthRow = typeof contextProviderHealth.$inferSelect;
+export type ContextProviderHealthInsert = typeof contextProviderHealth.$inferInsert;
+export type ContextSignalDefinitionRow = typeof contextSignalDefinitions.$inferSelect;
+export type ContextSignalDefinitionInsert = typeof contextSignalDefinitions.$inferInsert;
+export type ContextPolicyVersionRow = typeof contextPolicyVersions.$inferSelect;
+export type ContextPolicyVersionInsert = typeof contextPolicyVersions.$inferInsert;
+export type ContextObserverRunRow = typeof contextObserverRuns.$inferSelect;
+export type ContextObserverRunInsert = typeof contextObserverRuns.$inferInsert;
+export type ContextObservationRow = typeof contextObservations.$inferSelect;
+export type ContextObservationInsert = typeof contextObservations.$inferInsert;
+export type ContextSignalValueRow = typeof contextSignalValues.$inferSelect;
+export type ContextSignalValueInsert = typeof contextSignalValues.$inferInsert;
+export type SectorDefinitionRow = typeof sectorDefinitions.$inferSelect;
+export type SectorDefinitionInsert = typeof sectorDefinitions.$inferInsert;
+export type SectorMembershipRow = typeof sectorMemberships.$inferSelect;
+export type SectorMembershipInsert = typeof sectorMemberships.$inferInsert;
+export type MacroEventDefinitionRow = typeof macroEventDefinitions.$inferSelect;
+export type MacroEventDefinitionInsert = typeof macroEventDefinitions.$inferInsert;
+export type MacroEventObservationRow = typeof macroEventObservations.$inferSelect;
+export type MacroEventObservationInsert = typeof macroEventObservations.$inferInsert;
+export type GlobalContextSnapshotRow = typeof globalContextSnapshots.$inferSelect;
+export type GlobalContextSnapshotInsert = typeof globalContextSnapshots.$inferInsert;
+export type ProductContextSnapshotRow = typeof productContextSnapshots.$inferSelect;
+export type ProductContextSnapshotInsert = typeof productContextSnapshots.$inferInsert;
+export type ContextEnsembleEvidenceRow = typeof contextEnsembleEvidence.$inferSelect;
+export type ContextEnsembleEvidenceInsert = typeof contextEnsembleEvidence.$inferInsert;
+export type CandidateContextDecisionRow = typeof candidateContextDecisions.$inferSelect;
+export type CandidateContextDecisionInsert = typeof candidateContextDecisions.$inferInsert;
+export type ChampionContextComparisonRow = typeof championContextComparisons.$inferSelect;
+export type ChampionContextComparisonInsert = typeof championContextComparisons.$inferInsert;
+export type ContextIncidentRow = typeof contextIncidents.$inferSelect;
+export type ContextIncidentInsert = typeof contextIncidents.$inferInsert;

@@ -127,6 +127,13 @@
       "when": 1786900000000,
       "tag": "0017_phase2d_microstructure_observer",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1787000000000,
+      "tag": "0018_phase2e_context_observer",
+      "breakpoints": true
     }
   ]
 }

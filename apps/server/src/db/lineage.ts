@@ -2,17 +2,29 @@ import { createHash } from 'node:crypto';
 import { and, desc, eq, lte } from 'drizzle-orm';
 import { db } from './index';
 import {
+  candidateContextDecisions,
   candidateRiskDecisions,
   challengerRoutingDecisions,
   championChallengerRoutingComparisons,
+  championContextComparisons,
   championMicrostructureComparisons,
   championRiskComparisons,
   changePointEvents,
+  contextEnsembleEvidence,
+  contextIncidents,
+  contextObservations,
+  contextObserverRuns,
+  contextPolicyVersions,
+  contextProviderDefinitions,
+  contextProviderHealth,
+  contextSignalDefinitions,
+  contextSignalValues,
   decisionChains,
   eligibilityDecisions,
   executionCostObserverSnapshots,
   fingerprintEvidence,
   fingerprintSnapshots,
+  globalContextSnapshots,
   globalRegimeSnapshots,
   latentStateAssignments,
   latentStateMappings,
@@ -33,6 +45,7 @@ import {
   portfolioRiskSnapshots,
   positionRiskSnapshots,
   postFillRevalidations,
+  productContextSnapshots,
   productHygieneDecisions,
   productQuarantines,
   productRegimeSnapshots,
@@ -54,7 +67,20 @@ import {
   stressTestRuns,
   tradeFlowWindows,
   universeSnapshots,
+  type CandidateContextDecisionRow,
+  type ChampionContextComparisonRow,
   type ChampionMicrostructureComparisonRow,
+  type ContextEnsembleEvidenceRow,
+  type ContextIncidentRow,
+  type ContextObservationRow,
+  type ContextObserverRunRow,
+  type ContextPolicyVersionRow,
+  type ContextProviderDefinitionRow,
+  type ContextProviderHealthRow,
+  type ContextSignalDefinitionRow,
+  type ContextSignalValueRow,
+  type GlobalContextSnapshotRow,
+  type ProductContextSnapshotRow,
   type DecisionChainRow,
   type EligibilityDecisionRow,
   type ExecutionCostObserverSnapshotRow,
@@ -814,6 +840,28 @@ export interface ResearchObserverAggregate {
     championComparison: ChampionRiskComparisonRow | null;
   };
   microstructure: MicrostructureAggregate;
+  context: ContextAggregate;
+}
+
+/**
+ * Phase 2E §P — Context observer aggregate for the audit route.
+ *
+ * Loads INDEPENDENTLY of Phase 2A/2B/2C/2D records.
+ */
+export interface ContextAggregate {
+  observerRun: ContextObserverRunRow | null;
+  policyVersion: ContextPolicyVersionRow | null;
+  providerDefinitions: ContextProviderDefinitionRow[];
+  providerHealth: ContextProviderHealthRow[];
+  observations: ContextObservationRow[];
+  signalDefinitions: ContextSignalDefinitionRow[];
+  signalValues: ContextSignalValueRow[];
+  globalSnapshot: GlobalContextSnapshotRow | null;
+  productSnapshot: ProductContextSnapshotRow | null;
+  ensembleEvidence: ContextEnsembleEvidenceRow[];
+  candidateDecision: CandidateContextDecisionRow | null;
+  championComparison: ChampionContextComparisonRow | null;
+  incidents: ContextIncidentRow[];
 }
 
 /**
@@ -851,10 +899,11 @@ async function loadResearchObserverChain(
     .orderBy(desc(universeSnapshots.observedAt))
     .limit(1);
   if (!snapshot) {
-    // No Phase 2A universe snapshot exists, but Phase 2C/2D data may still
+    // No Phase 2A universe snapshot exists, but Phase 2C/2D/2E data may still
     // be present. Load them independently.
     const portfolioRisk = await loadPortfolioRiskForChain(chain.id);
     const microstructure = await loadMicrostructureForChain(chain.id);
+    const context = await loadContextForChain(chain.id);
     return {
       snapshot: null,
       hygiene: null,
@@ -874,6 +923,7 @@ async function loadResearchObserverChain(
       championComparison: null,
       portfolioRisk,
       microstructure,
+      context,
     };
   }
   const [hygiene] = await db
@@ -1013,6 +1063,7 @@ async function loadResearchObserverChain(
 
   const portfolioRisk = await loadPortfolioRiskForChain(chain.id);
   const microstructure = await loadMicrostructureForChain(chain.id);
+  const context = await loadContextForChain(chain.id);
 
   return {
     snapshot,
@@ -1033,6 +1084,136 @@ async function loadResearchObserverChain(
     championComparison: championComparison ?? null,
     portfolioRisk,
     microstructure,
+    context,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2E §P — Context aggregate loader.
+// Loads independently: the chain may exist without any Phase 2A/2B/2C/2D
+// observer records.
+// ---------------------------------------------------------------------------
+
+async function loadContextForChain(chainId: number): Promise<ContextAggregate> {
+  const empty: ContextAggregate = {
+    observerRun: null,
+    policyVersion: null,
+    providerDefinitions: [],
+    providerHealth: [],
+    observations: [],
+    signalDefinitions: [],
+    signalValues: [],
+    globalSnapshot: null,
+    productSnapshot: null,
+    ensembleEvidence: [],
+    candidateDecision: null,
+    championComparison: null,
+    incidents: [],
+  };
+  const [decision] = await db
+    .select()
+    .from(candidateContextDecisions)
+    .where(eq(candidateContextDecisions.decisionChainId, chainId))
+    .limit(1);
+  const [comparison] = await db
+    .select()
+    .from(championContextComparisons)
+    .where(eq(championContextComparisons.decisionChainId, chainId))
+    .limit(1);
+  if (!decision && !comparison) return empty;
+  let policyVersion: ContextPolicyVersionRow | null = null;
+  let globalSnapshot: GlobalContextSnapshotRow | null = null;
+  let productSnapshot: ProductContextSnapshotRow | null = null;
+  let observerRun: ContextObserverRunRow | null = null;
+  if (decision) {
+    const [pv] = await db.select().from(contextPolicyVersions).where(eq(contextPolicyVersions.id, decision.contextPolicyVersionId)).limit(1);
+    policyVersion = pv ?? null;
+    if (decision.globalContextSnapshotId) {
+      const [gs] = await db.select().from(globalContextSnapshots).where(eq(globalContextSnapshots.id, decision.globalContextSnapshotId)).limit(1);
+      globalSnapshot = gs ?? null;
+      if (gs) {
+        const [run] = await db.select().from(contextObserverRuns).where(eq(contextObserverRuns.id, gs.observerRunId)).limit(1);
+        observerRun = run ?? null;
+      }
+    }
+    if (decision.productContextSnapshotId) {
+      const [ps] = await db.select().from(productContextSnapshots).where(eq(productContextSnapshots.id, decision.productContextSnapshotId)).limit(1);
+      productSnapshot = ps ?? null;
+      if (!observerRun && ps) {
+        const [run] = await db.select().from(contextObserverRuns).where(eq(contextObserverRuns.id, ps.observerRunId)).limit(1);
+        observerRun = run ?? null;
+      }
+    }
+  }
+  let ensembleEvidence: ContextEnsembleEvidenceRow[] = [];
+  if (globalSnapshot || productSnapshot) {
+    if (globalSnapshot) {
+      const g = await db.select().from(contextEnsembleEvidence).where(eq(contextEnsembleEvidence.globalSnapshotId, globalSnapshot.id));
+      ensembleEvidence = ensembleEvidence.concat(g);
+    }
+    if (productSnapshot) {
+      const p = await db.select().from(contextEnsembleEvidence).where(eq(contextEnsembleEvidence.productSnapshotId, productSnapshot.id));
+      ensembleEvidence = ensembleEvidence.concat(p);
+    }
+  }
+  // Resolve every signal definition + value referenced by the evidence.
+  let signalDefinitions: ContextSignalDefinitionRow[] = [];
+  let signalValues: ContextSignalValueRow[] = [];
+  if (ensembleEvidence.length > 0) {
+    const sigDefIds = Array.from(new Set(ensembleEvidence.map((e) => e.signalDefinitionId)));
+    const sigValueIds = Array.from(new Set(ensembleEvidence.map((e) => e.signalValueId).filter((v): v is number => v != null)));
+    for (const id of sigDefIds) {
+      const [d] = await db.select().from(contextSignalDefinitions).where(eq(contextSignalDefinitions.id, id)).limit(1);
+      if (d) signalDefinitions.push(d);
+    }
+    for (const id of sigValueIds) {
+      const [v] = await db.select().from(contextSignalValues).where(eq(contextSignalValues.id, id)).limit(1);
+      if (v) signalValues.push(v);
+    }
+  }
+  // Resolve provider definitions referenced by signal definitions.
+  let providerDefinitions: ContextProviderDefinitionRow[] = [];
+  let providerHealth: ContextProviderHealthRow[] = [];
+  let observations: ContextObservationRow[] = [];
+  if (signalDefinitions.length > 0) {
+    const providerIds = Array.from(new Set(signalDefinitions.map((d) => d.providerDefinitionId)));
+    for (const id of providerIds) {
+      const [p] = await db.select().from(contextProviderDefinitions).where(eq(contextProviderDefinitions.id, id)).limit(1);
+      if (p) providerDefinitions.push(p);
+      const h = await db
+        .select()
+        .from(contextProviderHealth)
+        .where(eq(contextProviderHealth.providerDefinitionId, id))
+        .orderBy(desc(contextProviderHealth.observedAt))
+        .limit(5);
+      providerHealth = providerHealth.concat(h);
+    }
+    // Observations referenced by the signal values.
+    const obsIds = Array.from(new Set(signalValues.map((v) => v.observationId).filter((v): v is number => v != null)));
+    for (const id of obsIds) {
+      const [o] = await db.select().from(contextObservations).where(eq(contextObservations.id, id)).limit(1);
+      if (o) observations.push(o);
+    }
+  }
+  const incidents = await db
+    .select()
+    .from(contextIncidents)
+    .where(eq(contextIncidents.productId, decision?.productId ?? '__none__'))
+    .orderBy(desc(contextIncidents.detectedAt));
+  return {
+    observerRun,
+    policyVersion,
+    providerDefinitions,
+    providerHealth,
+    observations,
+    signalDefinitions,
+    signalValues,
+    globalSnapshot,
+    productSnapshot,
+    ensembleEvidence,
+    candidateDecision: decision ?? null,
+    championComparison: comparison ?? null,
+    incidents,
   };
 }
 
