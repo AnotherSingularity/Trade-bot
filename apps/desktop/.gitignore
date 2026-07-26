@@ -1,0 +1,6 @@
+# Local overrides for apps/desktop — the repo-root .gitignore excludes
+# `build/` because it's a Vite/Rollup artifact directory elsewhere.
+# The desktop workspace uses `build/` as a source directory for the
+# electron-builder scripts, so we un-ignore its contents here.
+!build/
+!build/**

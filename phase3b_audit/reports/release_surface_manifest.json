@@ -1,0 +1,146 @@
+{
+  "generatedAt": "2026-07-26T15:45:00Z",
+  "purpose": "Phase 3B active release-surface manifest",
+  "reporting": {
+    "active": "desktop/server release surface: verified",
+    "mobile": "mobile companion workspace: deferred, non-blocking"
+  },
+  "activeWorkspaces": [
+    {
+      "path": "apps/server",
+      "name": "server",
+      "version": "2.0.0",
+      "private": true,
+      "fileCountsByExtension": {
+        "dockerignore": 1,
+        "env": 1,
+        "example": 1,
+        "local": 1,
+        "md": 9,
+        "yml": 1,
+        "json": 45,
+        "sql": 21,
+        "ts": 186
+      },
+      "scripts": [
+        "build",
+        "db:generate",
+        "db:migrate",
+        "db:push",
+        "dev",
+        "lint",
+        "migrate",
+        "start",
+        "test",
+        "test:watch",
+        "typecheck"
+      ],
+      "productionDependencyCount": 13,
+      "devDependencyCount": 11
+    },
+    {
+      "path": "apps/desktop",
+      "name": "@horizon/desktop",
+      "version": "3.0.0",
+      "private": true,
+      "fileCountsByExtension": {
+        "gitignore": 1,
+        "ts": 28,
+        "nsh": 1,
+        "txt": 1,
+        "json": 5,
+        "md": 1,
+        "tsx": 26,
+        "html": 1,
+        "css": 1
+      },
+      "scripts": [
+        "build",
+        "build:main",
+        "build:preload",
+        "build:renderer",
+        "dev:main",
+        "dev:renderer",
+        "lint",
+        "package:win",
+        "test",
+        "typecheck"
+      ],
+      "productionDependencyCount": 8,
+      "devDependencyCount": 10
+    },
+    {
+      "path": "packages/shared",
+      "name": "@horizon/shared",
+      "version": "2.0.0",
+      "private": true,
+      "fileCountsByExtension": {
+        "json": 2,
+        "ts": 4
+      },
+      "scripts": [
+        "build",
+        "lint",
+        "test",
+        "typecheck"
+      ],
+      "productionDependencyCount": 0,
+      "devDependencyCount": 1
+    }
+  ],
+  "deferredWorkspaces": [
+    {
+      "path": "apps/mobile",
+      "name": "mobile",
+      "version": "2.0.0",
+      "private": true,
+      "fileCountsByExtension": {
+        "md": 1,
+        "tsx": 19,
+        "ts": 12,
+        "js": 2,
+        "json": 3
+      },
+      "scripts": [
+        "android",
+        "build",
+        "dev",
+        "export",
+        "ios",
+        "lint",
+        "test",
+        "typecheck"
+      ],
+      "productionDependencyCount": 19,
+      "devDependencyCount": 2
+    }
+  ],
+  "infrastructureFiles": [
+    "docker-compose.yml",
+    "docker-compose.prod.yml",
+    "turbo.json",
+    "package.json",
+    "package-lock.json",
+    ".github/workflows/desktop-windows.yml",
+    ".github/workflows/test.yml",
+    ".github/workflows/deploy.yml"
+  ],
+  "documentationFiles": [
+    "README.md",
+    "DEPLOY.md",
+    "CHANGELOG.md"
+  ],
+  "migrationsPath": "apps/server/drizzle/migrations",
+  "windowsInstallerConfig": "apps/desktop/installer",
+  "windowsCiWorkflow": ".github/workflows/desktop-windows.yml",
+  "releaseScripts": [
+    "apps/desktop/build/generate-build-manifest.ts"
+  ],
+  "operationalRunbooksPath": "docs/runbooks",
+  "invariants": {
+    "DRY_RUN": true,
+    "ORDER_SUBMISSION_ENABLED": false,
+    "liveOrderSubmissionDisabled": true,
+    "mobileWorkspaceDeferred": true
+  }
+}

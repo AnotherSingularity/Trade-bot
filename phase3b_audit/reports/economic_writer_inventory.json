@@ -1,0 +1,321 @@
+{
+  "generatedAt": "2026-07-26T15:45:00Z",
+  "scope": "apps/server/src",
+  "totalCandidateWriters": 35,
+  "distinctEconomicTables": 11,
+  "observerWriters": 0,
+  "reconciliationWriters": 3,
+  "byTable": {
+    "outcomeLabels": [
+      {
+        "file": "apps/server/src/db/lineage.ts",
+        "line": 591,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/lineage.ts",
+        "line": 651,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      }
+    ],
+    "positions": [
+      {
+        "file": "apps/server/src/db/queries.ts",
+        "line": 206,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/queries.ts",
+        "line": 218,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/queries.ts",
+        "line": 227,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/tx.ts",
+        "line": 138,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/tx.ts",
+        "line": 156,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/tx.ts",
+        "line": 721,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/tx.ts",
+        "line": 764,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/trading/protection/instance.ts",
+        "line": 231,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      }
+    ],
+    "orderIntents": [
+      {
+        "file": "apps/server/src/db/queries.ts",
+        "line": 239,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/queries.ts",
+        "line": 247,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/tx.ts",
+        "line": 147,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/trading/shadow/simulator.ts",
+        "line": 108,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      }
+    ],
+    "fills": [
+      {
+        "file": "apps/server/src/db/queries.ts",
+        "line": 322,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/tx.ts",
+        "line": 133,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/tx.ts",
+        "line": 313,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      }
+    ],
+    "roundTrips": [
+      {
+        "file": "apps/server/src/db/queries.ts",
+        "line": 379,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/tx.ts",
+        "line": 162,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      }
+    ],
+    "cashLedger": [
+      {
+        "file": "apps/server/src/db/queries.ts",
+        "line": 450,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/queries.ts",
+        "line": 475,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/db/tx.ts",
+        "line": 90,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      }
+    ],
+    "protectionInstances": [
+      {
+        "file": "apps/server/src/trading/protection/instance.ts",
+        "line": 73,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/trading/protection/instance.ts",
+        "line": 146,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/trading/protection/instance.ts",
+        "line": 298,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/trading/protection/instance.ts",
+        "line": 376,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/trading/protection/instance.ts",
+        "line": 419,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      }
+    ],
+    "reconciliationRuns": [
+      {
+        "file": "apps/server/src/trading/reconciliationJournal.ts",
+        "line": 75,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": true,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/trading/reconciliationJournal.ts",
+        "line": 88,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": true,
+        "testRoot": false
+      }
+    ],
+    "reconciliationActions": [
+      {
+        "file": "apps/server/src/trading/reconciliationJournal.ts",
+        "line": 106,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": true,
+        "testRoot": false
+      }
+    ],
+    "shadowExecutionPlans": [
+      {
+        "file": "apps/server/src/trading/shadow/authorization.ts",
+        "line": 255,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/trading/shadow/executionPlan.ts",
+        "line": 70,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/trading/shadow/executionPlan.ts",
+        "line": 113,
+        "method": "update",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      }
+    ],
+    "postFillRevalidations": [
+      {
+        "file": "apps/server/src/trading/shadow/postFillRevalidation.ts",
+        "line": 111,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      },
+      {
+        "file": "apps/server/src/trading/shadow/postFillRevalidation.ts",
+        "line": 168,
+        "method": "insert",
+        "observerRoot": false,
+        "reconciliationRoot": false,
+        "testRoot": false
+      }
+    ]
+  },
+  "reviewRules": [
+    "Every champion economic writer has one authorized purpose.",
+    "Every economic write retains exact lineage.",
+    "Observer modules cannot call champion writers.",
+    "Reconciliation uses the same entry and exit economic functions as normal processing.",
+    "No unattributed ledger writer exists.",
+    "No unknown plan or intent writer exists.",
+    "No duplicate economic path exists."
+  ]
+}

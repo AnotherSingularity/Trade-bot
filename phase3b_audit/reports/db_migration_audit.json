@@ -1,0 +1,333 @@
+{
+  "generatedAt": "2026-07-26T15:45:00Z",
+  "migrationCount": 21,
+  "snapshotCount": 21,
+  "fingerprintCount": 21,
+  "journalIdxCount": 21,
+  "migrationEntries": [
+    {
+      "file": "apps/server/drizzle/migrations/0000_init.sql",
+      "sha256": "01a14a955f3463ed3fa4b0f7b4a43438140363eb2262eda1846536101ce4a361",
+      "bytes": 2512
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0001_phase0_execution_safety.sql",
+      "sha256": "e0e156129ae7a7810750e67570fc4d87c094b68e41fd6403cfb425032c8b6ec5",
+      "bytes": 7385
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0002_phase1_slice1_immutable_decisions.sql",
+      "sha256": "cc9f6e49e1a320d1b24d363ef67c2e704f842786d75b07da53997b188f10f681",
+      "bytes": 7179
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0003_phase1_1a_atomicity_and_invariants.sql",
+      "sha256": "bfdfd34301c1ef086cb320eb903e0257f182ad7c094f5836467e63e676e1d66e",
+      "bytes": 2218
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0004_phase1_1a_fix_fencing_and_race_safe_exits.sql",
+      "sha256": "62fdc5ac1f6121773bc8d846af7efe032e717e8f39b9ed7e218a4e7ac8c71f29",
+      "bytes": 3256
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0005_phase1_1b_authoritative_fence_and_preview_binding.sql",
+      "sha256": "6da341bbdb61654a2ac9a9968275ef07aecc37a706dd8d5604a6e41aaa50d5a7",
+      "bytes": 5497
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0006_phase1_gate2_decision_lineage.sql",
+      "sha256": "d448112fc5821c974f9a07e8cd0f7f7ef089ddb88484782bb565ca7fc8a1c3ff",
+      "bytes": 14835
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0007_phase1_gate3a_exit_completion.sql",
+      "sha256": "dc61c1f35b76c4a8204182df73ff54d030a5975ecc9c2bfa62d172519924eb57",
+      "bytes": 2297
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0008_phase1_gate3b_cash_flow_cost_model.sql",
+      "sha256": "24adb3490123a559c11cfa9c5576ccba96e6fa4d5e762420325f3e92f7a57ff4",
+      "bytes": 5314
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0009_phase1_gate3c_protection_matrix.sql",
+      "sha256": "83a91f040a411282e59ef488056825d95edfe02dae45b031d42ca008708e1321",
+      "bytes": 8770
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0010_phase1_gate3d_integrated_shadow.sql",
+      "sha256": "fdcc733c021cde345c79b3ac90546b24c6ecbbbcc78ba8e2cb407032bd966287",
+      "bytes": 5709
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0011_phase1_gate3d_fix_runtime_integration.sql",
+      "sha256": "63df0ef5d225a1c7d48eb9a6489b98d493f123920247753aa0bb94bdf7f5d4d8",
+      "bytes": 890
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0012_phase1_2_live_data_plane.sql",
+      "sha256": "7c262473cce5dabd18a4223b5ed86cc2bbaabc86da28d4e00d4c7cf7578fc222",
+      "bytes": 15216
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0013_phase1_2_ops_soak.sql",
+      "sha256": "c82597451be5891f977c5bad4ab46968fa9ceeb5f4eafedf7d4879c9390f081a",
+      "bytes": 8142
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0014_phase2a_observer_framework.sql",
+      "sha256": "2ddb8ae61f909b3814bac9b6e0f371ff182ee13e9f10b2e02de4355c2c34a09c",
+      "bytes": 15431
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0015_phase2b_regime_observer.sql",
+      "sha256": "8011112554fb99e5ff19e074bf66887885aae8e010d6e7b4fe8e8ddf73c10731",
+      "bytes": 19927
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0016_phase2c_risk_engine.sql",
+      "sha256": "bf663e4d3df368eaa0d93ab1fd9ebde45c18a26244e18c2c867ee8cdad1cb284",
+      "bytes": 26109
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0017_phase2d_microstructure_observer.sql",
+      "sha256": "c3ed54d088b9308fa336ed59187c9ac75add2e7dfe88aef1c6af95db1f159d99",
+      "bytes": 18901
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0018_phase2e_context_observer.sql",
+      "sha256": "776c79c060d834901a8c789f3444b33c7549a518eac3713d8c65e7c32613825f",
+      "bytes": 24219
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0019_phase2f_validation_framework.sql",
+      "sha256": "70cca01de14c24081cc8d69ed3a2cdf2dd254766fb19411b74e288a91a25d9c7",
+      "bytes": 42977
+    },
+    {
+      "file": "apps/server/drizzle/migrations/0020_phase3a_desktop_operator_console.sql",
+      "sha256": "6b5a41340662a7e77528ebc0019e527ca84c2c94ffcc0ad2914e14d3412112e4",
+      "bytes": 11517
+    }
+  ],
+  "snapshotEntries": [
+    {
+      "file": "apps/server/drizzle/migrations/meta/0000_snapshot.json",
+      "sha256": "8131d09dc3113afe3f244bf4be00a5554b1183a63823ad31ce07dd0d433fc7f6",
+      "bytes": 12315
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0001_snapshot.json",
+      "sha256": "d41de644d5586e09f75f4eb0822da73f0e3c3c832303169de6d914f9f1de9473",
+      "bytes": 30654
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0002_snapshot.json",
+      "sha256": "dc12a89f5af5bfbb8e8cbbb81aa228bcceabf768b2760910035fdb24a6dcaac3",
+      "bytes": 52492
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0003_snapshot.json",
+      "sha256": "649196b1e66e36af20706c1e66181384625da544e8db6a7382bc43e0e3d27a40",
+      "bytes": 53761
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0004_snapshot.json",
+      "sha256": "6c6a69f0a6f47ff4f9b4935f5abc697766de20301c1f24620dc4d76a4291a9fa",
+      "bytes": 54600
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0005_snapshot.json",
+      "sha256": "107525cdf569794199fc59847c5c2980c8a4074cd7291f41b6f6984b0c90f282",
+      "bytes": 66509
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0006_snapshot.json",
+      "sha256": "d35676e26c64aa6e83e7c52ab3510dc84e1f7e235ea2f2f92c729ea5c81786f0",
+      "bytes": 105118
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0007_snapshot.json",
+      "sha256": "5a2e37b6b1bdb1af0f8036b66eeb25512e8987b5681cf6b5f3b15f290e15d498",
+      "bytes": 106571
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0008_snapshot.json",
+      "sha256": "8baeae0420433616ec92b5bf88a53b67e22203581e0a900cfbf4e55c9aff9827",
+      "bytes": 121459
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0009_snapshot.json",
+      "sha256": "f0503c156fdcdbc587668391d18fa06d7c09ee892b3474d729da7b1319aad217",
+      "bytes": 143616
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0010_snapshot.json",
+      "sha256": "1691689ffa0cd625f503d540004d4843f6d4403178adaaa7746f3a5467dbef0b",
+      "bytes": 162979
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0011_snapshot.json",
+      "sha256": "13118fb43c868fb4b64cb2162799865aa86e0ff69c3656c531953368b1e27fd7",
+      "bytes": 163657
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0012_snapshot.json",
+      "sha256": "78675139515924252e566c9839dd76cad9cef88a778f55ecb09d6c368dfacc59",
+      "bytes": 210852
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0013_snapshot.json",
+      "sha256": "a4c8f1526901cd270a78daac6911a9132db4e36b26c0d94ecac71cfedc205f4d",
+      "bytes": 237507
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0014_snapshot.json",
+      "sha256": "1fef6e1f02f9dad095d342200f46a8d452cbff9b30c740a74baacf58a725d653",
+      "bytes": 282315
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0015_snapshot.json",
+      "sha256": "b1e13f1709d27f0bce4aaf250afd416ed3d5004276ea27f150143fec3c9ca03f",
+      "bytes": 339750
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0016_snapshot.json",
+      "sha256": "98915dd9390787983909e82fb866ed55f44b506226e2228950fd093c8bce742e",
+      "bytes": 415827
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0017_snapshot.json",
+      "sha256": "20f612e0d1c12a64cc427c6c7f15847d264a7e16544fc49a2e44dfb9ce9c2db2",
+      "bytes": 473743
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0018_snapshot.json",
+      "sha256": "f56d64453c681d726e5251a04199bee3a6cd746b76b0bf2fd158b9d760aa0652",
+      "bytes": 545806
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0019_snapshot.json",
+      "sha256": "468c8c8c02ed430c5d0f091ac4b0a67fdd515d8ac861f6428564319fc0a976c9",
+      "bytes": 673067
+    },
+    {
+      "file": "apps/server/drizzle/migrations/meta/0020_snapshot.json",
+      "sha256": "b0e19f66fca298197541860b71f8d27e734c9b31c65373955ed9d0c4d9e6725f",
+      "bytes": 704558
+    }
+  ],
+  "fingerprintEntries": [
+    {
+      "file": "apps/server/drizzle/fingerprints/0000_mariadb_fingerprint.json",
+      "sha256": "ae360f2ec76ff2b83151026dd8cc616f4730f5dd0053a380db19031ad6bca089",
+      "bytes": 14457
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0001_mariadb_fingerprint.json",
+      "sha256": "b98862dfe27090629c6162258a92feb99b75a08504deab43b7a2d4b44530b0e6",
+      "bytes": 36136
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0002_mariadb_fingerprint.json",
+      "sha256": "4fe389794e40801b1e48507be52f2e9f6304bf4de976de0cd32d1431a93d5bfe",
+      "bytes": 62090
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0003_mariadb_fingerprint.json",
+      "sha256": "8351cabf5e5767d32d911d0ab409415207ee03b3031c1ad470549adb08d14c8a",
+      "bytes": 63446
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0004_mariadb_fingerprint.json",
+      "sha256": "dfe4f144fd67e451bf42d2a5b3791a4a0c8412153e335c99a1f1c1f44cbd298a",
+      "bytes": 64385
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0005_mariadb_fingerprint.json",
+      "sha256": "b29418ac4475189469fc07ee0369a48363194fbf9215a3c5072738edc75635ac",
+      "bytes": 78203
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0006_mariadb_fingerprint.json",
+      "sha256": "3b7c03ea1771cbdf3a0b1b504ab3d0426d184e024ad51042b4b278950ba84a39",
+      "bytes": 122337
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0007_mariadb_fingerprint.json",
+      "sha256": "1c0810ed8f3ce4f4704dc045a60c7503ad5ed97c67d00c1096a21a6073cccfe2",
+      "bytes": 124049
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0008_mariadb_fingerprint.json",
+      "sha256": "77fbb29fa203668da802005ded5e57186e415f7ece3b1369b3f2934ba53f39c4",
+      "bytes": 141603
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0009_mariadb_fingerprint.json",
+      "sha256": "d369f7c39e96720efa68fa66ce16fc643f4a7d2cee6910e47ce16fb88d8bbd75",
+      "bytes": 165997
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0010_mariadb_fingerprint.json",
+      "sha256": "f89ca8e44bd57924e4b972ef658a887aaa5d5dec178fe3b9bce3d667f251e2c7",
+      "bytes": 188324
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0011_mariadb_fingerprint.json",
+      "sha256": "f480cccd390a00b9c89e5b4bfd30e0aa0a6bd45724e2b664b03a3348e2a83d69",
+      "bytes": 189079
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0012_mariadb_fingerprint.json",
+      "sha256": "27db3920eb2e35ce864dad840fd650e1d3d6bb95c5abd683069ddea2ed312839",
+      "bytes": 243198
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0013_mariadb_fingerprint.json",
+      "sha256": "6ac1555ee788099d13bdec7e076e547337001825ebf363cb1b2e82794f355c0a",
+      "bytes": 273479
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0014_mariadb_fingerprint.json",
+      "sha256": "52d78ea2ea93f713d148126bb02da8ae7300e6987ef8223ee12e0f5d23dea59f",
+      "bytes": 324458
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0015_mariadb_fingerprint.json",
+      "sha256": "1a53d9ef9c014a5bf8ce159eb9974bde5e9b32c636383604cccd2d5e85ebc55e",
+      "bytes": 390037
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0016_mariadb_fingerprint.json",
+      "sha256": "e47778ab8a84a9254bb33960696ae9af2fe38adf6a4aa2606ae40952f997dabc",
+      "bytes": 477031
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0017_mariadb_fingerprint.json",
+      "sha256": "f49980bbee3e50f94bbb45915d656199aef0f04fdd04106c8ee864a61300f5ca",
+      "bytes": 542951
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0018_mariadb_fingerprint.json",
+      "sha256": "a7958477b3daa7eec0e8207d04f4f6e13a5c22b804cff2af83d1670cf616f14e",
+      "bytes": 626442
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0019_mariadb_fingerprint.json",
+      "sha256": "f70b199348647ead6dc3bf20698a58738808ab3f8fee088cf0b397c06536fb42",
+      "bytes": 772355
+    },
+    {
+      "file": "apps/server/drizzle/fingerprints/0020_mariadb_fingerprint.json",
+      "sha256": "17c8cd26672dfa2e8af91691db44cd5d1acec640ed8327aadd1be805e28d9d37",
+      "bytes": 808126
+    }
+  ],
+  "invariants": {
+    "contiguousIndexes": true,
+    "migrationCountMatchesJournal": true,
+    "everyMigrationHasSnapshot": true
+  }
+}

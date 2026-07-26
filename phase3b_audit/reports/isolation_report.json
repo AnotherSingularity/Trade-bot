@@ -1,0 +1,53 @@
+{
+  "generatedAt": "2026-07-26T15:45:00Z",
+  "workspaces": [
+    "apps/server",
+    "apps/desktop",
+    "packages/shared"
+  ],
+  "totalFilesScanned": 244,
+  "ruleCount": 10,
+  "violations": [],
+  "rulesEvaluated": [
+    {
+      "id": "renderer_no_electron",
+      "description": "Desktop renderer must never import from `electron`."
+    },
+    {
+      "id": "renderer_no_node_fs",
+      "description": "Desktop renderer must never import node:fs/node:child_process/node:https."
+    },
+    {
+      "id": "renderer_no_keytar",
+      "description": "Desktop renderer must never import keytar."
+    },
+    {
+      "id": "renderer_no_mariadb_or_drizzle",
+      "description": "Desktop renderer must never import a MariaDB driver or drizzle-orm."
+    },
+    {
+      "id": "renderer_no_ioredis",
+      "description": "Desktop renderer must never import ioredis or redis client."
+    },
+    {
+      "id": "renderer_no_server_internals",
+      "description": "Desktop renderer must never import from apps/server."
+    },
+    {
+      "id": "renderer_no_main_process",
+      "description": "Desktop renderer must never import from apps/desktop/src/main or preload."
+    },
+    {
+      "id": "champion_scanner_no_observer_import",
+      "description": "Champion scanner must not import Phase 2A-2F observer modules."
+    },
+    {
+      "id": "observer_no_champion_writer",
+      "description": "Observer modules must not import champion economic writers."
+    },
+    {
+      "id": "no_dynamic_electron_import",
+      "description": "No file may dynamically import electron."
+    }
+  ]
+}

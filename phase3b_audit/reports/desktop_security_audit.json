@@ -1,0 +1,184 @@
+{
+  "generatedAt": "2026-07-26T15:45:00Z",
+  "scope": "apps/desktop/src",
+  "totalChecks": 35,
+  "passed": 35,
+  "failed": [],
+  "checks": [
+    {
+      "name": "windows.contextIsolation=true",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "windows.nodeIntegration=false",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "windows.sandbox=true",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "windows.webSecurity=true",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "windows.experimentalFeatures=false",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "windows.allowRunningInsecureContent=false",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "windows.absolute preload enforced",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "ipc.allowlist declared",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "ipc.SafeFlags DRY_RUN literal true",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "ipc.SafeFlags ORDER_SUBMISSION_ENABLED literal false",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "ipc.liveOrderSubmissionDisabled literal true",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "ipc.every channel enumerated",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "preload.contextBridge exposed",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "preload.no arbitrary fetch",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "preload.no fs import",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "ipc.handler validates request",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "ipc.handler validates response",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "ipc.handler rejects channel not in allowlist",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "secrets.credential status only exposed",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "secrets.CredentialStatus enum documented",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "secrets.no raw credential in status map",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "auth.scrypt hash",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "auth.timingSafeEqual",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "auth.rate limit",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "auth.session expiry",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "auth.revoke",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "logging.REDACT_KEYS present",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "logging.password redacted",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "logging.coinbase secrets redacted",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "logging.access/refresh/session tokens redacted",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "env.rejects DRY_RUN=false",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "env.rejects ORDER_SUBMISSION_ENABLED=true",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "env.rejects external provider mode",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "supervisor.crash loop escalation",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "supervisor.bounded restart attempts",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

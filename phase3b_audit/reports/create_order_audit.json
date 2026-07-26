@@ -1,0 +1,359 @@
+{
+  "generatedAt": "2026-07-26T15:45:00Z",
+  "scopes": [
+    "apps/server/src",
+    "apps/desktop/src",
+    "packages/shared/src"
+  ],
+  "totalHits": 41,
+  "hitsByPattern": {
+    "createOrderCallSite": 4,
+    "createOrderIdentifier": 19,
+    "brokerageOrdersEndpoint": 13,
+    "coinbaseOrdersUrl": 0,
+    "fetchInvocation": 5,
+    "axiosImport": 0,
+    "undiciImport": 0,
+    "nodeHttpRequire": 0,
+    "websocketCtor": 0
+  },
+  "hitsByClassification": {
+    "comment": 20,
+    "fetch-call": 4,
+    "identifier-requires-review": 6,
+    "canonical-client-method-definition": 1,
+    "endpoint-reference": 8,
+    "double-lock-guarded-call-site": 2
+  },
+  "forbiddenCreateOrderCallSitesInProductionCode": [],
+  "results": [
+    {
+      "file": "apps/server/src/db/tx.ts",
+      "line": 284,
+      "snippet": "* whether the fills came from a live createOrder response, a live",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/env.ts",
+      "line": 50,
+      "snippet": "// Coinbase createOrder even under DRY_RUN so we can exercise unknown/reject/",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/env.ts",
+      "line": 59,
+      "snippet": "// (`createOrder` throws before any HTTP submit) so a bug elsewhere cannot",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/lib/fetchBarrier.ts",
+      "line": 21,
+      "snippet": "* How many times the `createOrder(...)` function was CALLED (regardless",
+      "patternId": "createOrderCallSite",
+      "kind": "coinbase-create-order-call",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/lib/fetchBarrier.ts",
+      "line": 8,
+      "snippet": "* The barrier is stronger than the Gate 1 `createOrder` killswitch because",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/lib/fetchBarrier.ts",
+      "line": 21,
+      "snippet": "* How many times the `createOrder(...)` function was CALLED (regardless",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/lib/fetchBarrier.ts",
+      "line": 23,
+      "snippet": "* top of `coinbase.createOrder`. Under SHADOW_LIVE this MUST stay 0 —",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/lib/fetchBarrier.ts",
+      "line": 141,
+      "snippet": "* Called at the very top of `coinbase.createOrder` (before the",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/lib/fetchBarrier.ts",
+      "line": 6,
+      "snippet": "*   2. Hard-refuse a POST to `/api/v3/brokerage/orders` regardless of caller.",
+      "patternId": "brokerageOrdersEndpoint",
+      "kind": "coinbase-orders-endpoint",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/lib/fetchBarrier.ts",
+      "line": 28,
+      "snippet": "* How many times `fetch(POST /api/v3/brokerage/orders)` was attempted.",
+      "patternId": "brokerageOrdersEndpoint",
+      "kind": "coinbase-orders-endpoint",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/lib/fetchBarrier.ts",
+      "line": 34,
+      "snippet": "* How many `POST /api/v3/brokerage/orders` requests completed on the",
+      "patternId": "brokerageOrdersEndpoint",
+      "kind": "coinbase-orders-endpoint",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/lib/fetchBarrier.ts",
+      "line": 28,
+      "snippet": "* How many times `fetch(POST /api/v3/brokerage/orders)` was attempted.",
+      "patternId": "fetchInvocation",
+      "kind": "fetch-call",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/market_data/coinbaseAdapter.ts",
+      "line": 19,
+      "snippet": "* /api/v3/brokerage/orders`. This module opens exactly the market-data",
+      "patternId": "brokerageOrdersEndpoint",
+      "kind": "coinbase-orders-endpoint",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/market_data/coinbaseRest.ts",
+      "line": 8,
+      "snippet": "* caller cannot slip a POST /api/v3/brokerage/orders through). Only",
+      "patternId": "brokerageOrdersEndpoint",
+      "kind": "coinbase-orders-endpoint",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/market_data/coinbaseRest.ts",
+      "line": 45,
+      "snippet": "const res = await fetch(url, { method: 'GET' });",
+      "patternId": "fetchInvocation",
+      "kind": "fetch-call",
+      "classification": "fetch-call"
+    },
+    {
+      "file": "apps/server/src/market_data/coinbaseRest.ts",
+      "line": 81,
+      "snippet": "const res = await fetch(url, { method: 'GET' });",
+      "patternId": "fetchInvocation",
+      "kind": "fetch-call",
+      "classification": "fetch-call"
+    },
+    {
+      "file": "apps/server/src/soak/certification.ts",
+      "line": 27,
+      "snippet": "*                   createOrder counter non-zero, less than 7 days).",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/soak/certification.ts",
+      "line": 156,
+      "snippet": "r.startsWith('createOrder') ||",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "identifier-requires-review"
+    },
+    {
+      "file": "apps/server/src/soak/preflight.ts",
+      "line": 17,
+      "snippet": "* A preflight either PASSES (every check ok + createOrder counters all",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 454,
+      "snippet": "export async function createOrder(intent: MarketOrderIntent): Promise<CreateOrderResult> {",
+      "patternId": "createOrderCallSite",
+      "kind": "coinbase-create-order-call",
+      "classification": "canonical-client-method-definition"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 419,
+      "snippet": "* before `createOrder` to catch increment/min-size violations and to surface",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 454,
+      "snippet": "export async function createOrder(intent: MarketOrderIntent): Promise<CreateOrderResult> {",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "identifier-requires-review"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 465,
+      "snippet": "'ORDER_SUBMISSION_ENABLED=false — createOrder refused to POST /orders. ' +",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "identifier-requires-review"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 425,
+      "snippet": "'/api/v3/brokerage/orders/preview',",
+      "patternId": "brokerageOrdersEndpoint",
+      "kind": "coinbase-orders-endpoint",
+      "classification": "endpoint-reference"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 471,
+      "snippet": "'/api/v3/brokerage/orders',",
+      "patternId": "brokerageOrdersEndpoint",
+      "kind": "coinbase-orders-endpoint",
+      "classification": "endpoint-reference"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 518,
+      "snippet": "`/api/v3/brokerage/orders/historical/${exchangeOrderId}`,",
+      "patternId": "brokerageOrdersEndpoint",
+      "kind": "coinbase-orders-endpoint",
+      "classification": "endpoint-reference"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 530,
+      "snippet": "`/api/v3/brokerage/orders/historical/batch?limit=100&order_status=OPEN,FILLED,CANCELLED,EXPIRED,FAILED`,",
+      "patternId": "brokerageOrdersEndpoint",
+      "kind": "coinbase-orders-endpoint",
+      "classification": "endpoint-reference"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 539,
+      "snippet": "`/api/v3/brokerage/orders/historical/fills?order_id=${encodeURIComponent(",
+      "patternId": "brokerageOrdersEndpoint",
+      "kind": "coinbase-orders-endpoint",
+      "classification": "endpoint-reference"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 549,
+      "snippet": "'/api/v3/brokerage/orders/batch_cancel',",
+      "patternId": "brokerageOrdersEndpoint",
+      "kind": "coinbase-orders-endpoint",
+      "classification": "endpoint-reference"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 131,
+      "snippet": "res = await fetch(`${BASE_URL}${path}`, {",
+      "patternId": "fetchInvocation",
+      "kind": "fetch-call",
+      "classification": "fetch-call"
+    },
+    {
+      "file": "apps/server/src/trading/executor.ts",
+      "line": 412,
+      "snippet": "const submitResult = await createOrder(submitIntent);",
+      "patternId": "createOrderCallSite",
+      "kind": "coinbase-create-order-call",
+      "classification": "double-lock-guarded-call-site"
+    },
+    {
+      "file": "apps/server/src/trading/executor.ts",
+      "line": 713,
+      "snippet": "const submitResult = await createOrder({",
+      "patternId": "createOrderCallSite",
+      "kind": "coinbase-create-order-call",
+      "classification": "double-lock-guarded-call-site"
+    },
+    {
+      "file": "apps/server/src/trading/executor.ts",
+      "line": 31,
+      "snippet": "createOrder,",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "identifier-requires-review"
+    },
+    {
+      "file": "apps/server/src/trading/executor.ts",
+      "line": 121,
+      "snippet": "* True when the executor should call the (mocked or real) Coinbase createOrder",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/trading/executor.ts",
+      "line": 412,
+      "snippet": "const submitResult = await createOrder(submitIntent);",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "identifier-requires-review"
+    },
+    {
+      "file": "apps/server/src/trading/executor.ts",
+      "line": 713,
+      "snippet": "const submitResult = await createOrder({",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "identifier-requires-review"
+    },
+    {
+      "file": "apps/server/src/trading/pagination.ts",
+      "line": 25,
+      "snippet": "* NOT touch `createOrder` — pagination is a read concern.",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/server/src/trading/pagination.ts",
+      "line": 272,
+      "snippet": "const base = `/api/v3/brokerage/orders/historical/batch?limit=${limit}`;",
+      "patternId": "brokerageOrdersEndpoint",
+      "kind": "coinbase-orders-endpoint",
+      "classification": "endpoint-reference"
+    },
+    {
+      "file": "apps/server/src/trading/pagination.ts",
+      "line": 309,
+      "snippet": "const base = `/api/v3/brokerage/orders/historical/fills?order_id=${encodeURIComponent(",
+      "patternId": "brokerageOrdersEndpoint",
+      "kind": "coinbase-orders-endpoint",
+      "classification": "endpoint-reference"
+    },
+    {
+      "file": "apps/server/src/trading/shadow/certification.ts",
+      "line": 34,
+      "snippet": "*       createOrder attempt count = 0, createOrder network count = 0,",
+      "patternId": "createOrderIdentifier",
+      "kind": "coinbase-create-order-identifier",
+      "classification": "comment"
+    },
+    {
+      "file": "apps/desktop/src/renderer/hooks/useHorizon.ts",
+      "line": 74,
+      "snippet": "useEffect(() => { fetch(); }, [fetch]);",
+      "patternId": "fetchInvocation",
+      "kind": "fetch-call",
+      "classification": "fetch-call"
+    }
+  ]
+}

@@ -1,0 +1,1815 @@
+{
+  "apps/server/drizzle.config.ts": {
+    "imports": [
+      "drizzle-kit"
+    ]
+  },
+  "apps/server/scripts/lib/canonical-json.ts": {
+    "imports": []
+  },
+  "apps/server/scripts/lib/mariadb-introspect.ts": {
+    "imports": [
+      "mysql2/promise"
+    ]
+  },
+  "apps/server/scripts/lib/schema-fingerprint.ts": {
+    "imports": [
+      "node:crypto",
+      "./mariadb-introspect"
+    ]
+  },
+  "apps/server/scripts/lib/to-drizzle-snapshot.ts": {
+    "imports": [
+      "node:crypto"
+    ]
+  },
+  "apps/server/scripts/reconstruct-snapshots.ts": {
+    "imports": [
+      "node:fs",
+      "node:path",
+      "node:child_process",
+      "node:url",
+      "mysql2/promise",
+      "./lib/canonical-json",
+      "./lib/mariadb-introspect",
+      "./lib/to-drizzle-snapshot"
+    ]
+  },
+  "apps/server/src/db/executionFence.ts": {
+    "imports": [
+      "drizzle-orm",
+      "./index",
+      "./schema"
+    ]
+  },
+  "apps/server/src/db/index.ts": {
+    "imports": [
+      "drizzle-orm/mysql2",
+      "mysql2/promise",
+      "../env",
+      "./schema"
+    ]
+  },
+  "apps/server/src/db/lineage.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "./index"
+    ]
+  },
+  "apps/server/src/db/migrate.ts": {
+    "imports": [
+      "drizzle-orm/mysql2/migrator",
+      "./index"
+    ]
+  },
+  "apps/server/src/db/queries.ts": {
+    "imports": [
+      "drizzle-orm",
+      "@horizon/shared",
+      "./index",
+      "./tx"
+    ]
+  },
+  "apps/server/src/db/schema.ts": {
+    "imports": [
+      "drizzle-orm",
+      "drizzle-orm/mysql-core"
+    ]
+  },
+  "apps/server/src/db/tx.ts": {
+    "imports": [
+      "drizzle-orm",
+      "@horizon/shared",
+      "./index",
+      "./schema"
+    ]
+  },
+  "apps/server/src/env.ts": {
+    "imports": [
+      "dotenv/config",
+      "zod"
+    ]
+  },
+  "apps/server/src/index.ts": {
+    "imports": [
+      "express",
+      "cors",
+      "@trpc/server/adapters/express",
+      "@horizon/shared",
+      "./env",
+      "./routers",
+      "./lib/trpc",
+      "./jobs/scanJob",
+      "./jobs/queue",
+      "./db/queries",
+      "./lib/services",
+      "./middleware/auth",
+      "./db",
+      "./trading/reconciler",
+      "./jobs/lease"
+    ]
+  },
+  "apps/server/src/jobs/lease.ts": {
+    "imports": [
+      "node:crypto",
+      "ioredis",
+      "../env",
+      "../db/executionFence"
+    ]
+  },
+  "apps/server/src/jobs/queue.ts": {
+    "imports": [
+      "bullmq",
+      "ioredis",
+      "@horizon/shared",
+      "../env"
+    ]
+  },
+  "apps/server/src/jobs/scanJob.ts": {
+    "imports": [
+      "bullmq",
+      "../trading/scanner",
+      "../db/queries",
+      "./queue"
+    ]
+  },
+  "apps/server/src/labeling/forwardOutcomes.ts": {
+    "imports": [
+      "@horizon/shared",
+      "drizzle-orm",
+      "../db"
+    ]
+  },
+  "apps/server/src/lib/fetchBarrier.ts": {
+    "imports": []
+  },
+  "apps/server/src/lib/operatingMode.ts": {
+    "imports": [
+      "../env"
+    ]
+  },
+  "apps/server/src/lib/services.ts": {
+    "imports": [
+      "bcryptjs",
+      "jsonwebtoken",
+      "@horizon/shared",
+      "../env",
+      "../db/queries",
+      "../trading/marketWindow"
+    ]
+  },
+  "apps/server/src/lib/trpc.ts": {
+    "imports": [
+      "@trpc/server",
+      "@trpc/server/adapters/express",
+      "../middleware/auth"
+    ]
+  },
+  "apps/server/src/market_data/bootstrap.ts": {
+    "imports": [
+      "drizzle-orm",
+      "../db",
+      "./candleAssembler"
+    ]
+  },
+  "apps/server/src/market_data/candleAssembler.ts": {
+    "imports": [
+      "drizzle-orm",
+      "../db"
+    ]
+  },
+  "apps/server/src/market_data/coinbaseAdapter.ts": {
+    "imports": []
+  },
+  "apps/server/src/market_data/coinbaseRest.ts": {
+    "imports": [
+      "./bootstrap"
+    ]
+  },
+  "apps/server/src/market_data/dataQualityGate.ts": {
+    "imports": [
+      "drizzle-orm",
+      "../db",
+      "./candleAssembler"
+    ]
+  },
+  "apps/server/src/market_data/envelope.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../db"
+    ]
+  },
+  "apps/server/src/market_data/providerFactory.ts": {
+    "imports": [
+      "../db",
+      "../db/schema",
+      "./coinbaseAdapter",
+      "./coinbaseRest",
+      "./bootstrap",
+      "./streams"
+    ]
+  },
+  "apps/server/src/market_data/streams.ts": {
+    "imports": []
+  },
+  "apps/server/src/market_data/supervisor.ts": {
+    "imports": [
+      "drizzle-orm",
+      "../db",
+      "./envelope"
+    ]
+  },
+  "apps/server/src/middleware/auth.ts": {
+    "imports": [
+      "express",
+      "jsonwebtoken",
+      "../env"
+    ]
+  },
+  "apps/server/src/reporting/shadowReports.ts": {
+    "imports": [
+      "@horizon/shared",
+      "drizzle-orm",
+      "../db",
+      "../trading/shadow/simulator",
+      "../lib/fetchBarrier"
+    ]
+  },
+  "apps/server/src/research/context/decision.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db",
+      "./providers",
+      "./signals",
+      "./ensemble"
+    ]
+  },
+  "apps/server/src/research/context/ensemble.ts": {
+    "imports": [
+      "node:crypto"
+    ]
+  },
+  "apps/server/src/research/context/fixtureManifest.ts": {
+    "imports": []
+  },
+  "apps/server/src/research/context/providers.ts": {
+    "imports": []
+  },
+  "apps/server/src/research/context/signals.ts": {
+    "imports": [
+      "node:crypto",
+      "./providers"
+    ]
+  },
+  "apps/server/src/research/features/contract.ts": {
+    "imports": []
+  },
+  "apps/server/src/research/features/inputs.ts": {
+    "imports": [
+      "node:crypto"
+    ]
+  },
+  "apps/server/src/research/features/math.ts": {
+    "imports": []
+  },
+  "apps/server/src/research/features/registry.ts": {
+    "imports": [
+      "drizzle-orm",
+      "../../db",
+      "./contract",
+      "./inputs",
+      "./stage1"
+    ]
+  },
+  "apps/server/src/research/features/stage1.ts": {
+    "imports": []
+  },
+  "apps/server/src/research/features/stage2.ts": {
+    "imports": [
+      "./stage1"
+    ]
+  },
+  "apps/server/src/research/fingerprint/composer.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db",
+      "../features/contract"
+    ]
+  },
+  "apps/server/src/research/hygiene/gate.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db",
+      "../universe/enumerator"
+    ]
+  },
+  "apps/server/src/research/microstructure/bookEngine.ts": {
+    "imports": [
+      "node:crypto",
+      "./provider"
+    ]
+  },
+  "apps/server/src/research/microstructure/decision.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db",
+      "./bookEngine",
+      "./executionCost"
+    ]
+  },
+  "apps/server/src/research/microstructure/executionCost.ts": {
+    "imports": [
+      "node:crypto",
+      "./bookEngine"
+    ]
+  },
+  "apps/server/src/research/microstructure/features.ts": {
+    "imports": [
+      "./bookEngine"
+    ]
+  },
+  "apps/server/src/research/microstructure/fixtureManifest.ts": {
+    "imports": []
+  },
+  "apps/server/src/research/microstructure/flow.ts": {
+    "imports": [
+      "./provider"
+    ]
+  },
+  "apps/server/src/research/microstructure/persistence.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db",
+      "./bookEngine",
+      "./executionCost",
+      "./features",
+      "./flow",
+      "./provider"
+    ]
+  },
+  "apps/server/src/research/microstructure/provider.ts": {
+    "imports": []
+  },
+  "apps/server/src/research/microstructure/shortlist.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db"
+    ]
+  },
+  "apps/server/src/research/regime/challenger.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db",
+      "./changeDetectors",
+      "./contract",
+      "./hmm"
+    ]
+  },
+  "apps/server/src/research/regime/changeDetectors.ts": {
+    "imports": [
+      "node:crypto",
+      "../features/inputs",
+      "../features/math"
+    ]
+  },
+  "apps/server/src/research/regime/contract.ts": {
+    "imports": []
+  },
+  "apps/server/src/research/regime/ensemble.ts": {
+    "imports": [
+      "./changeDetectors",
+      "./contract",
+      "./hmm"
+    ]
+  },
+  "apps/server/src/research/regime/globalState.ts": {
+    "imports": [
+      "node:crypto",
+      "../features/contract",
+      "../features/inputs",
+      "../features/math"
+    ]
+  },
+  "apps/server/src/research/regime/hmm.ts": {
+    "imports": [
+      "node:crypto",
+      "../features/inputs",
+      "../features/math",
+      "./contract"
+    ]
+  },
+  "apps/server/src/research/regime/hysteresis.ts": {
+    "imports": [
+      "./contract",
+      "./registry"
+    ]
+  },
+  "apps/server/src/research/regime/productState.ts": {
+    "imports": [
+      "node:crypto",
+      "../features/contract"
+    ]
+  },
+  "apps/server/src/research/regime/registry.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db",
+      "./contract"
+    ]
+  },
+  "apps/server/src/research/regime/reporting.ts": {
+    "imports": [
+      "drizzle-orm",
+      "../../db"
+    ]
+  },
+  "apps/server/src/research/risk/contract.ts": {
+    "imports": []
+  },
+  "apps/server/src/research/risk/correlation.ts": {
+    "imports": [
+      "node:crypto",
+      "../features/inputs",
+      "../features/math",
+      "./contract"
+    ]
+  },
+  "apps/server/src/research/risk/decision.ts": {
+    "imports": [
+      "drizzle-orm",
+      "../../db",
+      "./contract",
+      "./inputs",
+      "./policy",
+      "./measurements",
+      "./correlation",
+      "./liquidity",
+      "./lossStates",
+      "./expectedShortfall",
+      "./stressTests",
+      "./systemIntegrity",
+      "./sizeCap",
+      "./kelly"
+    ]
+  },
+  "apps/server/src/research/risk/expectedShortfall.ts": {
+    "imports": [
+      "./contract"
+    ]
+  },
+  "apps/server/src/research/risk/inputs.ts": {
+    "imports": [
+      "node:crypto",
+      "../../trading/cashFlowForecast"
+    ]
+  },
+  "apps/server/src/research/risk/kelly.ts": {
+    "imports": []
+  },
+  "apps/server/src/research/risk/liquidity.ts": {
+    "imports": [
+      "./contract",
+      "./inputs"
+    ]
+  },
+  "apps/server/src/research/risk/lossStates.ts": {
+    "imports": [
+      "drizzle-orm",
+      "../../db",
+      "./contract"
+    ]
+  },
+  "apps/server/src/research/risk/measurements.ts": {
+    "imports": [
+      "@horizon/shared",
+      "../../trading/cashFlowForecast"
+    ]
+  },
+  "apps/server/src/research/risk/policy.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db"
+    ]
+  },
+  "apps/server/src/research/risk/reporting.ts": {
+    "imports": [
+      "../../db"
+    ]
+  },
+  "apps/server/src/research/risk/sizeCap.ts": {
+    "imports": [
+      "./contract",
+      "./inputs",
+      "./measurements",
+      "./liquidity",
+      "./correlation",
+      "./expectedShortfall",
+      "./stressTests",
+      "./policy"
+    ]
+  },
+  "apps/server/src/research/risk/stressTests.ts": {
+    "imports": [
+      "node:crypto",
+      "./inputs"
+    ]
+  },
+  "apps/server/src/research/risk/systemIntegrity.ts": {
+    "imports": [
+      "./inputs"
+    ]
+  },
+  "apps/server/src/research/shortlist/policy.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db",
+      "../../db/schema",
+      "../features/contract"
+    ]
+  },
+  "apps/server/src/research/universe/enumerator.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db"
+    ]
+  },
+  "apps/server/src/research/validation/datasets.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db"
+    ]
+  },
+  "apps/server/src/research/validation/dsr.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db",
+      "../../db/schema"
+    ]
+  },
+  "apps/server/src/research/validation/evaluation.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db"
+    ]
+  },
+  "apps/server/src/research/validation/experiments.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db"
+    ]
+  },
+  "apps/server/src/research/validation/fixtureManifest.ts": {
+    "imports": []
+  },
+  "apps/server/src/research/validation/folds.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db"
+    ]
+  },
+  "apps/server/src/research/validation/pbo.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db"
+    ]
+  },
+  "apps/server/src/research/validation/promotion.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db"
+    ]
+  },
+  "apps/server/src/research/validation/statisticalAudit.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db"
+    ]
+  },
+  "apps/server/src/routers/auth.ts": {
+    "imports": [
+      "@trpc/server",
+      "zod",
+      "@horizon/shared",
+      "../lib/services",
+      "../lib/trpc"
+    ]
+  },
+  "apps/server/src/routers/history.ts": {
+    "imports": [
+      "zod",
+      "@horizon/shared",
+      "../db/queries",
+      "../lib/trpc"
+    ]
+  },
+  "apps/server/src/routers/index.ts": {
+    "imports": [
+      "../lib/trpc",
+      "./auth",
+      "./trading",
+      "./tokens",
+      "./history",
+      "./settings",
+      "./lineage"
+    ]
+  },
+  "apps/server/src/routers/lineage.ts": {
+    "imports": [
+      "zod",
+      "drizzle-orm",
+      "../db",
+      "../db/lineage",
+      "../lib/trpc"
+    ]
+  },
+  "apps/server/src/routers/settings.ts": {
+    "imports": [
+      "@horizon/shared",
+      "../trading/coinbase",
+      "../trading/claude",
+      "../env",
+      "../lib/trpc"
+    ]
+  },
+  "apps/server/src/routers/tokens.ts": {
+    "imports": [
+      "zod",
+      "@horizon/shared",
+      "../db/queries",
+      "../trading/coinbase",
+      "../lib/trpc"
+    ]
+  },
+  "apps/server/src/routers/trading.ts": {
+    "imports": [
+      "zod",
+      "../trading/coinbase",
+      "../trading/executor",
+      "../jobs/queue",
+      "../lib/services",
+      "../env",
+      "../lib/trpc"
+    ]
+  },
+  "apps/server/src/soak/certification.ts": {
+    "imports": [
+      "node:fs",
+      "drizzle-orm",
+      "../db",
+      "../lib/fetchBarrier",
+      "./incidents",
+      "./soakRunner"
+    ]
+  },
+  "apps/server/src/soak/incidents.ts": {
+    "imports": [
+      "drizzle-orm",
+      "../db"
+    ]
+  },
+  "apps/server/src/soak/preflight.ts": {
+    "imports": [
+      "drizzle-orm",
+      "../db",
+      "../lib/fetchBarrier"
+    ]
+  },
+  "apps/server/src/soak/soakRunner.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../db",
+      "../market_data/providerFactory",
+      "../trading/shadow/authorization",
+      "../trading/cashFlowForecast",
+      "../trading/protection/instance",
+      "../trading/shadow/fillModel",
+      "../market_data/envelope",
+      "../lib/fetchBarrier",
+      "./incidents",
+      "../db/schema"
+    ]
+  },
+  "apps/server/src/trading/cashFlowForecast.ts": {
+    "imports": [
+      "@horizon/shared",
+      "./feeTier",
+      "./preview"
+    ]
+  },
+  "apps/server/src/trading/claude.ts": {
+    "imports": [
+      "@anthropic-ai/sdk",
+      "zod",
+      "@horizon/shared",
+      "../env",
+      "./modes"
+    ]
+  },
+  "apps/server/src/trading/coinbase.ts": {
+    "imports": [
+      "node:crypto",
+      "../env",
+      "@horizon/shared"
+    ]
+  },
+  "apps/server/src/trading/continuousReconciler.ts": {
+    "imports": [
+      "@horizon/shared",
+      "../env",
+      "../db/schema",
+      "../jobs/lease",
+      "./coinbase",
+      "../db",
+      "drizzle-orm",
+      "./fillState"
+    ]
+  },
+  "apps/server/src/trading/costAdjustedPayoffGate.ts": {
+    "imports": [
+      "@horizon/shared",
+      "./costModel"
+    ]
+  },
+  "apps/server/src/trading/costModel.ts": {
+    "imports": [
+      "@horizon/shared",
+      "./feeTier",
+      "./preview"
+    ]
+  },
+  "apps/server/src/trading/dustPolicy.ts": {
+    "imports": [
+      "@horizon/shared"
+    ]
+  },
+  "apps/server/src/trading/evGate.ts": {
+    "imports": []
+  },
+  "apps/server/src/trading/executor.ts": {
+    "imports": [
+      "node:crypto",
+      "@horizon/shared",
+      "../env",
+      "./exitAttemptAllocator",
+      "../db/schema"
+    ]
+  },
+  "apps/server/src/trading/exitAttemptAllocator.ts": {
+    "imports": [
+      "drizzle-orm",
+      "../db/schema",
+      "../db/tx"
+    ]
+  },
+  "apps/server/src/trading/feeTier.ts": {
+    "imports": [
+      "@horizon/shared",
+      "../db",
+      "../db/schema",
+      "./coinbase",
+      "../env",
+      "../db/queries",
+      "drizzle-orm"
+    ]
+  },
+  "apps/server/src/trading/fillState.ts": {
+    "imports": [
+      "@horizon/shared"
+    ]
+  },
+  "apps/server/src/trading/forecastAttribution.ts": {
+    "imports": [
+      "@horizon/shared",
+      "drizzle-orm",
+      "../db",
+      "./cashFlowForecast"
+    ]
+  },
+  "apps/server/src/trading/indicators.ts": {
+    "imports": []
+  },
+  "apps/server/src/trading/marketWindow.ts": {
+    "imports": [
+      "@horizon/shared"
+    ]
+  },
+  "apps/server/src/trading/modes.ts": {
+    "imports": [
+      "@horizon/shared",
+      "./coinbase"
+    ]
+  },
+  "apps/server/src/trading/orderConfig.ts": {
+    "imports": [
+      "node:crypto",
+      "@horizon/shared",
+      "./preview"
+    ]
+  },
+  "apps/server/src/trading/outcomeLabeler.ts": {
+    "imports": [
+      "@horizon/shared",
+      "../db/schema"
+    ]
+  },
+  "apps/server/src/trading/pagination.ts": {
+    "imports": [
+      "./coinbase"
+    ]
+  },
+  "apps/server/src/trading/preview.ts": {
+    "imports": [
+      "@horizon/shared",
+      "./coinbase",
+      "../env"
+    ]
+  },
+  "apps/server/src/trading/protection/capabilityGate.ts": {
+    "imports": [
+      "@horizon/shared",
+      "./configBuilder",
+      "./policy",
+      "../../db/schema"
+    ]
+  },
+  "apps/server/src/trading/protection/configBuilder.ts": {
+    "imports": [
+      "node:crypto",
+      "@horizon/shared",
+      "../../db/schema",
+      "./policy"
+    ]
+  },
+  "apps/server/src/trading/protection/instance.ts": {
+    "imports": [
+      "@horizon/shared",
+      "drizzle-orm",
+      "../../db",
+      "../../db/lineage",
+      "./configBuilder"
+    ]
+  },
+  "apps/server/src/trading/protection/policy.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../../db"
+    ]
+  },
+  "apps/server/src/trading/reconciler.ts": {
+    "imports": [
+      "../env",
+      "../db/schema",
+      "../db/queries"
+    ]
+  },
+  "apps/server/src/trading/reconciliationJournal.ts": {
+    "imports": [
+      "node:crypto",
+      "drizzle-orm",
+      "../db",
+      "./pagination"
+    ]
+  },
+  "apps/server/src/trading/scanner.ts": {
+    "imports": [
+      "node:crypto",
+      "@horizon/shared",
+      "./coinbase",
+      "./claude",
+      "./modes",
+      "./executor",
+      "./marketWindow",
+      "../jobs/lease",
+      "./feeTier",
+      "./preview",
+      "./costModel",
+      "./evGate",
+      "../env"
+    ]
+  },
+  "apps/server/src/trading/shadow/authorization.ts": {
+    "imports": [
+      "drizzle-orm",
+      "../../db",
+      "../../db/lineage",
+      "../protection/policy"
+    ]
+  },
+  "apps/server/src/trading/shadow/certification.ts": {
+    "imports": [
+      "node:fs",
+      "drizzle-orm",
+      "@horizon/shared",
+      "../../db",
+      "../../lib/fetchBarrier",
+      "../cashFlowForecast",
+      "../protection/instance"
+    ]
+  },
+  "apps/server/src/trading/shadow/executionPlan.ts": {
+    "imports": [
+      "drizzle-orm",
+      "../../db",
+      "../../db/lineage",
+      "../protection/configBuilder",
+      "./authorization"
+    ]
+  },
+  "apps/server/src/trading/shadow/fillModel.ts": {
+    "imports": [
+      "@horizon/shared",
+      "drizzle-orm",
+      "../../db",
+      "../../db/schema",
+      "../../db/tx"
+    ]
+  },
+  "apps/server/src/trading/shadow/postFillRevalidation.ts": {
+    "imports": [
+      "@horizon/shared",
+      "drizzle-orm",
+      "../../db",
+      "../../db/lineage",
+      "../cashFlowForecast",
+      "./authorization",
+      "./executionPlan"
+    ]
+  },
+  "apps/server/src/trading/shadow/runtimeService.ts": {
+    "imports": [
+      "@horizon/shared",
+      "drizzle-orm",
+      "../../db",
+      "../../db/lineage",
+      "../../lib/operatingMode",
+      "../cashFlowForecast",
+      "./authorization",
+      "./postFillRevalidation",
+      "../../db/tx",
+      "../protection/configBuilder"
+    ]
+  },
+  "apps/server/src/trading/shadow/simulator.ts": {
+    "imports": [
+      "@horizon/shared",
+      "drizzle-orm",
+      "../../db",
+      "../../db/queries",
+      "../../db/lineage",
+      "./executionPlan",
+      "../forecastAttribution",
+      "./authorization",
+      "../protection/configBuilder"
+    ]
+  },
+  "apps/server/tests/claude.test.ts": {
+    "imports": [
+      "vitest",
+      "../src/trading/claude"
+    ]
+  },
+  "apps/server/tests/coinbase-parsing.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared",
+      "../src/trading/coinbase"
+    ]
+  },
+  "apps/server/tests/costModel-evGate.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared",
+      "../src/trading/feeTier",
+      "../src/trading/preview"
+    ]
+  },
+  "apps/server/tests/decisionSnapshots.test.ts": {
+    "imports": [
+      "vitest",
+      "../src/db",
+      "@horizon/shared",
+      "../src/trading/costModel",
+      "../src/trading/evGate"
+    ]
+  },
+  "apps/server/tests/executor-lifecycle.test.ts": {
+    "imports": [
+      "vitest",
+      "./setup/coinbase-mock",
+      "../src/trading/executor",
+      "../src/env"
+    ]
+  },
+  "apps/server/tests/executor.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared",
+      "../src/trading/executor",
+      "../src/db/schema"
+    ]
+  },
+  "apps/server/tests/feeTier.test.ts": {
+    "imports": [
+      "vitest",
+      "../src/db",
+      "../src/db/schema",
+      "../src/env",
+      "../src/trading/coinbase"
+    ]
+  },
+  "apps/server/tests/gate1-migration-integrity.test.ts": {
+    "imports": [
+      "node:fs",
+      "node:path",
+      "vitest",
+      "mysql2/promise",
+      "../scripts/lib/mariadb-introspect",
+      "../scripts/lib/canonical-json"
+    ]
+  },
+  "apps/server/tests/gate1-snapshot-regen.test.ts": {
+    "imports": [
+      "node:fs",
+      "node:path",
+      "node:child_process",
+      "vitest"
+    ]
+  },
+  "apps/server/tests/indicators.test.ts": {
+    "imports": [
+      "vitest"
+    ]
+  },
+  "apps/server/tests/killswitch.test.ts": {
+    "imports": [
+      "vitest",
+      "../src/env",
+      "../src/trading/coinbase"
+    ]
+  },
+  "apps/server/tests/lease.test.ts": {
+    "imports": [
+      "vitest",
+      "../src/jobs/lease"
+    ]
+  },
+  "apps/server/tests/marketWindow.test.ts": {
+    "imports": [
+      "vitest"
+    ]
+  },
+  "apps/server/tests/modes.test.ts": {
+    "imports": [
+      "vitest"
+    ]
+  },
+  "apps/server/tests/money.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared"
+    ]
+  },
+  "apps/server/tests/p11a-safety.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared",
+      "./setup/coinbase-mock",
+      "../src/db",
+      "../src/db/schema",
+      "../src/db/tx",
+      "../src/db/queries",
+      "../src/env",
+      "drizzle-orm"
+    ]
+  },
+  "apps/server/tests/phase1_1b.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared",
+      "drizzle-orm",
+      "../src/db",
+      "../src/trading/coinbase",
+      "../src/db/executionFence",
+      "../src/db/queries",
+      "../src/trading/exitAttemptAllocator",
+      "../src/trading/fillState",
+      "../src/trading/preview",
+      "../src/trading/continuousReconciler",
+      "./setup/db"
+    ]
+  },
+  "apps/server/tests/phase1_2.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared",
+      "drizzle-orm",
+      "../src/db",
+      "../src/db/queries",
+      "../src/market_data/dataQualityGate",
+      "../src/lib/fetchBarrier",
+      "../src/env",
+      "../src/db/lineage",
+      "./setup/db"
+    ]
+  },
+  "apps/server/tests/phase1_2_ops.test.ts": {
+    "imports": [
+      "vitest",
+      "drizzle-orm",
+      "../src/db",
+      "../src/db/queries",
+      "../src/lib/fetchBarrier",
+      "../src/market_data/providerFactory",
+      "../src/soak/soakRunner",
+      "../src/soak/certification",
+      "../src/market_data/streams",
+      "../src/market_data/bootstrap",
+      "./setup/db"
+    ]
+  },
+  "apps/server/tests/phase1_gate2.test.ts": {
+    "imports": [
+      "vitest",
+      "drizzle-orm",
+      "@horizon/shared",
+      "../src/db",
+      "../src/trading/outcomeLabeler",
+      "../src/db/queries",
+      "./setup/db"
+    ]
+  },
+  "apps/server/tests/phase1_gate3a.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared",
+      "drizzle-orm",
+      "../src/db",
+      "../src/trading/exitAttemptAllocator",
+      "./setup/db"
+    ]
+  },
+  "apps/server/tests/phase1_gate3b.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared",
+      "../src/db",
+      "../src/trading/forecastAttribution",
+      "../src/trading/preview",
+      "../src/trading/feeTier",
+      "../src/db/queries",
+      "./setup/db"
+    ]
+  },
+  "apps/server/tests/phase1_gate3c.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared",
+      "drizzle-orm",
+      "../src/db",
+      "../src/db/lineage",
+      "../src/db/queries",
+      "./setup/db"
+    ]
+  },
+  "apps/server/tests/phase1_gate3d.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared",
+      "drizzle-orm",
+      "../src/db",
+      "../src/db/lineage",
+      "../src/trading/protection/configBuilder",
+      "../src/trading/shadow/authorization",
+      "../src/trading/shadow/executionPlan",
+      "../src/trading/shadow/postFillRevalidation",
+      "../src/trading/shadow/certification",
+      "../src/lib/fetchBarrier",
+      "../src/trading/preview",
+      "../src/trading/feeTier",
+      "../src/db/tx",
+      "./setup/db"
+    ]
+  },
+  "apps/server/tests/phase1_gate3d_fix.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared",
+      "drizzle-orm",
+      "../src/db",
+      "../src/lib/fetchBarrier",
+      "../src/trading/preview",
+      "../src/trading/feeTier",
+      "../src/db/tx",
+      "./setup/db",
+      "../src/env",
+      "../src/trading/executor"
+    ]
+  },
+  "apps/server/tests/preview.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared",
+      "../src/env",
+      "../src/trading/preview",
+      "../src/trading/coinbase"
+    ]
+  },
+  "apps/server/tests/rate-limit.test.ts": {
+    "imports": [
+      "vitest",
+      "../src/lib/services"
+    ]
+  },
+  "apps/server/tests/reconciler.test.ts": {
+    "imports": [
+      "vitest",
+      "./setup/coinbase-mock",
+      "../src/db",
+      "../src/db/schema",
+      "../src/trading/reconciler",
+      "../src/db/queries",
+      "drizzle-orm"
+    ]
+  },
+  "apps/server/tests/research/fixtures/regimeScenarios.ts": {
+    "imports": [
+      "../../../src/research/features/inputs"
+    ]
+  },
+  "apps/server/tests/research/fixtures/riskFixtures.ts": {
+    "imports": [
+      "@horizon/shared",
+      "../../../src/trading/cashFlowForecast"
+    ]
+  },
+  "apps/server/tests/research/fixtures/scenarios.ts": {
+    "imports": [
+      "../../../src/research/features/inputs"
+    ]
+  },
+  "apps/server/tests/research/phase2a_isolation.test.ts": {
+    "imports": [
+      "node:fs",
+      "node:path",
+      "vitest"
+    ]
+  },
+  "apps/server/tests/research/phase2a_observer.test.ts": {
+    "imports": [
+      "vitest",
+      "drizzle-orm",
+      "../../src/db",
+      "../../src/db/lineage",
+      "../setup/db",
+      "./fixtures/scenarios"
+    ]
+  },
+  "apps/server/tests/research/phase2b_isolation.test.ts": {
+    "imports": [
+      "node:fs",
+      "node:path",
+      "vitest"
+    ]
+  },
+  "apps/server/tests/research/phase2b_regime.test.ts": {
+    "imports": [
+      "vitest",
+      "drizzle-orm",
+      "../../src/db",
+      "node:fs",
+      "node:path",
+      "../../src/research/features/contract",
+      "../../src/research/features/inputs",
+      "../../src/research/features/stage1",
+      "../../src/research/features/stage2",
+      "../../src/research/regime/ensemble",
+      "../../src/research/regime/reporting",
+      "../../src/db/lineage",
+      "../setup/db"
+    ]
+  },
+  "apps/server/tests/research/phase2c_isolation.test.ts": {
+    "imports": [
+      "node:fs",
+      "node:path",
+      "vitest"
+    ]
+  },
+  "apps/server/tests/research/phase2c_risk.test.ts": {
+    "imports": [
+      "vitest",
+      "node:fs",
+      "node:path",
+      "drizzle-orm",
+      "../../src/db",
+      "../setup/db",
+      "../../src/db/lineage",
+      "../../src/research/risk/inputs",
+      "../../src/research/risk/correlation",
+      "../../src/research/risk/liquidity",
+      "../../src/research/risk/expectedShortfall",
+      "../../src/research/risk/stressTests",
+      "../../src/research/risk/kelly",
+      "../../src/research/risk/systemIntegrity",
+      "../../src/research/features/inputs"
+    ]
+  },
+  "apps/server/tests/research/phase2d_fix.test.ts": {
+    "imports": [
+      "vitest",
+      "node:fs",
+      "node:path",
+      "drizzle-orm",
+      "../../src/db",
+      "../setup/db",
+      "../../src/db/lineage",
+      "../../src/lib/fetchBarrier",
+      "../../src/research/microstructure/bookEngine",
+      "../../src/research/microstructure/provider",
+      "../../src/research/microstructure/features",
+      "../../src/research/microstructure/flow",
+      "../../src/research/microstructure/decision"
+    ]
+  },
+  "apps/server/tests/research/phase2d_isolation.test.ts": {
+    "imports": [
+      "node:fs",
+      "node:path",
+      "vitest"
+    ]
+  },
+  "apps/server/tests/research/phase2d_microstructure.test.ts": {
+    "imports": [
+      "vitest",
+      "node:fs",
+      "node:path",
+      "../../src/db",
+      "../../src/db/schema",
+      "../setup/db",
+      "../../src/research/microstructure/bookEngine",
+      "../../src/research/microstructure/provider",
+      "../../src/research/microstructure/features",
+      "../../src/research/microstructure/flow",
+      "../../src/research/microstructure/decision",
+      "../../src/research/microstructure/shortlist"
+    ]
+  },
+  "apps/server/tests/research/phase2e_context.test.ts": {
+    "imports": [
+      "vitest",
+      "node:fs",
+      "node:path",
+      "drizzle-orm",
+      "../../src/db",
+      "../setup/db",
+      "../../src/db/lineage",
+      "../../src/lib/fetchBarrier",
+      "../../src/research/context/ensemble",
+      "../../src/research/context/fixtureManifest"
+    ]
+  },
+  "apps/server/tests/research/phase2e_isolation.test.ts": {
+    "imports": [
+      "node:fs",
+      "node:path",
+      "vitest"
+    ]
+  },
+  "apps/server/tests/research/phase2f_isolation.test.ts": {
+    "imports": [
+      "node:fs",
+      "node:path",
+      "vitest"
+    ]
+  },
+  "apps/server/tests/research/phase2f_validation.test.ts": {
+    "imports": [
+      "vitest",
+      "node:fs",
+      "node:path",
+      "drizzle-orm",
+      "../../src/db",
+      "../setup/db",
+      "../../src/db/lineage",
+      "../../src/lib/fetchBarrier"
+    ]
+  },
+  "apps/server/tests/scanner-flow.test.ts": {
+    "imports": [
+      "vitest",
+      "node:fs",
+      "node:url",
+      "node:path"
+    ]
+  },
+  "apps/server/tests/setup/coinbase-mock.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared"
+    ]
+  },
+  "apps/server/tests/setup/db.ts": {
+    "imports": [
+      "mysql2/promise"
+    ]
+  },
+  "apps/server/tests/tx-rollback-fencing.test.ts": {
+    "imports": [
+      "vitest",
+      "@horizon/shared",
+      "drizzle-orm",
+      "./setup/db",
+      "../src/db",
+      "../src/db/schema"
+    ]
+  },
+  "apps/server/tsup.config.ts": {
+    "imports": [
+      "tsup"
+    ]
+  },
+  "apps/server/vitest.config.ts": {
+    "imports": [
+      "vitest/config"
+    ]
+  },
+  "apps/desktop/build/generate-build-manifest.ts": {
+    "imports": [
+      "node:crypto",
+      "node:child_process",
+      "node:fs",
+      "node:path"
+    ]
+  },
+  "apps/desktop/src/main/authentication.ts": {
+    "imports": [
+      "node:crypto"
+    ]
+  },
+  "apps/desktop/src/main/index.ts": {
+    "imports": [
+      "node:path",
+      "electron",
+      "./authentication",
+      "./ipc",
+      "./logging",
+      "./localEnvironment",
+      "./secrets",
+      "./serviceSupervisor",
+      "./windows",
+      "../shared/ipcContract"
+    ]
+  },
+  "apps/desktop/src/main/ipc.ts": {
+    "imports": [
+      "zod",
+      "./logging",
+      "./secrets",
+      "./localEnvironment",
+      "./serviceSupervisor"
+    ]
+  },
+  "apps/desktop/src/main/localEnvironment.ts": {
+    "imports": []
+  },
+  "apps/desktop/src/main/logging.ts": {
+    "imports": []
+  },
+  "apps/desktop/src/main/secrets.ts": {
+    "imports": []
+  },
+  "apps/desktop/src/main/serviceAdapters.ts": {
+    "imports": [
+      "./serviceSupervisor"
+    ]
+  },
+  "apps/desktop/src/main/serviceSupervisor.ts": {
+    "imports": [
+      "./logging"
+    ]
+  },
+  "apps/desktop/src/main/windows.ts": {
+    "imports": [
+      "node:path"
+    ]
+  },
+  "apps/desktop/src/preload/index.ts": {
+    "imports": [
+      "electron"
+    ]
+  },
+  "apps/desktop/src/renderer/app/App.tsx": {
+    "imports": [
+      "react-router-dom",
+      "../components/HealthBar",
+      "../components/Sidebar",
+      "../screens/Overview",
+      "../screens/ShadowPortfolio",
+      "../screens/Positions",
+      "../screens/DecisionJournal",
+      "../screens/ResearchUniverse",
+      "../screens/Fingerprints",
+      "../screens/Regimes",
+      "../screens/PortfolioRisk",
+      "../screens/Microstructure",
+      "../screens/Context",
+      "../screens/ValidationLab",
+      "../screens/CostsAttribution",
+      "../screens/Protection",
+      "../screens/Reconciliation",
+      "../screens/Incidents",
+      "../screens/Reports",
+      "../screens/Configuration",
+      "../screens/System",
+      "../screens/Safety"
+    ]
+  },
+  "apps/desktop/src/renderer/app/main.tsx": {
+    "imports": [
+      "react",
+      "react-dom/client",
+      "./App"
+    ]
+  },
+  "apps/desktop/src/renderer/components/HealthBar.tsx": {
+    "imports": [
+      "../hooks/useHorizon"
+    ]
+  },
+  "apps/desktop/src/renderer/components/ScreenLayout.tsx": {
+    "imports": [
+      "react"
+    ]
+  },
+  "apps/desktop/src/renderer/components/Sidebar.tsx": {
+    "imports": [
+      "react-router-dom",
+      "../../shared/navigation"
+    ]
+  },
+  "apps/desktop/src/renderer/hooks/useHorizon.ts": {
+    "imports": [
+      "react"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/Configuration.tsx": {
+    "imports": [
+      "../components/ScreenLayout",
+      "../hooks/useHorizon"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/Context.tsx": {
+    "imports": [
+      "../components/ScreenLayout",
+      "../hooks/useHorizon"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/CostsAttribution.tsx": {
+    "imports": [
+      "../components/ScreenLayout"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/DecisionJournal.tsx": {
+    "imports": [
+      "../components/ScreenLayout"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/Fingerprints.tsx": {
+    "imports": [
+      "../components/ScreenLayout",
+      "../hooks/useHorizon"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/Incidents.tsx": {
+    "imports": [
+      "../components/ScreenLayout"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/Microstructure.tsx": {
+    "imports": [
+      "../components/ScreenLayout",
+      "../hooks/useHorizon"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/Overview.tsx": {
+    "imports": [
+      "../components/ScreenLayout",
+      "../hooks/useHorizon"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/PortfolioRisk.tsx": {
+    "imports": [
+      "../components/ScreenLayout",
+      "../hooks/useHorizon"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/Positions.tsx": {
+    "imports": [
+      "../components/ScreenLayout"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/Protection.tsx": {
+    "imports": [
+      "../components/ScreenLayout"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/Reconciliation.tsx": {
+    "imports": [
+      "../components/ScreenLayout"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/Regimes.tsx": {
+    "imports": [
+      "../components/ScreenLayout",
+      "../hooks/useHorizon"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/Reports.tsx": {
+    "imports": [
+      "react",
+      "../components/ScreenLayout"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/ResearchUniverse.tsx": {
+    "imports": [
+      "../components/ScreenLayout",
+      "../hooks/useHorizon"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/Safety.tsx": {
+    "imports": [
+      "../components/ScreenLayout",
+      "../hooks/useHorizon"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/ShadowPortfolio.tsx": {
+    "imports": [
+      "../components/ScreenLayout"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/System.tsx": {
+    "imports": [
+      "../components/ScreenLayout",
+      "../hooks/useHorizon"
+    ]
+  },
+  "apps/desktop/src/renderer/screens/ValidationLab.tsx": {
+    "imports": [
+      "../components/ScreenLayout",
+      "../hooks/useHorizon"
+    ]
+  },
+  "apps/desktop/src/shared/ipcContract.ts": {
+    "imports": [
+      "zod"
+    ]
+  },
+  "apps/desktop/src/shared/navigation.ts": {
+    "imports": []
+  },
+  "apps/desktop/tests/phase3a_authentication.test.ts": {
+    "imports": [
+      "vitest"
+    ]
+  },
+  "apps/desktop/tests/phase3a_build_manifest.test.ts": {
+    "imports": [
+      "node:fs",
+      "node:os",
+      "node:path",
+      "vitest",
+      "../build/generate-build-manifest"
+    ]
+  },
+  "apps/desktop/tests/phase3a_environment.test.ts": {
+    "imports": [
+      "vitest"
+    ]
+  },
+  "apps/desktop/tests/phase3a_ipc_contract.test.ts": {
+    "imports": [
+      "vitest"
+    ]
+  },
+  "apps/desktop/tests/phase3a_ipc_handler.test.ts": {
+    "imports": [
+      "vitest",
+      "../src/main/ipc",
+      "../src/shared/ipcContract",
+      "../src/main/logging",
+      "../src/main/localEnvironment"
+    ]
+  },
+  "apps/desktop/tests/phase3a_logging.test.ts": {
+    "imports": [
+      "vitest",
+      "../src/main/logging"
+    ]
+  },
+  "apps/desktop/tests/phase3a_navigation.test.ts": {
+    "imports": [
+      "vitest",
+      "../src/shared/navigation"
+    ]
+  },
+  "apps/desktop/tests/phase3a_safety_invariants.test.ts": {
+    "imports": [
+      "node:fs",
+      "node:path",
+      "vitest"
+    ]
+  },
+  "apps/desktop/tests/phase3a_secrets.test.ts": {
+    "imports": [
+      "vitest",
+      "../src/main/secrets"
+    ]
+  },
+  "apps/desktop/tests/phase3a_service_adapters.test.ts": {
+    "imports": [
+      "vitest"
+    ]
+  },
+  "apps/desktop/tests/phase3a_service_supervisor.test.ts": {
+    "imports": [
+      "vitest",
+      "../src/main/logging"
+    ]
+  },
+  "apps/desktop/tests/phase3a_window_security.test.ts": {
+    "imports": [
+      "vitest",
+      "../src/main/windows"
+    ]
+  },
+  "apps/desktop/tests/renderer/phase3a_health_bar.test.tsx": {
+    "imports": [
+      "vitest",
+      "react-dom/server",
+      "../../src/renderer/components/HealthBar",
+      "../../src/shared/navigation"
+    ]
+  },
+  "apps/desktop/tests/renderer/phase3a_screens.test.tsx": {
+    "imports": [
+      "vitest",
+      "react-dom/server",
+      "../../src/renderer/screens/Overview",
+      "../../src/renderer/screens/Safety",
+      "../../src/renderer/screens/Reports",
+      "../../src/renderer/screens/System",
+      "../../src/renderer/screens/Configuration",
+      "../../src/renderer/screens/ValidationLab"
+    ]
+  },
+  "apps/desktop/vite.config.ts": {
+    "imports": [
+      "vite",
+      "@vitejs/plugin-react"
+    ]
+  },
+  "apps/desktop/vitest.config.ts": {
+    "imports": [
+      "vitest/config",
+      "node:url",
+      "@vitejs/plugin-react"
+    ]
+  },
+  "packages/shared/src/constants.ts": {
+    "imports": []
+  },
+  "packages/shared/src/index.ts": {
+    "imports": []
+  },
+  "packages/shared/src/money.ts": {
+    "imports": []
+  },
+  "packages/shared/src/types.ts": {
+    "imports": [
+      "./constants"
+    ]
+  }
+}

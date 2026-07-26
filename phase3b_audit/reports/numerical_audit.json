@@ -1,0 +1,1561 @@
+{
+  "generatedAt": "2026-07-26T15:45:00Z",
+  "scope": "apps/server/src",
+  "totalHits": 193,
+  "nonCommentHits": 185,
+  "hitsByPattern": {
+    "silent_number_coercion": 142,
+    "plus_string_coerce": 0,
+    "nan_isNaN_only": 1,
+    "finite_check_missing": 0,
+    "silent_infinity": 17,
+    "silent_nan": 33
+  },
+  "reviewNote": "Static grep only — patterns flag call sites for manual sign-off, not automated pass/fail. The reviewer confirms each non-comment hit is a guarded conversion, an explicit test literal, or a documented sentinel.",
+  "results": [
+    {
+      "file": "apps/server/src/db/executionFence.ts",
+      "line": 66,
+      "snippet": "const newGeneration = Number(genRow?.gen ?? 0);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 47,
+      "snippet": "const num = (v: string | null): number | null => (v === null ? null : Number(v));",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 56,
+      "snippet": "entryPrice: Number(row.avgEntryPrice),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 57,
+      "snippet": "quantity: Number(row.filledQuantity),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 58,
+      "snippet": "allocationPct: Number(row.allocationPct),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 59,
+      "snippet": "takeProfitPrice: Number(row.takeProfitPrice),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 60,
+      "snippet": "stopLossPrice: Number(row.stopLossPrice),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 61,
+      "snippet": "takeProfitPct: Number(row.takeProfitPct),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 62,
+      "snippet": "stopLossPct: Number(row.stopLossPct),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 80,
+      "snippet": "quantity: Number(row.quantity),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 92,
+      "snippet": "const pnl = Number(row.realizedNetPnl);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 98,
+      "snippet": "entryPrice: Number(row.entryValueGross),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 99,
+      "snippet": "exitPrice: Number(row.exitValueGross),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 102,
+      "snippet": "pnlPct: Number(row.realizedNetPnlPct),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 134,
+      "snippet": "winRate: Number(row.winRate),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 188,
+      "snippet": "return Number(rows[0]?.count ?? 0);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 310,
+      "snippet": "return Number(rows[0]?.n ?? 0);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 401,
+      "snippet": "totalTrades: Number(r?.totalTrades ?? 0),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 402,
+      "snippet": "wins: Number(r?.wins ?? 0),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 403,
+      "snippet": "losses: Number(r?.losses ?? 0),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 404,
+      "snippet": "flats: Number(r?.flats ?? 0),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 405,
+      "snippet": "totalPnlDollars: Number(r?.totalPnlDollars ?? 0),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/queries.ts",
+      "line": 634,
+      "snippet": "return Number(rows[0]?.n ?? 0);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/tx.ts",
+      "line": 259,
+      "snippet": "const currentGen = Number(row.currentGeneration);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/db/tx.ts",
+      "line": 271,
+      "snippet": "const maxGen = Number(maxRows[0]?.maxGen ?? intent.fenceGeneration);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/market_data/bootstrap.ts",
+      "line": 230,
+      "snippet": "return Number(s) > 0;",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/market_data/candleAssembler.ts",
+      "line": 86,
+      "snippet": "const decEq = (a: string, b: string) => Number(a) === Number(b);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/market_data/coinbaseRest.ts",
+      "line": 88,
+      "snippet": "bucketStart: new Date(Number(c.start) * 1000),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/market_data/dataQualityGate.ts",
+      "line": 82,
+      "snippet": "const finalizedCount = Number(arr[0]?.c ?? 0);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/market_data/envelope.ts",
+      "line": 57,
+      "snippet": "const invalidTs = Number.isNaN(msg.sourceTimestamp.getTime());",
+      "patternId": "nan_isNaN_only",
+      "isComment": false,
+      "warn": "Global isNaN — prefer Number.isNaN"
+    },
+    {
+      "file": "apps/server/src/market_data/envelope.ts",
+      "line": 99,
+      "snippet": "// DB never sees a NaN. The rejected_malformed status preserves the audit trail.",
+      "patternId": "silent_nan",
+      "isComment": true,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/reporting/shadowReports.ts",
+      "line": 86,
+      "snippet": "approvedPlanCount: Number(approvedPlans),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/reporting/shadowReports.ts",
+      "line": 87,
+      "snippet": "openPositions: Number(openPositionsCount),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/reporting/shadowReports.ts",
+      "line": 119,
+      "snippet": "const productsEvaluatedRaw = Number(chainCountArr[0]?.n ?? 0);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/reporting/shadowReports.ts",
+      "line": 127,
+      "snippet": "const rejectedChainsN = Number(rejectedArr[0]?.n ?? 0);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/reporting/shadowReports.ts",
+      "line": 168,
+      "snippet": "const unresolved = Number(unresolvedArr[0]?.n ?? 0);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/reporting/shadowReports.ts",
+      "line": 200,
+      "snippet": "approvedPlans: Number(approvedPlansCount),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/reporting/shadowReports.ts",
+      "line": 212,
+      "snippet": "unprotectedExposure: Number(unprotectedExposure),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/reporting/shadowReports.ts",
+      "line": 239,
+      "snippet": "return Number(arr[0]?.n ?? 0);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/features/contract.ts",
+      "line": 17,
+      "snippet": "*   4. NaN or Infinity are fatal — they promote to `numerical_failure`",
+      "patternId": "silent_infinity",
+      "isComment": true,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/contract.ts",
+      "line": 17,
+      "snippet": "*   4. NaN or Infinity are fatal — they promote to `numerical_failure`",
+      "patternId": "silent_nan",
+      "isComment": true,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/contract.ts",
+      "line": 125,
+      "snippet": "const num = typeof meta.value === 'number' ? (meta.value as unknown as number) : NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/contract.ts",
+      "line": 133,
+      "snippet": "failureReason: 'value is NaN or Infinity',",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/contract.ts",
+      "line": 133,
+      "snippet": "failureReason: 'value is NaN or Infinity',",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 9,
+      "snippet": "* validate finiteness explicitly and promote NaN/Infinity into a",
+      "patternId": "silent_infinity",
+      "isComment": true,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 9,
+      "snippet": "* validate finiteness explicitly and promote NaN/Infinity into a",
+      "patternId": "silent_nan",
+      "isComment": true,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 19,
+      "snippet": "* positive prices — returns NaN if any input is <= 0.",
+      "patternId": "silent_nan",
+      "isComment": true,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 26,
+      "snippet": "if (!(a > 0) || !(b > 0)) return [NaN];",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 33,
+      "snippet": "if (xs.length === 0) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 39,
+      "snippet": "/** Sample variance (n-1). Returns NaN for n<2. */",
+      "patternId": "silent_nan",
+      "isComment": true,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 41,
+      "snippet": "if (xs.length < 2) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 59,
+      "snippet": "if (xs.length !== ys.length || xs.length < 2) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 73,
+      "snippet": "if (!(denom > 0)) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 87,
+      "snippet": "if (x.length !== y.length || x.length < 2) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 98,
+      "snippet": "if (!(den > 0)) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 107,
+      "snippet": "if (!(den > 0)) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 113,
+      "snippet": "* intercept). Returns NaN for degenerate inputs.",
+      "patternId": "silent_nan",
+      "isComment": true,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 116,
+      "snippet": "if (x.length !== y.length || x.length < 3) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 126,
+      "snippet": "if (!(den > 0)) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 142,
+      "snippet": "if (lag < 1 || xs.length <= lag + 1) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 153,
+      "snippet": "if (!(den > 0)) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 175,
+      "snippet": "return { vr: NaN, standardError: NaN, n, q };",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 181,
+      "snippet": "if (!(v1 > 0)) return { vr: NaN, standardError: NaN, n, q };",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 224,
+      "snippet": "return { H: NaN, intercept: NaN, r2: NaN, scales: [], logScales: [], logRs: [] };",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 252,
+      "snippet": "logRs.push(NaN);",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 263,
+      "snippet": "return { H: NaN, intercept: NaN, r2: NaN, scales, logScales, logRs };",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 296,
+      "snippet": "if (!(total > 0)) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/math.ts",
+      "line": 311,
+      "snippet": "if (xs.length === 0) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/stage1.ts",
+      "line": 455,
+      "snippet": "let hi = -Infinity;",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/stage1.ts",
+      "line": 456,
+      "snippet": "let lo = Infinity;",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/stage2.ts",
+      "line": 411,
+      "snippet": "let hi = -Infinity;",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/features/stage2.ts",
+      "line": 412,
+      "snippet": "let lo = Infinity;",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/hygiene/gate.ts",
+      "line": 163,
+      "snippet": "return Number(s) > 0;",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/microstructure/bookEngine.ts",
+      "line": 161,
+      "snippet": "const price = Number(l.price);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/microstructure/bookEngine.ts",
+      "line": 162,
+      "snippet": "const size = Number(l.size);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/microstructure/bookEngine.ts",
+      "line": 207,
+      "snippet": "const price = Number(l.price);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/microstructure/bookEngine.ts",
+      "line": 208,
+      "snippet": "const size = Number(l.size);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/microstructure/flow.ts",
+      "line": 47,
+      "snippet": "const price = Number(ev.trade.price);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/microstructure/flow.ts",
+      "line": 48,
+      "snippet": "const size = Number(ev.trade.size);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/regime/changeDetectors.ts",
+      "line": 334,
+      "snippet": "if (xs.length < 2) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/regime/globalState.ts",
+      "line": 386,
+      "snippet": "if (n === 0) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/regime/hmm.ts",
+      "line": 140,
+      "snippet": "let prevLL = -Infinity;",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/regime/hmm.ts",
+      "line": 158,
+      "snippet": "const logAlpha: number[][] = Array.from({ length: T }, () => Array<number>(K).fill(-Infinity));",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/regime/hmm.ts",
+      "line": 169,
+      "snippet": "const logBeta: number[][] = Array.from({ length: T }, () => Array<number>(K).fill(-Infinity));",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/regime/hmm.ts",
+      "line": 363,
+      "snippet": "logLikelihood: NaN,",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/regime/hmm.ts",
+      "line": 374,
+      "snippet": "const logAlpha = new Array<number>(K).fill(-Infinity);",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/regime/hmm.ts",
+      "line": 377,
+      "snippet": "const next: number[] = new Array(K).fill(-Infinity);",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/regime/hmm.ts",
+      "line": 390,
+      "snippet": "logLikelihood: NaN,",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/regime/hmm.ts",
+      "line": 399,
+      "snippet": "let bestP = -Infinity;",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/regime/hmm.ts",
+      "line": 497,
+      "snippet": "let m = -Infinity;",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/regime/hmm.ts",
+      "line": 499,
+      "snippet": "if (!Number.isFinite(m)) return -Infinity;",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/regime/hmm.ts",
+      "line": 511,
+      "snippet": "if (xs.length < 2) return NaN;",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/risk/contract.ts",
+      "line": 98,
+      "snippet": "failureReason: 'value is NaN or Infinity',",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/risk/contract.ts",
+      "line": 98,
+      "snippet": "failureReason: 'value is NaN or Infinity',",
+      "patternId": "silent_nan",
+      "isComment": false,
+      "warn": "literal NaN — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/risk/decision.ts",
+      "line": 118,
+      "snippet": "positionQuoteExposure: Number(p.remainingBaseSize) * Number(p.markPrice ?? p.weightedAverageEntry),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/decision.ts",
+      "line": 124,
+      "snippet": "candidateQuoteExposure: Number(inp.input.proposedQuoteSize),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/decision.ts",
+      "line": 137,
+      "snippet": "positionQuoteExposure: Number(p.remainingBaseSize) * Number(p.markPrice ?? p.weightedAverageEntry),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/decision.ts",
+      "line": 143,
+      "snippet": "candidateQuoteExposure: Number(inp.input.proposedQuoteSize),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/decision.ts",
+      "line": 156,
+      "snippet": "const equity = Number(inp.input.portfolioLedgerState.totalEquity);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/decision.ts",
+      "line": 200,
+      "snippet": "const proposedBase = Number(inp.input.proposedBaseSize);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/decision.ts",
+      "line": 363,
+      "snippet": "proposedBaseSize: Number(inp.input.proposedBaseSize),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/decision.ts",
+      "line": 364,
+      "snippet": "proposedQuoteSize: Number(inp.input.proposedQuoteSize),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/decision.ts",
+      "line": 405,
+      "snippet": "const peak = Number(input.drawdownState.peakEquity);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/decision.ts",
+      "line": 521,
+      "snippet": "cash: Number(input.input.cashAvailable).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/decision.ts",
+      "line": 522,
+      "snippet": "reservedCash: Number(input.input.cashReserved).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/decision.ts",
+      "line": 532,
+      "snippet": "currentDrawdown: Number(input.input.drawdownState.currentDrawdown).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/liquidity.ts",
+      "line": 57,
+      "snippet": "const proposedQuote = Number(input.proposedQuoteSize);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/liquidity.ts",
+      "line": 58,
+      "snippet": "const participation = liq.quoteVolume24h > 0 ? proposedQuote / liq.quoteVolume24h : Infinity;",
+      "patternId": "silent_infinity",
+      "isComment": false,
+      "warn": "literal Infinity — verify not silent"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 75,
+      "snippet": "endingEquity: Number(input.currentEquity).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 76,
+      "snippet": "realizedNetPnl: Number(input.realizedNetPnl).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 88,
+      "snippet": "startingEquity: Number(input.startingEquity).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 89,
+      "snippet": "endingEquity: Number(input.currentEquity).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 90,
+      "snippet": "realizedNetPnl: Number(input.realizedNetPnl).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 126,
+      "snippet": "endingEquity: Number(input.currentEquity).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 127,
+      "snippet": "realizedNetPnl: Number(input.realizedNetPnl).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 139,
+      "snippet": "startingEquity: Number(input.startingEquity).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 140,
+      "snippet": "endingEquity: Number(input.currentEquity).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 141,
+      "snippet": "realizedNetPnl: Number(input.realizedNetPnl).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 165,
+      "snippet": "peakEquity: Number(input.peakEquity).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 166,
+      "snippet": "currentEquity: Number(input.currentEquity).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 167,
+      "snippet": "currentDrawdown: Number(input.currentDrawdown).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 168,
+      "snippet": "maximumDrawdown: Number(input.maximumDrawdown).toFixed(10),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 195,
+      "snippet": "const start = Number(input.dailyLossState.startingEquity);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 196,
+      "snippet": "const cur = Number(input.dailyLossState.currentEquity);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 197,
+      "snippet": "const realized = Number(input.dailyLossState.realizedNetPnl);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 225,
+      "snippet": "const realized = Number(input.weeklyLossState.realizedNetPnl);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 252,
+      "snippet": "const peak = Number(input.drawdownState.peakEquity);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 253,
+      "snippet": "const cur = Number(input.drawdownState.currentEquity);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/lossStates.ts",
+      "line": 270,
+      "snippet": "maximumDrawdown: Number(input.drawdownState.maximumDrawdown),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 60,
+      "snippet": "const stopPrice = Number(input.stopPrice);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 87,
+      "snippet": "return Number(m.toDecimalString());",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 148,
+      "snippet": "const base = Number(p.remainingBaseSize);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 149,
+      "snippet": "const avg = Number(p.weightedAverageEntry);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 150,
+      "snippet": "const mark = p.markPrice != null ? Number(p.markPrice) : avg;",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 201,
+      "snippet": "const stop = p.activeStopPrice != null ? Number(p.activeStopPrice) : null;",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 280,
+      "snippet": "clusterExposure.set(p.clusterKey, (clusterExposure.get(p.clusterKey) ?? 0) + Number(p.remainingBaseSize) * Number(p.markPrice ?? p.weightedAverageEntry));",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 285,
+      "snippet": ".reduce((s, i) => s + Number(i.proposedQuoteSize), 0);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 290,
+      "snippet": ".reduce((s, i) => s + Number(i.proposedQuoteSize), 0);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 292,
+      "snippet": "const equity = Number(input.portfolioLedgerState.totalEquity);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 293,
+      "snippet": "const cash = Number(input.cashAvailable);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 294,
+      "snippet": "const reserved = Number(input.cashReserved);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 299,
+      "snippet": "const candidateQuote = Number(input.proposedQuoteSize);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/measurements.ts",
+      "line": 309,
+      "snippet": "const illiquidExposure = input.liquidityEvidence.hygieneEligible ? 0 : Number(input.proposedQuoteSize);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/reporting.ts",
+      "line": 54,
+      "snippet": "const avgMultiplier = reduces.length > 0 ? reduces.reduce((s, d) => s + Number(d.sizeMultiplier), 0) / reduces.length : null;",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/reporting.ts",
+      "line": 62,
+      "snippet": "totalOpenRiskLatest: latest ? Number(latest.totalOpenStopRisk) : 0,",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/reporting.ts",
+      "line": 63,
+      "snippet": "cashUtilizationLatest: latest ? Number(latest.grossExposure) / Math.max(1, Number(latest.cash)) : 0,",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/reporting.ts",
+      "line": 64,
+      "snippet": "unprotectedExposureLatest: latest ? Number(latest.unprotectedExposure) : 0,",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/reporting.ts",
+      "line": 68,
+      "snippet": "btcBetaExposureLatest: latest?.btcBetaExposure != null ? Number(latest.btcBetaExposure) : null,",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/reporting.ts",
+      "line": 69,
+      "snippet": "ethBetaExposureLatest: latest?.ethBetaExposure != null ? Number(latest.ethBetaExposure) : null,",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/reporting.ts",
+      "line": 70,
+      "snippet": "dailyLossLatest: latest ? Number(latest.dailyLoss) : 0,",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/reporting.ts",
+      "line": 71,
+      "snippet": "weeklyLossLatest: latest ? Number(latest.weeklyLoss) : 0,",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/reporting.ts",
+      "line": 72,
+      "snippet": "currentDrawdownLatest: latest ? Number(latest.currentDrawdown) : 0,",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/reporting.ts",
+      "line": 73,
+      "snippet": "historicalVaRLatest: latest?.historicalVaR != null ? Number(latest.historicalVaR) : null,",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/reporting.ts",
+      "line": 74,
+      "snippet": "historicalEsLatest: latest?.historicalExpectedShortfall != null ? Number(latest.historicalExpectedShortfall) : null,",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/reporting.ts",
+      "line": 75,
+      "snippet": "worstStressLossLatest: latest?.worstStressLoss != null ? Number(latest.worstStressLoss) : null,",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/sizeCap.ts",
+      "line": 68,
+      "snippet": "const proposedBase = Number(inp.input.proposedBaseSize);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/sizeCap.ts",
+      "line": 69,
+      "snippet": "const price = Number(inp.input.approvedEntryPrice);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/sizeCap.ts",
+      "line": 70,
+      "snippet": "const equity = Number(inp.input.portfolioLedgerState.totalEquity);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/sizeCap.ts",
+      "line": 95,
+      "snippet": "const cash = Number(inp.input.cashAvailable);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/sizeCap.ts",
+      "line": 96,
+      "snippet": "const reserved = Number(inp.input.cashReserved);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/sizeCap.ts",
+      "line": 186,
+      "snippet": "const baseIncrement = Number(inp.input.productMetadata.baseIncrement);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/sizeCap.ts",
+      "line": 191,
+      "snippet": "const baseMinimum = Number(inp.input.productMetadata.baseMinimum);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/sizeCap.ts",
+      "line": 192,
+      "snippet": "const quoteMinimum = inp.input.productMetadata.quoteMinimum != null ? Number(inp.input.productMetadata.quoteMinimum) : 0;",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/stressTests.ts",
+      "line": 245,
+      "snippet": "quoteExposure: Number(p.remainingBaseSize) * Number(p.markPrice ?? p.weightedAverageEntry),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/research/risk/stressTests.ts",
+      "line": 253,
+      "snippet": "quoteExposure: Number(input.proposedQuoteSize),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/routers/tokens.ts",
+      "line": 23,
+      "snippet": "price = Number(product.price);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/routers/tokens.ts",
+      "line": 24,
+      "snippet": "volume24h = Number(product.volume_24h) * price;",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/routers/tokens.ts",
+      "line": 25,
+      "snippet": "changePct24h = Number(product.price_percentage_change_24h);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/routers/tokens.ts",
+      "line": 36,
+      "snippet": "winRate: stat && stat.totalTrades > 0 ? Number(stat.winRate) : null,",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/routers/trading.ts",
+      "line": 36,
+      "snippet": "const currentPrice = Number(product.price);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/soak/certification.ts",
+      "line": 111,
+      "snippet": "acc.accountingDifferenceAbs += Math.abs(Number(r.accountingDifference));",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/cashFlowForecast.ts",
+      "line": 431,
+      "snippet": "const deviationValue = Number(deviationBps.toDecimalString(4));",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 364,
+      "snippet": "closes: candles.map((c) => Number(c.close)),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 365,
+      "snippet": "volumes: candles.map((c) => Number(c.volume)),",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/coinbase.ts",
+      "line": 380,
+      "snippet": "return usd ? Number(usd.available_balance.value) : 0;",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/fillState.ts",
+      "line": 202,
+      "snippet": "const oursNumber = Number(ours.toDecimalString(4));",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/marketWindow.ts",
+      "line": 19,
+      "snippet": "const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0') % 24;",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/marketWindow.ts",
+      "line": 20,
+      "snippet": "const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/orderConfig.ts",
+      "line": 227,
+      "snippet": "if (Number(diffBps.toDecimalString(4)) > snapshot.priceMoveToleranceBps) {",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/reconciler.ts",
+      "line": 97,
+      "snippet": "const bal = Number(a.available_balance.value);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/reconciler.ts",
+      "line": 105,
+      "snippet": "const expected = Number(p.filledQuantity);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/scanner.ts",
+      "line": 276,
+      "snippet": "const price = Number(product.price);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/scanner.ts",
+      "line": 277,
+      "snippet": "const volume24hBase = Number(product.volume_24h);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/scanner.ts",
+      "line": 279,
+      "snippet": "const changePct24h = Number(product.price_percentage_change_24h);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/shadow/certification.ts",
+      "line": 140,
+      "snippet": "if (Number(diff.toDecimalString(8)) > 0.00000001) {",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/shadow/certification.ts",
+      "line": 213,
+      "snippet": "Number(accountingDifferenceMax.toDecimalString(8)) === 0 &&",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/shadow/postFillRevalidation.ts",
+      "line": 98,
+      "snippet": "} else if (Number(deviationBps.toDecimalString(4)) > INVALID_DEVIATION_BPS) {",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/shadow/postFillRevalidation.ts",
+      "line": 101,
+      "snippet": "} else if (Number(deviationBps.toDecimalString(4)) > POST_FILL_DEVIATION_TOLERANCE_BPS) {",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/shadow/postFillRevalidation.ts",
+      "line": 197,
+      "snippet": "const n = Number(v);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/shadow/postFillRevalidation.ts",
+      "line": 211,
+      "snippet": "const b = Number(plan.exactBaseSize);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/shadow/postFillRevalidation.ts",
+      "line": 212,
+      "snippet": "const q = Number(plan.exactQuoteSize);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/shadow/simulator.ts",
+      "line": 392,
+      "snippet": "return Number(rows[0]?.n ?? 0);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    },
+    {
+      "file": "apps/server/src/trading/shadow/simulator.ts",
+      "line": 405,
+      "snippet": "return Number(rows[0]?.n ?? 0);",
+      "patternId": "silent_number_coercion",
+      "isComment": false,
+      "warn": "Number(...) without ?? fallback"
+    }
+  ]
+}
