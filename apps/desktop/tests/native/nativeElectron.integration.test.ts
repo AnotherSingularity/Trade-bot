@@ -446,19 +446,128 @@ async function boundedPartialTeardown(): Promise<void> {
   }
 }
 
-// Stage 3C-CI-FIX5 §1: the sole post-DOM-load initialisation. Anything
-// that touches the page BEFORE the first `it()` must happen inside
-// this function so it is bounded by the `renderer_ready` withNativeTimeout.
-// The probe waits for `window.horizon` to be exposed by the preload —
-// which is the smallest observable proof that the preload script ran
-// AND that the renderer's IPC bridge is live. If the renderer crashed
-// or hangs before exposing `window.horizon`, this promise never
-// resolves and the timeout fires with `native_startup_timeout:renderer_ready`.
+// Stage 3C-CI-FIX5 §1 + Stage 3C-CI-FIX6 §3/§4: the sole post-DOM-load
+// initialisation. Anything that touches the page BEFORE the first
+// `it()` must happen inside this function so it is bounded by the
+// `renderer_ready` withNativeTimeout.
+//
+// The probe waits for the renderer to be ready by accepting EITHER
+//   - a captured `HORIZON_NATIVE_RENDERER_BOOTSTRAPPED` console marker
+//     (already streamed to renderer.log by the harness), OR
+//   - `window.__HORIZON_NATIVE_RENDERER_READY__ === true` — a durable
+//     flag set by the renderer at bootstrap time so the probe survives
+//     a listener-attachment race, OR
+//   - `window.horizon` being fully populated (desktopData function +
+//     auth object) — the smallest observable proof preload ran and the
+//     IPC bridge is live.
+//
+// The probe races against renderer error events so a crash/pageerror/
+// load failure fails FAST with an attributive error code, rather than
+// consuming the full 60-second renderer_ready timeout:
+//   - `native_renderer_error:<sanitized-message>` on pageerror
+//   - `native_renderer_crashed` on crash
+//   - `native_renderer_load_failed:<code>` on requestfailed of the doc
+//
+// Before entering the poll loop, the probe writes
+// `renderer-state-after-first-window.json` capturing document.readyState,
+// URL, root existence, and window.horizon keys — evidence for a
+// reviewer even if readiness never arrives.
 async function initializeAndAwaitRendererReady(page: import('playwright').Page): Promise<void> {
-  // Poll — cheaper than the alternative approaches (waitForFunction
-  // schedules polling internally anyway, and this variant emits per-
-  // iteration diagnostics if we ever need them). Deadline enforced by
-  // the outer withNativeTimeout.
+  // Snapshot page state IMMEDIATELY on entry so a subsequent hang
+  // still leaves proof of what the page looked like at DOM-load time.
+  await snapshotRendererStateAfterFirstWindow(page);
+
+  // Race the polling loop against renderer error events. If the
+  // renderer already crashed, we don't want to wait 60s to say so.
+  const readyPromise = pollForRendererReady(page);
+  const errorPromise = raceOnRendererError(page);
+  try {
+    await Promise.race([readyPromise, errorPromise]);
+  } finally {
+    // Detach short-lived error listeners so they don't fire during
+    // later assertions (harness page listeners for logging remain
+    // attached — those live for the whole run).
+    ephemeralErrorListenerCleanup();
+  }
+}
+
+// Stores per-run ephemeral listener cleanup handles.
+let ephemeralErrorListenerCleanup: () => void = () => {};
+
+async function snapshotRendererStateAfterFirstWindow(page: import('playwright').Page): Promise<void> {
+  if (!iso?.logsDir) return;
+  try {
+    const state = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const h = (globalThis as any).horizon;
+      return {
+        readyState: document.readyState,
+        href: location.href,
+        title: document.title,
+        bodyText: (document.body?.innerText ?? '').slice(0, 2_000),
+        hasRoot: Boolean(document.querySelector('#root')),
+        rootChildrenCount: document.querySelector('#root')?.children.length ?? 0,
+        horizonKeys: h && typeof h === 'object' ? Object.keys(h) : null,
+        horizonNativeDiagnosticsEnabled: (h && typeof h === 'object') ? h.nativeDiagnosticsEnabled === true : null,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        durableReadyFlag: (globalThis as any).__HORIZON_NATIVE_RENDERER_READY__ === true,
+      };
+    });
+    for (const dir of [WORKFLOW_LOGS_DIR, iso.logsDir]) {
+      try {
+        writeFileSync(join(dir, 'renderer-state-after-first-window.json'), JSON.stringify({
+          contract: 'stage3c-native-renderer-state.v1',
+          capturedAt: new Date().toISOString(),
+          ...state,
+        }, null, 2));
+      } catch { /* best-effort */ }
+    }
+  } catch (e) {
+    for (const dir of [WORKFLOW_LOGS_DIR, iso.logsDir]) {
+      try {
+        writeFileSync(join(dir, 'renderer-state-after-first-window.json'), JSON.stringify({
+          contract: 'stage3c-native-renderer-state.v1',
+          capturedAt: new Date().toISOString(),
+          evaluateError: sanitizeDiagnosticMessage(e instanceof Error ? e.message : String(e)),
+        }, null, 2));
+      } catch { /* best-effort */ }
+    }
+  }
+}
+
+function raceOnRendererError(page: import('playwright').Page): Promise<never> {
+  return new Promise<never>((_, reject) => {
+    const onPageError = (err: Error): void => {
+      diagnosticsTrace?.record('renderer_ready', 'failed', {
+        errorCode: `native_renderer_error:${sanitizeDiagnosticMessage(err.message).slice(0, 200)}`,
+      });
+      reject(new Error(`native_renderer_error:${sanitizeDiagnosticMessage(err.message).slice(0, 200)}`));
+    };
+    const onCrash = (): void => {
+      diagnosticsTrace?.record('renderer_ready', 'failed', { errorCode: 'native_renderer_crashed' });
+      reject(new Error('native_renderer_crashed'));
+    };
+    const onRequestFailed = (req: import('playwright').Request): void => {
+      // Only fail-fast when the MAIN document request failed. Sub-
+      // resource failures (icons, fonts) are noisy and not fatal.
+      if (req.resourceType() === 'document') {
+        const code = req.failure()?.errorText ?? 'unknown';
+        diagnosticsTrace?.record('renderer_ready', 'failed', { errorCode: `native_renderer_load_failed:${code}` });
+        reject(new Error(`native_renderer_load_failed:${code}`));
+      }
+    };
+    page.on('pageerror', onPageError);
+    page.on('crash', onCrash);
+    page.on('requestfailed', onRequestFailed);
+    ephemeralErrorListenerCleanup = () => {
+      page.off('pageerror', onPageError);
+      page.off('crash', onCrash);
+      page.off('requestfailed', onRequestFailed);
+    };
+  });
+}
+
+async function pollForRendererReady(page: import('playwright').Page): Promise<void> {
   const start = Date.now();
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -466,15 +575,18 @@ async function initializeAndAwaitRendererReady(page: import('playwright').Page):
     try {
       ok = await page.evaluate(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const h = (globalThis as any).horizon;
+        const g = globalThis as any;
+        // Accept the durable window flag first — survives listener races.
+        if (g.__HORIZON_NATIVE_RENDERER_READY__ === true) return true;
+        const h = g.horizon;
         return !!(h && typeof h === 'object' && typeof h.desktopData === 'function' && typeof h.auth === 'object');
       });
     } catch {
       // page.evaluate can reject during navigation / crash — swallow
-      // and retry until the outer timeout fires.
+      // and retry until either the outer timeout fires or a race
+      // partner (pageerror/crash) rejects first.
     }
     if (ok) {
-      // Also record how long it took so a slow-but-successful boot is legible.
       diagnosticsTrace?.record('renderer_ready', 'started', { readyAfterMs: Date.now() - start });
       return;
     }

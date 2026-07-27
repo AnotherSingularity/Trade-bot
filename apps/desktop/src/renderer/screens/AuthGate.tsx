@@ -13,9 +13,24 @@
  * data. This stage restricts the renderer strictly to the auth flow.
  */
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import type { AuthOperationResponse, SanitizedAuthState } from '../../shared/ipcContract';
+
+// Stage 3C-CI-FIX6 §2: AuthGate mount marker — fires only under the
+// strict test diagnostics policy. Emits once per session as evidence
+// that the top-level auth boundary rendered (which is the point past
+// which the renderer is ready to receive readiness assertions).
+function emitAuthGateMarker(): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const h = (globalThis as any).window?.horizon;
+    if (h && h.nativeDiagnosticsEnabled === true) {
+      // eslint-disable-next-line no-console
+      console.log('HORIZON_NATIVE_AUTH_GATE_RENDERED');
+    }
+  } catch { /* swallow */ }
+}
 
 function StatusBanner({ text }: { text: string }) {
   return (
@@ -244,6 +259,11 @@ function BootstrapUnavailableScreen({ state, onRetry }: { state: SanitizedAuthSt
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { state, loading, refresh, actions } = useAuth();
+
+  // Emit the AuthGate render marker exactly once per component mount
+  // — the marker proves the React tree walked to the top-level auth
+  // boundary. Under packaged/production builds this call is a no-op.
+  useEffect(() => { emitAuthGateMarker(); }, []);
 
   if (loading) return null;
 

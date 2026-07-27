@@ -12,11 +12,48 @@
  *   5. Confirms the enclosed file paths use the portable forward-slash
  *      representation (deterministic across POSIX + Windows).
  */
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { tmpdir, platform } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+// Stage 3C-CI-FIX6 §1: Windows spawn shim.
+// - Node ≥ 20.12 (CVE-2024-27980 mitigation) refuses to spawn `.bat`
+//   / `.cmd` files unless `shell: true` is set. `npm` on Windows IS
+//   `npm.cmd`, so both defenses are needed: (a) name the .cmd file
+//   explicitly, and (b) run through the shell.
+// - On POSIX we invoke `npm` directly and NEVER opt into the shell.
+// - The wrapper also fail-fasts on spawn errors with a diagnostic
+//   message; a bare `status=null` from a failed spawn was the FIX5
+//   Windows symptom.
+function runNpm(
+  args: readonly string[],
+  cwd: string,
+  extraEnv: Record<string, string> = {},
+): SpawnSyncReturns<string> {
+  const isWin = process.platform === 'win32';
+  const cmd = isWin ? 'npm.cmd' : 'npm';
+  const result = spawnSync(cmd, args, {
+    cwd,
+    encoding: 'utf8',
+    shell: isWin,
+    env: { ...process.env, ...extraEnv },
+  });
+  const banner = [
+    `command=${cmd}`,
+    `args=${JSON.stringify(args)}`,
+    `cwd=${cwd}`,
+    `platform=${process.platform}`,
+    `error=${String(result.error ?? 'null')}`,
+    `status=${result.status}`,
+    `signal=${result.signal ?? 'null'}`,
+    `stdout=${result.stdout ?? ''}`,
+    `stderr=${result.stderr ?? ''}`,
+  ].join('\n');
+  expect(result.error, `spawn failed to launch ${cmd}\n${banner}`).toBeUndefined();
+  return result;
+}
 
 const DESKTOP_ROOT = resolve(__dirname, '..', '..');
 
@@ -49,15 +86,14 @@ describe('Stage 3C-CI-FIX5 — build:manifest package script', () => {
   });
 
   it('runs via `npm run build:manifest -- <dist>` and produces build-manifest.json', () => {
-    // Use the same npm binary that Vitest was launched with — ensures
-    // we invoke the workspace-hoisted tsx, not a global one.
-    const isWin = platform() === 'win32';
-    const npmBin = isWin ? 'npm.cmd' : 'npm';
-    const result = spawnSync(npmBin, ['run', 'build:manifest', '--', distDir], {
-      cwd: DESKTOP_ROOT,
-      encoding: 'utf8',
-      env: { ...process.env, HORIZON_BUILD_COMMIT: 'fix5-unit-test' },
-    });
+    // Uses the FIX6 runNpm shim — invokes npm.cmd on Windows through
+    // the shell (Node ≥ 20.12 CVE-2024-27980 mitigation) and reports
+    // spawn errors with full diagnostic context.
+    const result = runNpm(
+      ['run', 'build:manifest', '--', distDir],
+      DESKTOP_ROOT,
+      { HORIZON_BUILD_COMMIT: 'fix6-unit-test' },
+    );
     expect(result.status, `stdout=${result.stdout}\nstderr=${result.stderr}`).toBe(0);
     const manifestPath = join(distDir, 'build-manifest.json');
     expect(existsSync(manifestPath), 'build-manifest.json missing').toBe(true);
@@ -72,7 +108,7 @@ describe('Stage 3C-CI-FIX5 — build:manifest package script', () => {
       safeFlags: { DRY_RUN: boolean; ORDER_SUBMISSION_ENABLED: boolean; SIMULATION_MODE: string };
     };
     expect(parsed.packageName).toBe('@horizon/desktop');
-    expect(parsed.buildCommit).toBe('fix5-unit-test');
+    expect(parsed.buildCommit).toBe('fix6-unit-test');
     // Bundle checksum must be deterministic sha256 hex — the aggregate
     // over every file in the dist tree in a portable way.
     expect(parsed.bundleChecksum).toMatch(/^[a-f0-9]{64}$/);
@@ -85,8 +121,6 @@ describe('Stage 3C-CI-FIX5 — build:manifest package script', () => {
   }, 30_000);
 
   it('bundleChecksum is stable across two runs given identical inputs (portable path handling)', () => {
-    const isWin = platform() === 'win32';
-    const npmBin = isWin ? 'npm.cmd' : 'npm';
     const runOnce = (dst: string): string => {
       // Rebuild the fixture from scratch each time — the walker
       // includes the just-written build-manifest.json in the next
@@ -96,15 +130,14 @@ describe('Stage 3C-CI-FIX5 — build:manifest package script', () => {
       writeFileSync(join(dst, 'main', 'index.js'), 'console.log("main");\n');
       writeFileSync(join(dst, 'renderer', 'index.html'), '<!doctype html><html></html>\n');
       writeFileSync(join(dst, 'renderer', 'assets', 'app.js'), 'export {};\n');
-      const result = spawnSync(npmBin, ['run', 'build:manifest', '--', dst], {
-        cwd: DESKTOP_ROOT,
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          HORIZON_BUILD_COMMIT: 'fix5-unit-test',
+      const result = runNpm(
+        ['run', 'build:manifest', '--', dst],
+        DESKTOP_ROOT,
+        {
+          HORIZON_BUILD_COMMIT: 'fix6-unit-test',
           HORIZON_BUILD_TIMESTAMP: '2026-07-27T00:00:00.000Z',
         },
-      });
+      );
       expect(result.status, `stdout=${result.stdout}\nstderr=${result.stderr}`).toBe(0);
       const parsed = JSON.parse(readFileSync(join(dst, 'build-manifest.json'), 'utf8')) as {
         bundleChecksum: string;
