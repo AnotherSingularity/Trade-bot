@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 // Stage 1 §17 — invariants that remain true across the runtime wiring.
@@ -17,13 +17,29 @@ function walk(dir: string, acc: string[]): void {
   }
 }
 
+// Stage 3C-CI-FIX3 §C: normalize path separators before endsWith().
+// path.join uses '\\' on Windows and '/' on POSIX; endsWith('main/index.ts')
+// silently misses on Windows and the original `find(...)!` bang then
+// crashes with "Cannot read properties of undefined" instead of a
+// clear assertion. This helper normalises both sides.
+function normSep(p: string): string {
+  return p.split(sep).join('/');
+}
+
+function findFile(contents: Array<{ f: string; c: string }>, suffix: string): { f: string; c: string } {
+  const normSuffix = suffix.split(/[/\\]/).join('/');
+  const found = contents.find((x) => normSep(x.f).endsWith(normSuffix));
+  expect(found, `expected to find a source file ending in "${suffix}" — searched ${contents.length} files`).toBeDefined();
+  return found!;
+}
+
 describe('stage1 §36-§39 — safe-flag + zero-order + no-stub invariants', () => {
   const files: string[] = [];
   walk(DESKTOP_SRC, files);
   const contents = files.map((f) => ({ f, c: readFileSync(f, 'utf8') }));
 
   it('T-S1.36: safe flags remain unchanged (DRY_RUN=true, ORDER_SUBMISSION_ENABLED=false enforced)', () => {
-    const env = contents.find((x) => x.f.endsWith('localEnvironment.ts'))!;
+    const env = findFile(contents, 'localEnvironment.ts');
     expect(env.c).toMatch(/DRY_RUN must be true/);
     expect(env.c).toMatch(/ORDER_SUBMISSION_ENABLED must be false/);
     expect(env.c).toMatch(/production providers must remain inactive/);
@@ -39,7 +55,7 @@ describe('stage1 §36-§39 — safe-flag + zero-order + no-stub invariants', () 
   });
 
   it('T-S1.no-hardcoded-versions: no phase-2X policy version literal appears in main/index.ts', () => {
-    const idx = contents.find((x) => x.f.endsWith('main/index.ts'))!;
+    const idx = findFile(contents, 'main/index.ts');
     // Old Phase 3A boot hardcoded 'p2a-1', 'p2b-1', … as counter/version defaults.
     expect(idx.c.includes("'p2a-1'")).toBe(false);
     expect(idx.c.includes("'p2b-1'")).toBe(false);
@@ -47,14 +63,14 @@ describe('stage1 §36-§39 — safe-flag + zero-order + no-stub invariants', () 
   });
 
   it('T-S1.no-hardcoded-counters: no `functionInvocations: 0, attemptCount: 0` literal in main/index.ts', () => {
-    const idx = contents.find((x) => x.f.endsWith('main/index.ts'))!;
+    const idx = findFile(contents, 'main/index.ts');
     expect(idx.c.match(/functionInvocations:\s*0,\s*attemptCount:\s*0/)).toBeNull();
   });
 
   it('T-S1.no-stub-runner: production factory refuses InMemoryRunner', () => {
     // Encoded in stage1_adapter_factory.test.ts; here we assert that the
     // desktop main entry no longer imports InMemoryRunner from serviceAdapters.
-    const idx = contents.find((x) => x.f.endsWith('main/index.ts'))!;
+    const idx = findFile(contents, 'main/index.ts');
     expect(idx.c).not.toMatch(/import\s*{[^}]*InMemoryRunner[^}]*}\s*from\s*['"]\.\/serviceAdapters['"]/);
     // The new factory is imported.
     expect(idx.c).toMatch(/createServiceAdapters/);

@@ -335,6 +335,11 @@ describe.sequential('stage2-fix §5 bootstrap-scope narrowness', () => {
   });
 
   it('BS8: bootstrap token does not appear in captured server stdout/stderr', () => {
+    // Stage 3C-CI-FIX3 §C: `if (!available) return` mirrors the other
+    // external-service assertions in this describe. Without services
+    // (Windows CI, etc.), no server was spawned and serverStdio is
+    // empty — the length assertion would fire spuriously.
+    if (!available) return;
     // The server has produced several lines of output by now (startup log
     // + BullMQ ready + reconciliation status).
     const combined = serverStdio.join('');

@@ -82,12 +82,23 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci
 
-      # Stage 3C-ENV-FIX2 §2: create the log directory unconditionally
-      # so downstream steps (upload-artifact, evidence summary) always
-      # have a valid path to reference, even when the native harness
-      # never launches.
+      # Stage 3C-CI-FIX3 §B: create the log directory AND emit a
+      # bootstrap file so the artefact-upload step always has a real
+      # file to upload — GitHub actions/upload-artifact silently
+      # skips empty directories, so `if-no-files-found: error` alone
+      # would only catch truly-absent trees.
       - name: Prepare native evidence directory
-        run: mkdir -p apps/desktop/tests/native/logs
+        shell: bash
+        run: |
+          mkdir -p apps/desktop/tests/native/logs
+          cat > apps/desktop/tests/native/logs/ci-bootstrap.txt <<EOF
+          workflow_run_id=${GITHUB_RUN_ID}
+          commit=${GITHUB_SHA}
+          runner_os=${RUNNER_OS}
+          native_test_started=false
+          harness_launched_at=pending
+          note=Overwritten or supplemented by native test evidence.json when the harness actually runs.
+          EOF
 
       - name: Typecheck (shared)
         working-directory: packages/shared
@@ -135,18 +146,19 @@ jobs:
         env:
           NATIVE_DEBUG: '0'
 
-      # Stage 3C-ENV-FIX2 §3: artefact upload must tolerate an empty
-      # log tree (env/setup failures never produce logs). `if-no-files-found: warn`
-      # keeps the step non-fatal so a subsequent env failure still
-      # yields a diagnosable run rather than a bare "artifact missing".
-      - name: Upload native harness evidence
+      # Stage 3C-CI-FIX3 §B: upload the directory itself (not
+      # `logs/**`) so the ci-bootstrap.txt file always accompanies
+      # any subsequent evidence.json. `if-no-files-found: error`
+      # is now safe because the Prepare step guarantees at least
+      # ci-bootstrap.txt exists.
+      - name: Upload native evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: stage3c-native-evidence-${{ github.run_id }}
-          path: apps/desktop/tests/native/logs/**
+          path: apps/desktop/tests/native/logs
           retention-days: 30
-          if-no-files-found: warn
+          if-no-files-found: error
 
       # Stage 3C-ENV-FIX2 §3: search from the repo root instead of
       # cd'ing into the log directory. The prior step tried

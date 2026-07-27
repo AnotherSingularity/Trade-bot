@@ -87,6 +87,12 @@ export interface SeedSummary {
   reconciliation_runs: number;
   desktop_incidents: number;
   protection_instances: number;
+  // Stage 3C-CI-FIX3 §A — protection_policy_versions is a required
+  // parent for the Protection screen; previously never populated in
+  // the summary object, causing the manifest coverage assertion to
+  // read `undefined` (=> 0) and reject the run even after the row
+  // successfully landed. Now explicitly tracked.
+  protection_policy_versions: number;
 
   // 8 new domains added in Stage 3C-ENV
   bot_config: number;
@@ -110,6 +116,42 @@ async function tableExists(c: Connection, name: string): Promise<boolean> {
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return Number((rows as any)[0]?.n ?? 0) > 0;
+}
+
+/**
+ * Stage 3C-CI-FIX3 §A: sanitized error string for seed failures.
+ * The message goes into the CI log + evidence bundle; must not
+ * leak bearer tokens, bootstrap tokens, or connection strings.
+ */
+export function sanitizeSeedError(raw: string): string {
+  return raw
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer <REDACTED>')
+    .replace(/mysql:\/\/[^@\s]+@/g, 'mysql://<REDACTED>@')
+    .replace(/password\s*=\s*'?[^\s',)]+/gi, 'password=<REDACTED>')
+    .replace(/[A-Fa-f0-9]{32,}/g, '<HEX_REDACTED>')
+    .slice(0, 480);
+}
+
+/**
+ * Stage 3C-CI-FIX3 §A: strict insert for mandatory seed rows.
+ * Unlike safeInsert (which swallows and moves on), this throws
+ * with a sanitized error the caller can propagate to the harness
+ * log — giving CI a clear diagnosis instead of a downstream
+ * "seeded=0" surprise. Used only for tables the manifest lists
+ * as `expectedState: 'healthy'`.
+ */
+async function requiredInsert(
+  connection: Connection,
+  label: string,
+  sql: string,
+  values: readonly unknown[],
+): Promise<void> {
+  try {
+    await connection.query(sql, values as unknown[]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`required_seed_failed:${label}:${sanitizeSeedError(message)}`);
+  }
 }
 
 async function safeInsert(c: Connection, sql: string, values: unknown[]): Promise<void> {
@@ -556,14 +598,40 @@ export async function seedNativeFixture(dbUrl: string): Promise<SeedSummary> {
     }
 
     // -----------------------------------------------------------
-    // Protection (Stage 3C schema)
+    // Protection (Stage 3C schema) — mandatory, NO silent path.
+    // Stage 3C-CI-FIX3 §A: previously used safeInsert which
+    // swallowed CI-only insert errors and left downstream FKs +
+    // manifest gate to surface "seeded=0" as an ambiguous failure.
+    // Now requiredInsert + explicit count verification. The
+    // migration definition (0009_phase1_gate3c_protection_matrix.sql
+    // lines 18-29) declares: id INT AUTO_INCREMENT PK,
+    // version VARCHAR(32) NOT NULL UNIQUE, status ENUM(...) NOT NULL
+    // DEFAULT 'draft', description TEXT NULL,
+    // createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    // activatedAt TIMESTAMP NULL, supersedesPolicyId INT NULL.
+    // Explicit values supplied for every column so the row is
+    // deterministic regardless of runner sql_mode /
+    // explicit_defaults_for_timestamp defaults.
     // -----------------------------------------------------------
     if (await tableExists(c, 'protection_policy_versions')) {
-      await safeInsert(c,
-        `INSERT INTO protection_policy_versions (id, version, status, description, createdAt, activatedAt)
-         VALUES (8101, 'native.policy.v1', 'active', 'Stage 3C native seed policy', ?, ?)`,
+      await requiredInsert(c, 'protection_policy_versions',
+        `INSERT INTO protection_policy_versions
+           (id, version, status, description, createdAt, activatedAt, supersedesPolicyId)
+         VALUES (8101, 'native.policy.v1', 'active',
+           'Stage 3C native seed policy', ?, ?, NULL)`,
         [SEED_MYSQL_NOW, SEED_MYSQL_NOW],
       );
+      // Explicit post-insert verification. The reviewer's Stage 3C-CI-FIX3
+      // requirement: "Query the table immediately after insertion and
+      // require at least one row."
+      const [rows] = await c.query(
+        'SELECT COUNT(*) AS count FROM protection_policy_versions',
+      );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const count = Number((rows as any)[0]?.count ?? 0);
+      if (count < 1) {
+        throw new Error('required_seed_verification_failed:protection_policy_versions');
+      }
     }
     // protection_capabilities FK to protection_policy_versions (8101 above)
     if (await tableExists(c, 'protection_capabilities')) {
@@ -639,6 +707,7 @@ export async function seedNativeFixture(dbUrl: string): Promise<SeedSummary> {
       reconciliation_runs: await countRows(c, 'reconciliation_runs'),
       desktop_incidents: await countRows(c, 'desktop_incidents'),
       protection_instances: await countRows(c, 'protection_instances'),
+      protection_policy_versions: await countRows(c, 'protection_policy_versions'),
       bot_config: await countRows(c, 'bot_config'),
       decision_chains: await countRows(c, 'decision_chains'),
       scan_runs: await countRows(c, 'scan_runs'),
