@@ -578,3 +578,126 @@ Only after that artefact lands can the roadmap reclaim
 `native_electron_unpacked_integration_verified`,
 `all_19_screens_runtime_verified`, and
 `desktop_screen_binding_complete`.
+
+## 22. Stage 3C-ENV-FIX — pinned engine + mandatory manifest closure
+
+The Stage 3C-ENV review flagged two required corrections before the
+CI-produced evidence would be trustworthy. Stage 3C-ENV-FIX closes both.
+
+### 22.1 CI pinned to canonical engine/version
+
+`.github/workflows/stage3c-native.yml` services:
+- `mariadb:10.11.6` — the certified development target Horizon's
+  migration authoring runs against.
+- `redis:7.4-alpine` — matches the production Compose contract.
+
+Rationale: a green CI result against `mariadb:11` would have introduced
+a new database compatibility variable, not verified the intended
+desktop stack.
+
+### 22.2 Mandatory 19-screen evidence manifest
+
+`apps/desktop/tests/native/deterministicSeed.ts` — new
+`NINETEEN_SCREEN_MANIFEST` (frozen array, length 19). Each entry:
+`{ screenKey, hash, screenAttr, expectedState, expectedSignatures,
+requiredSeedTables, seededOutcomeReason }`.
+
+Every screen has a DETERMINISTIC expected state (`healthy` for 17,
+explicit `empty` for `costs_attribution` with the auditable reason
+"deep FK chain candidates→execution_cost_forecasts not seeded", and
+`healthy` for `reports` since its query returns fixed literals). The
+declaration is auditable — never "advisory best effort".
+
+`assertManifestCoverage(seedSummary)` throws in `beforeAll` if any
+`expectedState: 'healthy'` entry's `requiredSeedTables` did not land.
+Fails the run before Electron launches — no wall-clock wasted on a
+broken seed.
+
+`nativeElectron.integration.test.ts` — new
+`T-manifest[<screenKey>]` × 19 loop enforces:
+- screen reachable at declared hash route
+- leaves loading state within deadline
+- renders declared `data-screen` attr
+- emits declared `expectedState` as `data-state`
+- every declared `expectedSignatures` string is present in the frame
+
+Any failure fails the suite. Missing entry, missing signature,
+loading-state timeout, or observed state ≠ expected state all fail
+individually.
+
+### 22.3 Seed coverage after Stage 3C-ENV-FIX
+
+Local run confirms:
+```
+seed_coverage: required=14/14 recommended=9/10
+recommended_seed_gaps: [
+  "Costs: expected ≥1 in forecast_vs_realized_attributions, got 0 (phase3B_round_trip_fk)"
+]
+```
+
+The single gap (`forecast_vs_realized_attributions`) is explicitly
+declared as `expectedState: 'empty'` in the manifest — auditable and
+mandatory, not advisory. All other Phase 2 observer tables
+(`fingerprint_snapshots`, `global_regime_snapshots`,
+`portfolio_risk_snapshots`, `research_experiments`, `protection_instances`,
+`market_observations`, `outcome_labels`, `eligibility_decisions`,
+`desktop_incidents`) now land — Stage 3C-ENV-FIX added the missing
+required NOT NULL columns (immutablePayload, labelWindowStart/End,
+implementationHash, endTime, validationPolicyVersion, etc.) and seeded
+the parent FK graph rows (`desktop_installations` id=1,
+`regime_observer_runs` id=7401, `portfolio_risk_runs` id=10001,
+`protection_capabilities` id=1, `risk_policy_versions` id=20001,
+`dataset_definitions` id=1, `dataset_versions` id=1).
+
+### 22.4 Evidence.json enforced fields
+
+`T-evidence` now hard-fails if the emitted bundle is missing any of:
+`contract`, `runId`, `gitCommit`, `os`, `nodeVersion`, `dbName`,
+`redisNamespace`, `migrationHeadCount`, `schemaFingerprintResult`,
+`screenMatrix`, `assertionResults`, `rendererSecurityResult`,
+`shutdownResult`, `processLeakResult`, `createOrderCounters`,
+`safeFlags`, `serverLogFile`, `electronLogFile`. Also asserts
+`migrationHeadCount === 22`, all three Create Order counters === 0,
+safeFlags DRY_RUN=true / ORDER_SUBMISSION_ENABLED=false /
+liveCapitalAuthorized=false, and `screenMatrix.length === 19`.
+
+### 22.5 Sanitized logs
+
+Both `server` and `electron-main` sanitized logs are emitted
+unconditionally as CI artefacts. When a source stream produced no
+captured output (e.g. Electron writing to a sink Playwright can't
+tee), an explicit placeholder is written so review always sees the
+complete artefact manifest, never a mysterious missing file.
+
+### 22.6 Verification (all green locally)
+
+- `apps/desktop npx vitest run` — 44 files / 521 tests / 0 fail
+  (sandbox_policy 8 tests unchanged)
+- Local native harness: `seed_coverage: required=14/14 recommended=9/10`;
+  `manifest_coverage_complete=19` — proving both hard gates pass
+  before Electron launch. The Electron child-process sandbox blocker
+  remains the only outstanding environmental issue, to be cleared by
+  the pinned CI job.
+
+### 22.7 Updated verdict claimed (checkpoint, CI run still pending)
+
+```
+stage3c_native_harness_implemented
+stage3c_native_harness_completeness_hardened
+stage3c_native_engine_pinned
+stage3c_native_manifest_mandatory
+stage3c_native_runtime_verification_pending_ci_run
+all_19_screens_unit_bound
+authenticated_desktop_data_integration_unit_verified
+native_electron_test_blocked_container_only
+report_generation_pending
+managed_docker_runtime_verification_pending
+windows_packaging_pending
+operational_validation_not_started
+live_capital_prohibited
+```
+
+Full Stage 3 verdict remains reclaimable ONLY after
+`.github/workflows/stage3c-native.yml` produces a green run with
+`evidence.json` matching §21.8 + all 55 assertions passed + all 19
+manifest screens verified.

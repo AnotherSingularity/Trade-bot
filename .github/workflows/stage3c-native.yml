@@ -19,8 +19,13 @@ jobs:
     timeout-minutes: 30
 
     services:
+      # Stage 3C-ENV-FIX §1: pin to the canonical development target
+      # engine/version so the native run does not introduce a new
+      # database compatibility variable. MariaDB 10.11.6 is Horizon's
+      # certified server + migration authoring target; Redis 7.4-alpine
+      # matches the production Compose contract.
       mariadb:
-        image: mariadb:11
+        image: mariadb:10.11.6
         env:
           MARIADB_ROOT_PASSWORD: password
         ports:
@@ -31,7 +36,7 @@ jobs:
           --health-timeout=5s
           --health-retries=10
       redis:
-        image: redis:7
+        image: redis:7.4-alpine
         ports:
           - 6379:6379
         options: >-

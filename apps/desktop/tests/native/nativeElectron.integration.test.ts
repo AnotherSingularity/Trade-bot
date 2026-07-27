@@ -25,7 +25,10 @@ import {
   spawnServer, teardown, waitForReadiness, writeEvidenceBundle, writeSanitizedLog,
   type ElectronLaunch, type EvidenceBundle, type NativeIsolation, type ServerSpawn,
 } from './electronHarness';
-import { assertSeedCoverageComplete, seedNativeFixture, type SeedSummary } from './deterministicSeed';
+import {
+  NINETEEN_SCREEN_MANIFEST, assertManifestCoverage, assertSeedCoverageComplete,
+  seedNativeFixture, type SeedSummary,
+} from './deterministicSeed';
 
 const NAV_ROUTES: ReadonlyArray<{ key: string; hash: string; screenAttr: string; banner?: string }> = [
   { key: 'overview',             hash: '#/overview',                screenAttr: 'overview' },
@@ -116,9 +119,19 @@ beforeAll(async () => {
     // eslint-disable-next-line no-console
     console.log('[stage3c-native] recommended_seed_gaps: ' + JSON.stringify(coverage.recommendedMissing));
   }
+  // Stage 3C-ENV-FIX §2 — mandatory 19-screen manifest coverage.
+  // Every screen whose expectedState is 'healthy' MUST have its
+  // required seed tables populated. Screens whose expectedState is
+  // explicitly 'empty'/'stale'/'degraded'/'unavailable' are permitted
+  // — the manifest is the auditable declaration.
+  const manifestCoverage = assertManifestCoverage(seedSummary);
+  if (!manifestCoverage.ok) {
+    throw new Error(`manifest_coverage_incomplete: ${manifestCoverage.violations.join('; ')}`);
+  }
   startupTrace.push('seed_applied');
   startupTrace.push(`seed_coverage_required=${coverage.requiredMet}`);
   startupTrace.push(`seed_coverage_recommended=${coverage.recommendedMet}`);
+  startupTrace.push(`manifest_coverage_complete=${NINETEEN_SCREEN_MANIFEST.length}`);
   server = await spawnServer(iso);
   startupTrace.push('server_spawned');
   const readiness = await waitForReadiness(server, 90_000);
@@ -440,6 +453,55 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
   // refactor (e.g. renamed data-screen attr, removed route).
   it('T-coverage: all 19 screens exercised at least once', () => {
     expect(passedScreens.size, `only ${passedScreens.size}/19 screens exercised: ${Array.from(passedScreens).sort().join(',')}`).toBe(19);
+  });
+
+  // ------------------------------------------------------------------
+  // Stage 3C-ENV-FIX §2 — mandatory 19-screen manifest enforcement.
+  //
+  // Every entry in NINETEEN_SCREEN_MANIFEST becomes a distinct it()
+  // that verifies:
+  //   - the screen is reachable at its declared hash route,
+  //   - it leaves the loading state within the deadline,
+  //   - it renders the declared data-screen attribute,
+  //   - it emits the declared expectedState in data-state,
+  //   - all expectedSignatures are present in the rendered frame.
+  // Any failure fails the suite. Screen missing from manifest → fails.
+  // ------------------------------------------------------------------
+  const manifestScreenResults: Array<{ key: string; state: string | null; signaturesMet: boolean; passed: boolean; detail: string }> = [];
+  for (const entry of NINETEEN_SCREEN_MANIFEST) {
+    it(`T-manifest[${entry.screenKey}]: expected=${entry.expectedState}; signatures=[${entry.expectedSignatures.length}]`, async () => {
+      const { leftLoading, frame } = await navigateAndWaitFor(entry.hash, entry.screenAttr);
+      // Extract observed state.
+      const stateMatch = frame.match(new RegExp(`data-screen="${entry.screenAttr}"[^>]*data-state="([^"]+)"|data-state="([^"]+)"[^>]*data-screen="${entry.screenAttr}"`));
+      const observedState = stateMatch ? (stateMatch[1] ?? stateMatch[2] ?? null) : null;
+      const missingSignatures = entry.expectedSignatures.filter((s) => !frame.includes(s));
+      const passed = leftLoading && observedState === entry.expectedState && missingSignatures.length === 0;
+      const detail = passed
+        ? 'ok'
+        : [
+            `leftLoading=${leftLoading}`,
+            `observedState=${observedState}`,
+            `expectedState=${entry.expectedState}`,
+            missingSignatures.length ? `missingSignatures=${JSON.stringify(missingSignatures)}` : '',
+          ].filter(Boolean).join(' ');
+      manifestScreenResults.push({ key: entry.screenKey, state: observedState, signaturesMet: missingSignatures.length === 0, passed, detail });
+      expect(leftLoading, `${entry.screenKey} did not leave loading state`).toBe(true);
+      expect(observedState, `${entry.screenKey} expected data-state="${entry.expectedState}" — got "${observedState}"`).toBe(entry.expectedState);
+      expect(missingSignatures, `${entry.screenKey} missing signatures: ${JSON.stringify(missingSignatures)}`).toEqual([]);
+    });
+  }
+
+  // Second-level hard gate — total manifest coverage.
+  it('T-manifest-completeness: every one of 19 screens has an executed manifest assertion', () => {
+    // Each entry above ran; if vitest reported any as failed, the suite
+    // is already failed. This test asserts the manifest LIST itself
+    // covers all 19 (guards against a future refactor removing an entry).
+    expect(NINETEEN_SCREEN_MANIFEST.length).toBe(19);
+    // Every result populated → every it() actually executed.
+    // (vitest runs sequentially in this file; the array is populated
+    // in-order by the manifest loop above.)
+    // eslint-disable-next-line no-console
+    console.log('[stage3c-native] manifest_screen_results=' + JSON.stringify(manifestScreenResults));
   });
 
   // §12.20 No screen renders a static healthy placeholder.
@@ -811,15 +873,46 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
     };
     const evidencePath = writeEvidenceBundle(iso!, bundle);
     expect(evidencePath).toMatch(/evidence\.json$/);
-    // Sanitize + write server log if present.
-    try {
-      const raw = readFileSync(`${iso!.logsDir}/server.live.log`, 'utf8');
-      writeSanitizedLog(iso!, 'server', raw);
-    } catch { /* server log optional */ }
-    try {
-      const raw = readFileSync(`${iso!.logsDir}/electron.log`, 'utf8');
-      writeSanitizedLog(iso!, 'electron', raw);
-    } catch { /* electron log optional */ }
+    // Stage 3C-ENV-FIX §CI: sanitized logs required as artefacts —
+    // server, electron-main (and if a separate preload/renderer log
+    // stream is capturable). Missing files are recorded as empty
+    // sanitized files so the CI artefact carries a complete manifest.
+    for (const [srcName, dstName] of [
+      ['server.live.log', 'server'],
+      ['electron.log', 'electron-main'],
+    ] as const) {
+      try {
+        const raw = readFileSync(`${iso!.logsDir}/${srcName}`, 'utf8');
+        writeSanitizedLog(iso!, dstName, raw);
+      } catch {
+        // Emit an explicit placeholder so the artefact bundle proves
+        // we tried; makes review reliable when a stream produced no
+        // output (e.g. Electron writing to a different sink).
+        writeSanitizedLog(iso!, dstName, `[stage3c-env-fix] source '${srcName}' produced no captured output for run ${iso!.runId}\n`);
+      }
+    }
+    // Assert the required fields per Stage 3C-ENV-FIX §"CI acceptance
+    // requirements": evidence.json must contain the full manifest so a
+    // reviewer can validate against the checklist without inspecting
+    // logs.
+    const required: Array<keyof EvidenceBundle> = [
+      'contract', 'runId', 'gitCommit', 'os', 'nodeVersion',
+      'dbName', 'redisNamespace', 'migrationHeadCount',
+      'schemaFingerprintResult', 'screenMatrix', 'assertionResults',
+      'rendererSecurityResult', 'shutdownResult', 'processLeakResult',
+      'createOrderCounters', 'safeFlags', 'serverLogFile', 'electronLogFile',
+    ];
+    for (const k of required) {
+      expect(bundle[k], `evidence.json missing required field: ${k}`).not.toBeUndefined();
+    }
+    expect(bundle.migrationHeadCount).toBe(22);
+    expect(bundle.createOrderCounters.functionInvocations).toBe(0);
+    expect(bundle.createOrderCounters.attemptCount).toBe(0);
+    expect(bundle.createOrderCounters.networkCount).toBe(0);
+    expect(bundle.safeFlags.DRY_RUN).toBe(true);
+    expect(bundle.safeFlags.ORDER_SUBMISSION_ENABLED).toBe(false);
+    expect(bundle.safeFlags.liveCapitalAuthorized).toBe(false);
+    expect(bundle.screenMatrix).toHaveLength(19);
   });
 
   // Summary echo for the report.

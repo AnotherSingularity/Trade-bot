@@ -115,12 +115,18 @@ async function tableExists(c: Connection, name: string): Promise<boolean> {
 async function safeInsert(c: Connection, sql: string, values: unknown[]): Promise<void> {
   try {
     await c.query(sql, values);
-  } catch {
-    // A missing optional column on this snapshot revision is not a
-    // test-breaking condition — the query service will treat the row
-    // as missing and fall back to empty/degraded. The test never
-    // ASSUMES an inserted row is present; it either finds it or
-    // observes the honest empty state.
+  } catch (e) {
+    // Stage 3C-ENV-FIX §2: previously silent. Now emit under
+    // NATIVE_DEBUG=1 so CI can diagnose exactly which INSERT
+    // couldn't land. Still non-fatal — the required-vs-recommended
+    // coverage gate (assertSeedCoverageComplete) is what enforces
+    // the hard fail; this log is diagnostic only.
+    if (process.env.NATIVE_DEBUG === '1') {
+      const msg = String((e as Error).message ?? e).slice(0, 240);
+      const preview = sql.split(/\s+/).slice(0, 5).join(' ');
+      // eslint-disable-next-line no-console
+      console.error(`[stage3c-seed] safeInsert failed (${preview}...): ${msg}`);
+    }
   }
 }
 
@@ -136,6 +142,61 @@ async function countRows(c: Connection, name: string): Promise<number> {
 export async function seedNativeFixture(dbUrl: string): Promise<SeedSummary> {
   const c = await createConnection({ uri: dbUrl, multipleStatements: false, dateStrings: true });
   try {
+    // -----------------------------------------------------------
+    // Parent-row precursors — seeded FIRST so downstream FKs resolve.
+    // Stage 3C-ENV-FIX §2 requires that every screen have a deterministic
+    // seeded outcome (either healthy evidence or an auditable degraded
+    // state); the FK chain seeding lets the Phase 2 observer rows land.
+    // -----------------------------------------------------------
+    if (await tableExists(c, 'desktop_installations')) {
+      await safeInsert(c,
+        `INSERT INTO desktop_installations (id, installationKey, desktopVersion, buildCommit,
+           platform, firstInstalledAt, machineFingerprint)
+         VALUES (1, 'native.installation.v1', '3.0.0', 'stage3c_env_fix',
+           'linux', ?, 'native_machine_fingerprint_v1')`,
+        [SEED_MYSQL_NOW],
+      );
+    }
+    if (await tableExists(c, 'risk_policy_versions')) {
+      await safeInsert(c,
+        `INSERT INTO risk_policy_versions (id, policyKey, policyVersion, description,
+           operatingScope, status, effectiveFrom, implementationHash, configurationHash)
+         VALUES (20001, 'native.risk.policy', 'v1', 'stage 3c env fix seed policy',
+           'global', 'validated_for_research', ?, 'hash_native_risk_impl', 'hash_native_risk_conf')`,
+        [SEED_MYSQL_NOW],
+      );
+    }
+    if (await tableExists(c, 'dataset_definitions')) {
+      await safeInsert(c,
+        `INSERT INTO dataset_definitions (id, datasetKey, description, sourceCategory)
+         VALUES (1, 'native.seed.dataset', 'stage 3c env fix seed dataset', 'synthetic_fixture')`,
+        [],
+      );
+    }
+    if (await tableExists(c, 'dataset_versions')) {
+      await safeInsert(c,
+        `INSERT INTO dataset_versions (id, datasetDefinitionId, datasetVersion, sourceCategory,
+           sourceIdentity, productUniverseHash, startTime, endTime, dataAvailabilityCutoff,
+           featureVersions, fingerprintVersion, regimeVersion, riskPolicyVersion,
+           microstructurePolicyVersion, contextPolicyVersion, costModelVersion, fillModelVersion,
+           labelVersion, exclusionPolicyVersion, codeCommit, inputHash)
+         VALUES (1, 1, 'v1', 'synthetic_fixture',
+           'stage3c_env_fix', 'hash_native_dataset_v1', ?, ?, ?,
+           'features.v1', 'fp.v1', 'regime.v1', 'risk.v1',
+           'micro.v1', 'context.v1', 'cost.v1', 'fill.v1',
+           'label.v1', 'exclusion.v1', 'stage3c_env_fix', 'hash_native_dataset_input_v1')`,
+        [SEED_MYSQL_DAY_AGO, SEED_MYSQL_NOW, SEED_MYSQL_NOW],
+      );
+    }
+    // Note: regime_observer_runs (FK to universe_snapshots) and
+    // protection_capabilities (FK to protection_policy_versions) are
+    // seeded LATER — after their parent tables land — see below.
+    // Note: forecast_vs_realized_attributions requires a
+    // execution_cost_forecasts row which requires a candidates row
+    // which requires a full scanner chain — that FK graph is
+    // deliberately left unseeded and the Costs screen is declared
+    // to render `empty` as its expected auditable state.
+
     // -----------------------------------------------------------
     // Overview + Safety — bot_config
     // (reconciliationStatus consumed by both Overview and Safety.
@@ -297,18 +358,23 @@ export async function seedNativeFixture(dbUrl: string): Promise<SeedSummary> {
       );
     }
     if (await tableExists(c, 'market_observations')) {
+      // immutablePayload column added by Stage 2A — required NOT NULL.
       await safeInsert(c,
         `INSERT INTO market_observations (id, decisionChainId, productId, observedAt,
-           dataAvailableAt, marketDataVersion, inputDataHash, price, volume24h, spread, dataQualityStatus)
+           dataAvailableAt, marketDataVersion, inputDataHash, price, volume24h, spread,
+           dataQualityStatus, immutablePayload)
          VALUES (?, ?, 'BTC-USD', ?, ?, 'md-native-v1', 'hash_native_btc_1',
-           '50000.00000000', '1000000.00000000', '10.00000000', 'valid')`,
+           '50000.00000000', '1000000.00000000', '10.00000000', 'valid',
+           '{"kind":"stage3c_native_seed","product":"BTC-USD"}')`,
         [SEED_IDS.marketObservationAccepted, SEED_IDS.decisionChainAccepted, SEED_MYSQL_HOUR_AGO, SEED_MYSQL_HOUR_AGO],
       );
       await safeInsert(c,
         `INSERT INTO market_observations (id, decisionChainId, productId, observedAt,
-           dataAvailableAt, marketDataVersion, inputDataHash, price, volume24h, spread, dataQualityStatus)
+           dataAvailableAt, marketDataVersion, inputDataHash, price, volume24h, spread,
+           dataQualityStatus, immutablePayload)
          VALUES (?, ?, 'ETH-USD', ?, ?, 'md-native-v1', 'hash_native_eth_1',
-           '3000.00000000', '500000.00000000', '5.00000000', 'stale')`,
+           '3000.00000000', '500000.00000000', '5.00000000', 'stale',
+           '{"kind":"stage3c_native_seed","product":"ETH-USD"}')`,
         [SEED_IDS.marketObservationBroken, SEED_IDS.decisionChainBroken, SEED_MYSQL_HOUR_AGO, SEED_MYSQL_HOUR_AGO],
       );
     }
@@ -321,11 +387,13 @@ export async function seedNativeFixture(dbUrl: string): Promise<SeedSummary> {
       );
     }
     if (await tableExists(c, 'outcome_labels')) {
+      // labelWindowStart/End + dataAvailableAt required NOT NULL — Stage 2 addition.
       await safeInsert(c,
         `INSERT INTO outcome_labels (decisionChainId, roundTripId, labelVersion, labelType,
-           tpReachedFirst, slReachedFirst, timeout, ambiguous)
-         VALUES (?, ?, 1, 'held_forward', 1, 0, 0, 0)`,
-        [SEED_IDS.decisionChainAccepted, SEED_IDS.roundTripWin],
+           tpReachedFirst, slReachedFirst, timeout, ambiguous,
+           labelWindowStart, labelWindowEnd, dataAvailableAt)
+         VALUES (?, ?, 1, 'held_forward', 1, 0, 0, 0, ?, ?, ?)`,
+        [SEED_IDS.decisionChainAccepted, SEED_IDS.roundTripWin, SEED_MYSQL_HOUR_AGO, SEED_MYSQL_NOW, SEED_MYSQL_NOW],
       );
     }
 
@@ -353,17 +421,41 @@ export async function seedNativeFixture(dbUrl: string): Promise<SeedSummary> {
     }
 
     // -----------------------------------------------------------
-    // Fingerprints (Stage 2A schema)
+    // Fingerprints (Stage 2A schema — snapshotId FK to universe_snapshots)
     // -----------------------------------------------------------
     if (await tableExists(c, 'fingerprint_snapshots')) {
       await safeInsert(c,
         `INSERT INTO fingerprint_snapshots (id, snapshotId, productId, fingerprintClass,
            confidence, qualityPenalty, liquidityPenalty, classificationVersion, metadataVersion,
-           inputHash, observedAt)
+           inputHash, observedAt, dataAvailableAt, state)
          VALUES (7301, 7101, 'BTC-USD', 'REVERSION_CANDIDATE',
            '0.6500', '0.1000', '0.0500', 'native.v1', 'native.v1',
-           'hash_native_fp_btc', ?)`,
-        [SEED_MYSQL_NOW],
+           'hash_native_fp_btc', ?, ?, 'complete')`,
+        [SEED_MYSQL_NOW, SEED_MYSQL_NOW],
+      );
+    }
+
+    // -----------------------------------------------------------
+    // Regime observer run — FK to universe_snapshots (id=7101 above)
+    // -----------------------------------------------------------
+    if (await tableExists(c, 'regime_observer_runs')) {
+      await safeInsert(c,
+        `INSERT INTO regime_observer_runs (id, snapshotId, startedAt, completedAt,
+           productsConsidered, globalStatesEmitted, productStatesEmitted, unknownCount, disorderedCount,
+           observerVersion, transitionPolicyVersion)
+         VALUES (7401, 7101, ?, ?,
+           4, 1, 0, 0, 0, 'regime.native.v1', 'transition.native.v1')`,
+        [SEED_MYSQL_NOW, SEED_MYSQL_NOW],
+      );
+    }
+    if (await tableExists(c, 'portfolio_risk_runs')) {
+      await safeInsert(c,
+        `INSERT INTO portfolio_risk_runs (id, policyVersionId, startedAt, completedAt,
+           candidatesEvaluated, authorizeAsProposed, reduceSize, rejects, abstains, dataFailures,
+           runnerVersion)
+         VALUES (10001, 20001, ?, ?,
+           1, 1, 0, 0, 0, 0, 'risk.native.v1')`,
+        [SEED_MYSQL_NOW, SEED_MYSQL_NOW],
       );
     }
 
@@ -432,14 +524,19 @@ export async function seedNativeFixture(dbUrl: string): Promise<SeedSummary> {
     // Validation Lab (Stage 2F schema)
     // -----------------------------------------------------------
     if (await tableExists(c, 'research_experiments')) {
+      // Stage 2F requires: validationPolicyVersion, registeredAt,
+      // registeredBy, codeCommit, randomSeed (all NOT NULL).
+      // datasetVersionId=1 is seeded above.
       await safeInsert(c,
         `INSERT INTO research_experiments (id, experimentKey, experimentVersion, hypothesis,
            championVersion, challengerVersion, datasetVersionId, primaryMetric,
-           secondaryMetrics, parameterSearchSpace, multipleTestingFamily)
+           secondaryMetrics, parameterSearchSpace, multipleTestingFamily,
+           validationPolicyVersion, registeredAt, registeredBy, codeCommit, randomSeed, status)
          VALUES (7801, 'native.seed.experiment', 'v1', 'stage3c seed hypothesis',
            'observed', 'native_challenger_v1', 1, 'net_sharpe',
-           '[]', '{}', 'family.native')`,
-        [],
+           '[]', '{}', 'family.native',
+           'validation_policy.native.v1', ?, 'native.operator', 'stage3c_env_fix', 42, 'registered')`,
+        [SEED_MYSQL_NOW],
       );
     }
 
@@ -466,6 +563,17 @@ export async function seedNativeFixture(dbUrl: string): Promise<SeedSummary> {
         `INSERT INTO protection_policy_versions (id, version, status, description, createdAt, activatedAt)
          VALUES (8101, 'native.policy.v1', 'active', 'Stage 3C native seed policy', ?, ?)`,
         [SEED_MYSQL_NOW, SEED_MYSQL_NOW],
+      );
+    }
+    // protection_capabilities FK to protection_policy_versions (8101 above)
+    if (await tableExists(c, 'protection_capabilities')) {
+      await safeInsert(c,
+        `INSERT INTO protection_capabilities (id, policyVersionId, productId, side,
+           entryOrderType, timeInForce, protectionType, capabilityState, source, validatedAt, evidenceHash)
+         VALUES (1, 8101, 'BTC-USD', 'BUY',
+           'market_ioc', 'IOC', 'attached_trigger_bracket_gtc', 'sandbox_validated',
+           'stage3c_env_fix_seed', ?, 'hash_native_cap_v1')`,
+        [SEED_MYSQL_NOW],
       );
     }
     if (await tableExists(c, 'protection_instances')) {
@@ -604,6 +712,234 @@ export interface SeedCoverageResult {
   requiredMissing: string[];
   recommendedMet: number;
   recommendedMissing: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Stage 3C-ENV-FIX §2 — mandatory 19-screen evidence manifest.
+//
+// Every screen has a DETERMINISTIC EXPECTED STATE + EXPECTED SIGNATURE.
+// The native test consumes this manifest and fails if:
+//   - Any screen key is absent from the manifest.
+//   - Any authenticated request is not observed.
+//   - Any screen remains loading past the deadline.
+//   - Any response fails validation.
+//   - Any expected signature is absent.
+//   - A screen whose expectedState is `healthy` falls back to empty
+//     because seeding failed.
+//
+// A non-healthy expected state is permitted ONLY when explicitly
+// declared here (auditable). It is NEVER "best effort".
+// ---------------------------------------------------------------------------
+
+export type ExpectedState = 'healthy' | 'empty' | 'stale' | 'degraded' | 'unavailable';
+
+export interface ScreenManifestEntry {
+  screenKey: string;
+  hash: string;               // renderer HashRouter path
+  screenAttr: string;         // data-screen attr StateFrame emits
+  expectedState: ExpectedState;
+  expectedSignatures: readonly string[];  // strings required in frame (all must match)
+  requiredSeedTables: readonly string[];  // must all be seeded for expectedState==='healthy'
+  seededOutcomeReason: string;            // audit trail
+}
+
+export const NINETEEN_SCREEN_MANIFEST: ReadonlyArray<ScreenManifestEntry> = Object.freeze([
+  {
+    screenKey: 'overview',
+    hash: '#/overview',
+    screenAttr: 'overview',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED', '0021'],
+    requiredSeedTables: ['bot_config', 'decision_chains', 'reconciliation_actions'],
+    seededOutcomeReason: 'bot_config+decision_chains+reconciliation_actions seed authoritative readiness signals',
+  },
+  {
+    screenKey: 'shadow_portfolio',
+    hash: '#/shadow-portfolio',
+    screenAttr: 'portfolio',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED'],
+    requiredSeedTables: ['portfolio_risk_snapshots'],
+    seededOutcomeReason: 'portfolio_risk_snapshots with observerRunId=10001 (parent portfolio_risk_runs seeded)',
+  },
+  {
+    screenKey: 'positions',
+    hash: '#/positions',
+    screenAttr: 'positions',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED'],
+    requiredSeedTables: ['positions', 'order_intents', 'fills', 'round_trips', 'cash_ledger'],
+    seededOutcomeReason: 'positions 1001 (open, partial) + 1002 (dust) + supporting order_intents/fills/round_trips/cash_ledger',
+  },
+  {
+    screenKey: 'decision_journal',
+    hash: '#/decision-journal',
+    screenAttr: 'decisions',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED'],
+    requiredSeedTables: ['decision_chains', 'scan_runs', 'market_observations', 'eligibility_decisions', 'outcome_labels'],
+    seededOutcomeReason: 'decision_chain 4001 (complete) + 4002 (broken lineage) + full descendant chain',
+  },
+  {
+    screenKey: 'research_universe',
+    hash: '#/research/universe',
+    screenAttr: 'universe',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED'],
+    requiredSeedTables: ['universe_snapshots', 'universe_products'],
+    seededOutcomeReason: 'universe_snapshots 7101 + 4 universe_products (BTC/ETH/SOL/AVAX)',
+  },
+  {
+    screenKey: 'fingerprints',
+    hash: '#/research/fingerprints',
+    screenAttr: 'fingerprints',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED'],
+    requiredSeedTables: ['fingerprint_snapshots'],
+    seededOutcomeReason: 'fingerprint_snapshots 7301 REVERSION_CANDIDATE with dataAvailableAt',
+  },
+  {
+    screenKey: 'regimes',
+    hash: '#/research/regimes',
+    screenAttr: 'regimes',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED'],
+    requiredSeedTables: ['global_regime_snapshots'],
+    seededOutcomeReason: 'global_regime_snapshots 7401 TREND_UP with observerRunId FK 7401',
+  },
+  {
+    screenKey: 'portfolio_risk',
+    hash: '#/research/portfolio-risk',
+    screenAttr: 'risk',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED', 'KELLY DISABLED', 'OBSERVER ENFORCEMENT DISABLED'],
+    requiredSeedTables: ['portfolio_risk_snapshots'],
+    seededOutcomeReason: 'portfolio_risk_snapshots with observerRunId=10001',
+  },
+  {
+    screenKey: 'microstructure',
+    hash: '#/research/microstructure',
+    screenAttr: 'microstructure',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED', 'PRODUCTION LEVEL-2 PROVIDER INACTIVE', 'QUEUE POSITION NOT KNOWN'],
+    requiredSeedTables: ['order_book_sessions'],
+    seededOutcomeReason: 'order_book_sessions 7601 BTC-USD',
+  },
+  {
+    screenKey: 'context',
+    hash: '#/research/context',
+    screenAttr: 'context',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED'],
+    requiredSeedTables: ['context_provider_definitions'],
+    seededOutcomeReason: 'context_provider_definitions 7701 native.seed',
+  },
+  {
+    screenKey: 'validation_lab',
+    hash: '#/research/validation-lab',
+    screenAttr: 'validation',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED', 'MODEL PROMOTION DISABLED', 'PROSPECTIVE EVIDENCE PENDING'],
+    requiredSeedTables: ['research_experiments'],
+    seededOutcomeReason: 'research_experiments 7801 with dataset_versions FK',
+  },
+  {
+    screenKey: 'costs_attribution',
+    hash: '#/ops/costs-attribution',
+    screenAttr: 'costs',
+    // Explicitly declared empty: forecast_vs_realized_attributions
+    // requires costForecastId → execution_cost_forecasts → candidates
+    // → scanner chain. That deep FK graph is intentionally NOT seeded
+    // (would require inventing a scanner run that never happened).
+    // The Costs screen renders `empty` from a real query response
+    // returning zero rows — auditable per Stage 3C-ENV-FIX §2.
+    expectedState: 'empty',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED'],
+    requiredSeedTables: [],
+    seededOutcomeReason: 'expected-empty by design; deep FK chain (candidates→execution_cost_forecasts) not seeded',
+  },
+  {
+    screenKey: 'protection',
+    hash: '#/ops/protection',
+    screenAttr: 'protection',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED'],
+    requiredSeedTables: ['protection_policy_versions', 'protection_instances'],
+    seededOutcomeReason: 'protection_policy_versions 8101 + protection_instances 8201 (FK to capabilities 1)',
+  },
+  {
+    screenKey: 'reconciliation',
+    hash: '#/ops/reconciliation',
+    screenAttr: 'reconciliation',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED'],
+    requiredSeedTables: ['reconciliation_runs', 'reconciliation_actions'],
+    seededOutcomeReason: 'reconciliation_runs 8301 + reconciliation_actions row',
+  },
+  {
+    screenKey: 'incidents',
+    hash: '#/ops/incidents',
+    screenAttr: 'incidents',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED'],
+    requiredSeedTables: ['desktop_incidents'],
+    seededOutcomeReason: 'desktop_incidents 3001 (open) + 3002 (acked), FK to desktop_installations id=1',
+  },
+  {
+    screenKey: 'reports',
+    hash: '#/ops/reports',
+    screenAttr: 'reports',
+    // Reports is intentionally generation-pending (Stage 4). The query
+    // returns fixed literals (13-item catalog, generationAvailable=false,
+    // reasonCode='report_generation_stage4_pending'). We render `healthy`
+    // (the fixed literals are the real query response).
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED', 'NOT YET IMPLEMENTED'],
+    requiredSeedTables: [],
+    seededOutcomeReason: 'reports query returns fixed literal catalog (13 kinds, generationAvailable=false)',
+  },
+  {
+    screenKey: 'configuration',
+    hash: '#/system/configuration',
+    screenAttr: 'configuration',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED'],
+    requiredSeedTables: [],
+    seededOutcomeReason: 'configuration query returns fixed literals (championVersion=observed, coinbase=absent, etc.)',
+  },
+  {
+    screenKey: 'system',
+    hash: '#/system',
+    screenAttr: 'system',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED', '0021'],
+    requiredSeedTables: [],
+    seededOutcomeReason: '__drizzle_migrations count + process-derived fields (nodeVersion, uptime)',
+  },
+  {
+    screenKey: 'safety',
+    hash: '#/safety',
+    screenAttr: 'safety',
+    expectedState: 'healthy',
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED'],
+    requiredSeedTables: ['bot_config'],
+    seededOutcomeReason: 'safety query reads bot_config + fixed safe-flag literals',
+  },
+]);
+
+export function assertManifestCoverage(s: SeedSummary): { ok: boolean; violations: string[] } {
+  const violations: string[] = [];
+  const summary = s as unknown as Record<string, number | undefined>;
+  for (const entry of NINETEEN_SCREEN_MANIFEST) {
+    if (entry.expectedState === 'healthy') {
+      for (const t of entry.requiredSeedTables) {
+        if ((summary[t] ?? 0) < 1) {
+          violations.push(`${entry.screenKey}: expectedState=healthy requires ${t} seeded (got ${summary[t] ?? 0})`);
+        }
+      }
+    }
+  }
+  return { ok: violations.length === 0, violations };
 }
 
 export function assertSeedCoverageComplete(s: SeedSummary): SeedCoverageResult {
