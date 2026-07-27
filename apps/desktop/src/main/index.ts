@@ -57,6 +57,20 @@ const logger = new Logger(new ConsoleSink(), 'main');
 // disable branch (Rule 1 in localEnvironment.ts). The runtime log
 // records the decision + reason so review can prove the boundary
 // held from CI artefacts.
+// Stage 3C-CI-FIX4 §A5: hardened native-diagnostics gate.
+// Packaged installers structurally cannot enable the preload/renderer
+// HORIZON_NATIVE_* markers — we strip the env var here BEFORE any
+// preload/renderer sees it. Non-canonical values are also rejected
+// so a typo cannot activate diagnostics.
+if (app.isPackaged) {
+  delete process.env.HORIZON_NATIVE_DIAGNOSTICS;
+} else if (
+  process.env.HORIZON_NATIVE_DIAGNOSTICS !== undefined
+  && process.env.HORIZON_NATIVE_DIAGNOSTICS !== 'true'
+) {
+  delete process.env.HORIZON_NATIVE_DIAGNOSTICS;
+}
+
 const sandboxDecision = resolveSandboxPolicy({
   isPackaged: app.isPackaged,
   nodeEnv: process.env.NODE_ENV,

@@ -37,7 +37,17 @@ jobs:
       - name: Typecheck (main + preload + renderer)
         working-directory: apps/desktop
         run: npm run lint
-      - name: Run desktop tests
+      # Stage 3C-CI-FIX4 §B7: Windows unit job uses the PORTABLE
+      # vitest config (vitest.config.ts). Service-dependent tests
+      # (MariaDB/Redis probes, external integration) run only in
+      # the Linux workflow via `npm run test:external` where
+      # MariaDB 10.11.6 + Redis 7.4-alpine are provisioned.
+      # A green Windows run establishes: Windows path portability,
+      # desktop typecheck, desktop build, service-independent test
+      # compatibility. It does NOT establish external-services
+      # integration, native Electron runtime verification, or
+      # installer readiness.
+      - name: Run portable desktop unit suite
         working-directory: apps/desktop
         run: npm test
 

@@ -15,7 +15,8 @@
     "package:win": "electron-builder --win --publish never",
     "lint": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "typecheck": "npm run lint",
-    "test": "vitest run",
+    "test": "vitest run --config vitest.config.ts",
+    "test:external": "vitest run --config vitest.external.config.ts",
     "test:native": "xvfb-run -a --server-args='-screen 0 1280x800x24' vitest run --config vitest.native.config.ts"
   },
   "dependencies": {

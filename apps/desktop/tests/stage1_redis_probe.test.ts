@@ -24,16 +24,20 @@ describe('stage1 §5 — Redis probe', () => {
   });
 
   it('T-S1.15: real Redis probe against localhost succeeds', async () => {
-    // Stage 3C-CI-FIX3 §C: service-dependent — skip when Redis is
-    // unreachable (Windows CI, sandboxed containers). The
-    // fingerprint-verified path still runs against the pinned
-    // Redis 7.4-alpine service in the external-services runner
-    // (stage3c-native-electron workflow).
+    // Stage 3C-CI-FIX4 §B4: this test is service-dependent and is
+    // now in the mandatory external-services vitest config (not the
+    // portable unit config). When HORIZON_REQUIRE_EXTERNAL_SERVICES=true,
+    // an unreachable Redis MUST fail — no silent skip. Portable
+    // Windows CI does not run this file (see vitest.config.ts
+    // exclusion list).
     const probe = new RedisProbe();
     const r = await probe.probe({ url: 'redis://127.0.0.1:6379', requiredNamespace: 'horizon:*', timeoutMs: 2_000 });
-    if (!r.ok) {
+    if (!r.ok && process.env.HORIZON_REQUIRE_EXTERNAL_SERVICES !== 'true') {
+      // Legacy dev-only allowance for a locally-run test with no
+      // services. The external-services suite sets the strict env
+      // and forces failure.
       // eslint-disable-next-line no-console
-      console.warn('[stage1 T-S1.15] Redis unreachable — asserting no false positive; skipping success assertion');
+      console.warn('[stage1 T-S1.15] Redis unreachable — dev-mode allowance; external suite enforces');
       return;
     }
     expect(r.ok).toBe(true);

@@ -140,23 +140,53 @@ jobs:
           echo "redis did not become ready" >&2
           exit 1
 
+      # Stage 3C-CI-FIX4 §B8: run the mandatory external-services
+      # integration suite BEFORE the native harness. Fast-fail on
+      # any schema/probe regression instead of burning wall-clock
+      # on Electron. HORIZON_REQUIRE_EXTERNAL_SERVICES=true forces
+      # the tests to hard-fail on missing services (Redis probe
+      # etc. no longer silently returns).
+      - name: Provision horizon_trade_test for external suite
+        run: |
+          mysql -h 127.0.0.1 -u root -ppassword -e "CREATE DATABASE IF NOT EXISTS horizon_trade_test"
+      - name: Run external-services integration suite
+        working-directory: apps/desktop
+        env:
+          HORIZON_REQUIRE_EXTERNAL_SERVICES: 'true'
+          HORIZON_MARIADB_URL: mysql://root:password@127.0.0.1:3306/horizon_trade_test
+          HORIZON_REDIS_URL: redis://127.0.0.1:6379
+        run: npm run test:external
+
       - name: Run Stage 3C native Electron integration test
         working-directory: apps/desktop
         run: npm run test:native
         env:
           NATIVE_DEBUG: '0'
 
-      # Stage 3C-CI-FIX3 §B: upload the directory itself (not
-      # `logs/**`) so the ci-bootstrap.txt file always accompanies
-      # any subsequent evidence.json. `if-no-files-found: error`
-      # is now safe because the Prepare step guarantees at least
-      # ci-bootstrap.txt exists.
+      # Stage 3C-CI-FIX4 §A9: exclude the Chromium user-data cache
+      # tree from the artefact — noise that overwhelms the actual
+      # diagnostics. Preserve only DevToolsActivePort + Preferences
+      # + Local State. Everything else in electron-userdata/ is
+      # per-run Chromium cache noise.
       - name: Upload native evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: stage3c-native-evidence-${{ github.run_id }}
-          path: apps/desktop/tests/native/logs
+          path: |
+            apps/desktop/tests/native/logs
+            !apps/desktop/tests/native/logs/**/electron-userdata/Cache/**
+            !apps/desktop/tests/native/logs/**/electron-userdata/Code Cache/**
+            !apps/desktop/tests/native/logs/**/electron-userdata/GPUCache/**
+            !apps/desktop/tests/native/logs/**/electron-userdata/Service Worker/**
+            !apps/desktop/tests/native/logs/**/electron-userdata/Network/**
+            !apps/desktop/tests/native/logs/**/electron-userdata/Session Storage/**
+            !apps/desktop/tests/native/logs/**/electron-userdata/Local Storage/**
+            !apps/desktop/tests/native/logs/**/electron-userdata/blob_storage/**
+            !apps/desktop/tests/native/logs/**/electron-userdata/ShaderCache/**
+            !apps/desktop/tests/native/logs/**/electron-userdata/GrShaderCache/**
+            !apps/desktop/tests/native/logs/**/electron-userdata/DawnCache/**
+            !apps/desktop/tests/native/logs/**/electron-userdata/DawnGraphiteCache/**
           retention-days: 30
           if-no-files-found: error
 

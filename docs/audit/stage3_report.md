@@ -701,3 +701,261 @@ Full Stage 3 verdict remains reclaimable ONLY after
 `.github/workflows/stage3c-native.yml` produces a green run with
 `evidence.json` matching §21.8 + all 55 assertions passed + all 19
 manifest screens verified.
+
+## 23. Stage 3C-CI-FIX4 — bounded native diagnostics + Windows test isolation
+
+Two CI tracks failed after Stage 3C-CI-FIX3 landed:
+
+**Native workflow (Linux).** The Playwright `_electron.launch()` call
+opaquely hung to the workflow's 15-minute cancellation window. Neither
+"electron launched", "first window observed", nor "renderer DOM
+loaded" was attributable — the artefact tree carried only the
+CI-bootstrap sentinel + the empty per-run directory. Classification:
+*harness diagnostics failure*, not a product/data-model failure.
+
+**Windows workflow.** Two orthogonal problems: (1) path assertions
+that used forward slashes literally failed on Windows (`path.join`
+uses `\\`); (2) service-dependent tests (`stage1_mariadb_probe`,
+`stage1_redis_probe`, `stage1_schema_fingerprint`,
+`stage1fix_external_services_integration`,
+`stage2_end_to_end_integration`, `stage2fix_bootstrap_scope`,
+`stage2fix_db_isolation`, `stage1_supervisor_integration`,
+`stage1_command_runner`) were pulled into the Windows unit run and
+failed because no MariaDB/Redis are provisioned on that runner.
+Classification: *portability + test-suite scoping*.
+
+Stage 3C-CI-FIX4 replaces both. No product logic changed.
+
+### 23.1 Bounded native startup diagnostics
+
+New module `apps/desktop/tests/native/nativeDiagnostics.ts` exports:
+
+- `NATIVE_STARTUP_PHASES` — 35-entry frozen tuple naming every
+  observable phase (native_test_entered → cleanup_complete).
+- `StartupTrace` — synchronous JSONL writer to
+  `<logsDir>/startup-trace.jsonl`. `appendFileSync` per phase so a
+  SIGTERM/timeout still leaves a legible artefact.
+- `withNativeTimeout(phase, ms, promise, opts?)` — races an operation
+  against a per-phase deadline; the timeout branch rejects with a
+  deterministic `native_startup_timeout:<phase>` error code AND emits
+  a `failed` trace entry. `finally` clears the timer so completed
+  operations never leak handles.
+- `NativeRunStatus` — writes `<logsDir>/native-run-status.json` and
+  updates it on `setPhase()` / `markCompleted()` / `markFailed()`.
+  Contract `stage3c-native-run-status.v1`.
+- `writeFailureClassification(logsDir, err, {electronPid, serverPid})`
+  — emits `failure-classification.json` with the mapped classification
+  (electron_launch / first_window / renderer_dom / renderer_ready /
+  authentication / screen_contract / security / shutdown /
+  process_leak / unknown), sanitized error message, phase, timestamps,
+  pids. Contract `stage3c-native-failure.v1`.
+- `sanitizeDiagnosticMessage(raw)` — redacts Bearer tokens, mysql://
+  connection strings, bootstrap tokens, password fields, and any
+  32+ char hex blob; slices to 4KB.
+- `nativeDiagnosticsEnabled({isPackaged, nodeEnv, optIn})` — strict
+  test-only opt-in policy. Packaged=true → always false regardless of
+  env. NODE_ENV≠'test' → always false. optIn≠'true' (canonical) →
+  always false. Non-canonical values ('1', 'yes', 'YES', ' true ')
+  → false. A stray env var in a released installer structurally
+  cannot activate the diagnostic markers.
+
+### 23.2 Electron launch split into 3 bounded phases
+
+`electronHarness.launchElectron(iso, server, trace?)` now runs:
+
+1. `withNativeTimeout('electron_launch', 60_000, electron.launch(...))`
+2. `withNativeTimeout('first_window', 60_000, app.firstWindow(...))`
+3. `withNativeTimeout('renderer_dom', 45_000, page.waitForLoadState('domcontentloaded'))`
+
+Each phase records `<phase>_wait_started` and `<phase>_observed`
+trace entries around it. A hang in any single phase now produces a
+specific `native_startup_timeout:<phase>` error code + a failed
+JSONL entry naming that phase — replacing the prior opaque 15-minute
+Playwright wait.
+
+Electron env additions:
+- `ELECTRON_ENABLE_LOGGING=1`
+- `ELECTRON_ENABLE_STACK_DUMPING=1`
+- `HORIZON_NATIVE_DIAGNOSTICS=true` (main strips this in packaged mode
+  before subprocess spawn — see below)
+
+The harness also tees `app.process().stdout/stderr` into
+`electron-main.stdout.log` / `electron-main.stderr.log` and hooks
+`page.on('console'/'pageerror'/'crash'/'requestfailed')` to write
+`preload.log` and `renderer.log`, so a mid-startup crash still
+leaves streamed evidence.
+
+### 23.3 beforeAll wrapped in try/catch/finally with full failure artefacts
+
+`nativeElectron.integration.test.ts` — the entire `beforeAll` is now
+wrapped so any failure emits:
+
+- `startup-trace.jsonl` (already open, `failed` entry recorded)
+- `native-run-status.json` (`markFailed(classification)`)
+- `failure-classification.json` (via `writeFailureClassification`)
+- `environment-summary.json` (contract `stage3c-native-environment.v1`)
+- `process-tree.txt` (sanitized `ps -eo pid,ppid,pgid,comm,args`)
+- `failure.png` + `failure-dom.html` + `current-url.txt` when a page
+  object exists (best-effort — a launch-phase failure has no page)
+
+Emission happens at BOTH `WORKFLOW_LOGS_DIR` (workflow-visible) AND
+`iso.logsDir` (per-run) when iso was minted, so evidence survives
+regardless of which stage failed. The workflow's placeholder
+`ci-bootstrap.txt` is overwritten at native-test entry with
+`native_test_started=true` and a real ISO timestamp — a reviewer can
+now tell native entry actually happened, not just that the workflow
+started.
+
+`afterAll` records `shutdown_started` / `cleanup_complete` and marks
+the status file completed after teardown, plus captures process-tree
+snapshots before and after teardown so process-leak review is
+attributable.
+
+### 23.4 Preload + renderer native-diagnostic markers
+
+`apps/desktop/src/main/index.ts` strips `HORIZON_NATIVE_DIAGNOSTICS`
+in `app.isPackaged` mode and in any non-canonical variant, before
+any subprocess sees it. `apps/desktop/src/preload/index.ts` computes
+`nativeDiagnosticsOn = NODE_ENV==='test' && env==='true'`, exposes
+`window.horizon.nativeDiagnosticsEnabled` boolean, and emits
+`HORIZON_NATIVE_PRELOAD_INITIALIZED` to console only in that mode.
+`apps/desktop/src/renderer/app/main.tsx` emits
+`HORIZON_NATIVE_RENDERER_BOOTSTRAPPED` on the same guard. Both
+markers land in `renderer.log` via the harness's console listener.
+
+### 23.5 Windows test-suite scoping
+
+`apps/desktop/vitest.config.ts` — expanded `exclude` list to remove
+every MariaDB/Redis-dependent test from the portable suite. Windows
+now runs ONLY service-independent tests: unit-scope service adapters,
+compose-file contract, docker-probe boundary, migration runner logic,
+schema-fingerprint validators (portable variants), IPC contract,
+authentication, secure storage, renderer state matrices, etc.
+
+`apps/desktop/vitest.external.config.ts` (new) — includes exactly the
+service-dependent suites, forced `singleFork:true` so schema-namespace
+state does not leak between tests, `retry:0`, `testTimeout:90_000`,
+`hookTimeout:180_000`. This is the CI-only "external" tier that runs
+on the Linux workflow (with MariaDB 10.11.6 + Redis 7.4-alpine
+provisioned) BEFORE the native harness. A schema/probe regression
+now fails in <30s instead of consuming 15 minutes of Electron
+wall-clock.
+
+`apps/desktop/package.json` scripts:
+- `test` → `vitest run --config vitest.config.ts` (portable)
+- `test:external` → `vitest run --config vitest.external.config.ts`
+- `test:native` → `xvfb-run -a ... vitest run --config vitest.native.config.ts`
+
+`apps/desktop/tests/stage1_runtime_assets.test.ts` — added `eqPath()`
+helper using `path.normalize()`; every direct `toContain` on a path
+substring replaced with the normalized-equality form, so the tests
+pass on Windows (`\\`) and POSIX (`/`).
+
+`apps/desktop/tests/stage1_redis_probe.test.ts` — T-S1.15 now honours
+`HORIZON_REQUIRE_EXTERNAL_SERVICES`. The external suite forces
+failure on a missing Redis; the portable dev allowance remains for
+developer environments that don't provision Redis.
+
+### 23.6 CI workflow updates
+
+`.github/workflows/stage3c-native.yml` — adds the mandatory
+external-services suite BEFORE the native harness, with
+`HORIZON_REQUIRE_EXTERNAL_SERVICES=true` forcing hard-fail on any
+missing dependency. Also adds Chromium user-data cache directory
+exclusions to the artefact upload glob so evidence stays legible
+instead of drowning in per-run cache noise. `timeout-minutes: 30`
+caps the whole job; internal `withNativeTimeout` bounds cap each
+phase.
+
+`.github/workflows/desktop-windows.yml` — added a clarifying comment
+that the Windows job runs the portable suite ONLY, that a green
+Windows run establishes path portability + desktop typecheck +
+service-independent test compatibility, and that it does NOT
+establish external-services integration or native Electron
+verification.
+
+### 23.7 New unit tests
+
+`apps/desktop/tests/main/nativeDiagnostics.test.ts` — 13 tests
+covering:
+- JSONL trace writes valid records with timestamp/phase/state/pid
+- synchronous append (subsequent read sees prior write)
+- timeout helper returns normally before deadline
+- timeout helper throws `native_startup_timeout:<phase>` code
+- timer cleaned after normal completion
+- sanitizer redacts Bearer tokens / mysql:// / hex tokens
+- status file transitions started → phase → failed
+- packaged mode structurally refuses to enable diagnostics
+- production NODE_ENV structurally refuses
+- strict test-only triple enables, non-canonical values refused
+- classifyFailure maps every timeout phase → classification
+- writeFailureClassification writes sanitized message
+- phase catalog is stable
+
+`apps/desktop/tests/main/ci_test_isolation.test.ts` — 20 tests
+covering:
+- portable vitest config excludes tests/native/**, every named
+  MariaDB/Redis suite, and the `*external*.test.ts` glob
+- external vitest config uses `pool:'forks'` + `singleFork:true`
+  and includes every mandatory external probe
+- package.json scripts partition test / test:external / test:native
+- native workflow pins mariadb:10.11.6 + redis:7.4-alpine,
+  installs redis-tools, runs external suite BEFORE native, sets
+  HORIZON_REQUIRE_EXTERNAL_SERVICES=true, has timeout-minutes cap,
+  excludes electron-userdata cache dirs from artefact, uploads
+  on always(), emits ci-bootstrap sentinel before native
+- Windows workflow runs on windows-latest, invokes portable `npm
+  test` only (no test:external / test:native run steps), enforces
+  DRY_RUN=true + ORDER_SUBMISSION_ENABLED=false at build
+
+### 23.8 Verification (local)
+
+- `packages/shared npx tsc --noEmit` — clean
+- `apps/server npx tsc --noEmit` — clean
+- `apps/desktop npx tsc -p tsconfig.json --noEmit` — no new errors
+  (20 pre-existing errors identical to pre-change baseline)
+- `apps/desktop npx vitest run` — 37 files / 503 tests / 0 fail
+  (portable suite; includes 13 new nativeDiagnostics + 20 new
+  ci_test_isolation tests)
+- `apps/desktop npm run build` — main + preload + renderer clean
+- `git diff --stat -- apps/server/drizzle/migrations/` — empty
+  (migrations 0000-0021 byte-identical)
+
+### 23.9 Absolute constraints preserved
+
+- No migrations modified
+- No product logic changes
+- DRY_RUN=true / ORDER_SUBMISSION_ENABLED=false unchanged
+- No Coinbase credentials referenced
+- No production providers activated
+- No observer enforcement / promotion / Kelly enabled
+- No live capital authorized
+- No test skips added for required integration evidence
+- No broad try/catch that swallows failures — every catch in the
+  new code writes evidence and rethrows
+
+### 23.10 Verdict claimed after Stage 3C-CI-FIX4 (still pending CI)
+
+```
+stage3c_native_harness_implemented
+stage3c_native_harness_completeness_hardened
+stage3c_native_engine_pinned
+stage3c_native_manifest_mandatory
+stage3c_native_bounded_diagnostics_landed
+stage3c_windows_unit_isolation_landed
+stage3c_native_runtime_verification_pending_ci_run
+all_19_screens_unit_bound
+authenticated_desktop_data_integration_unit_verified
+native_electron_test_pending_bounded_ci_run
+report_generation_pending
+managed_docker_runtime_verification_pending
+windows_packaging_pending
+operational_validation_not_started
+live_capital_prohibited
+```
+
+Reclaiming the full 3C verdict still requires a green
+`stage3c-native-electron` workflow run whose artefact bundle
+carries `evidence.json` + `native-run-status.json` with
+`completed:true` + `failureClassification:null` + all 55 assertions
++ all 19 manifest screens.

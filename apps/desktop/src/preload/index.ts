@@ -135,7 +135,23 @@ if (allowedChannels.size !== bridgeChannelCount) {
     exposed: bridgeChannelCount,
   });
 } else {
-  contextBridge.exposeInMainWorld('horizon', api);
+  // Stage 3C-CI-FIX4 §A5: strict native-diagnostics opt-in.
+  // The main process deletes HORIZON_NATIVE_DIAGNOSTICS from
+  // process.env when app.isPackaged is true — so a packaged
+  // installer cannot reach the ON branch here. Even so, we require
+  // strict NODE_ENV=test + strict 'true' env value; non-canonical
+  // values ('1', 'yes', 'YES', ' true ') are rejected.
+  const nativeDiagnosticsOn =
+    process.env.NODE_ENV === 'test'
+    && process.env.HORIZON_NATIVE_DIAGNOSTICS === 'true';
+  const bridged = { ...api, nativeDiagnosticsEnabled: nativeDiagnosticsOn };
+  contextBridge.exposeInMainWorld('horizon', bridged);
+  if (nativeDiagnosticsOn) {
+    // Fixed marker consumed by the native harness page.on('console')
+    // capture. The receiving stream writes it to preload.log.
+    // eslint-disable-next-line no-console
+    console.log('HORIZON_NATIVE_PRELOAD_INITIALIZED');
+  }
 }
 
 export type { HorizonBridge };

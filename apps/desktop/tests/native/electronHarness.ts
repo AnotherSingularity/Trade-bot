@@ -33,6 +33,7 @@ import { createConnection } from 'mysql2/promise';
 import IORedis from 'ioredis';
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright';
 import { createScratchDb, dropScratchDb, makeScratchDbName, scratchDbUrl } from '../lib/scratchDb';
+import { StartupTrace, withNativeTimeout } from './nativeDiagnostics';
 
 // ---------------------------------------------------------------------------
 // Fixed inputs
@@ -248,59 +249,137 @@ export interface ElectronLaunch {
   userDataDir: string;
 }
 
-export async function launchElectron(iso: NativeIsolation, server: ServerSpawn): Promise<ElectronLaunch> {
+/**
+ * Stage 3C-CI-FIX4 §A2/§A3: launch Electron in three separately
+ * bounded phases so a hang is attributable to exactly one phase
+ * rather than an opaque 15-min timeout:
+ *   1. `_electron.launch()`               — 60s
+ *   2. `firstWindow()`                    — 60s
+ *   3. `waitForLoadState('domcontentloaded')` — 45s
+ * Optional caller-driven renderer_ready check (§A3, 60s) is done
+ * by the integration test itself.
+ */
+export async function launchElectron(iso: NativeIsolation, server: ServerSpawn, trace?: StartupTrace): Promise<ElectronLaunch> {
   const userDataDir = join(iso.logsDir, 'electron-userdata');
   const reportDir = join(iso.logsDir, 'electron-reports');
   mkdirSync(userDataDir, { recursive: true });
   mkdirSync(reportDir, { recursive: true });
-  const app = await electron.launch({
-    executablePath: ELECTRON_BIN,
-    args: [
-      DESKTOP_MAIN_ENTRY,
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--in-process-gpu',
-      `--user-data-dir=${userDataDir}`,
-    ],
-    env: {
-      ...process.env,
-      DISPLAY: process.env.DISPLAY ?? ':99',
-      NODE_ENV: 'development',
-      HORIZON_ENVIRONMENT: 'development',
-      HORIZON_SERVER_EXTERNAL: 'true',
-      HORIZON_MARIADB_URL: iso.dbUrl,
-      HORIZON_REDIS_URL: REDIS_URL,
-      HORIZON_SERVER_HEALTH_URL: server.healthUrl,
-      HORIZON_BOOTSTRAP_TOKEN: server.bootstrapToken,
-      HORIZON_PROJECT_ROOT: REPO_ROOT,
-      HORIZON_AUTH_REQUIRED: 'true',
-      HORIZON_USE_KEYTAR: 'false',
-      HORIZON_DATABASE_MODE: 'external_services',
-      HORIZON_DEVELOPMENT_FAKE: 'false',
-      HORIZON_SCHEMA_VERSION: '0021',
-      HORIZON_REPORT_DIR: reportDir,
-      // Main is bundled to dist/main/main/index.js; the renderer index.html
-      // is at dist/renderer/index.html. Override the default resolver
-      // which assumes an untouched tsc layout.
-      HORIZON_RENDERER_URL: `file://${join(DESKTOP_DIST, 'renderer/index.html')}`,
-      HORIZON_ELECTRON_NO_SANDBOX: 'true',
-      // Electron/Chromium refuse to run as root without --no-sandbox
-      // in child processes; the env-level flag propagates to every
-      // subprocess (renderer, GPU, network, utility).
-      ELECTRON_DISABLE_SANDBOX: '1',
-    },
-    timeout: 45_000,
-  });
-  // Fire-and-forget log capture for the electron process itself.
+  const localTrace = trace ?? new StartupTrace(iso.logsDir);
+
+  const app = await withNativeTimeout(
+    'electron_launch',
+    60_000,
+    electron.launch({
+      executablePath: ELECTRON_BIN,
+      args: [
+        DESKTOP_MAIN_ENTRY,
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--in-process-gpu',
+        `--user-data-dir=${userDataDir}`,
+      ],
+      env: {
+        ...process.env,
+        DISPLAY: process.env.DISPLAY ?? ':99',
+        NODE_ENV: 'development',
+        HORIZON_ENVIRONMENT: 'development',
+        HORIZON_SERVER_EXTERNAL: 'true',
+        HORIZON_MARIADB_URL: iso.dbUrl,
+        HORIZON_REDIS_URL: REDIS_URL,
+        HORIZON_SERVER_HEALTH_URL: server.healthUrl,
+        HORIZON_BOOTSTRAP_TOKEN: server.bootstrapToken,
+        HORIZON_PROJECT_ROOT: REPO_ROOT,
+        HORIZON_AUTH_REQUIRED: 'true',
+        HORIZON_USE_KEYTAR: 'false',
+        HORIZON_DATABASE_MODE: 'external_services',
+        HORIZON_DEVELOPMENT_FAKE: 'false',
+        HORIZON_SCHEMA_VERSION: '0021',
+        HORIZON_REPORT_DIR: reportDir,
+        // Main is bundled to dist/main/main/index.js; the renderer index.html
+        // is at dist/renderer/index.html. Override the default resolver
+        // which assumes an untouched tsc layout.
+        HORIZON_RENDERER_URL: `file://${join(DESKTOP_DIST, 'renderer/index.html')}`,
+        HORIZON_ELECTRON_NO_SANDBOX: 'true',
+        // Electron/Chromium refuse to run as root without --no-sandbox
+        // in child processes; the env-level flag propagates to every
+        // subprocess (renderer, GPU, network, utility).
+        ELECTRON_DISABLE_SANDBOX: '1',
+        // Stage 3C-CI-FIX4 §A4: Chromium diagnostics.
+        ELECTRON_ENABLE_LOGGING: '1',
+        ELECTRON_ENABLE_STACK_DUMPING: '1',
+        // Stage 3C-CI-FIX4 §A5: preload + renderer emit the fixed
+        // native-only initialization markers (nativeDiagnosticsEnabled).
+        HORIZON_NATIVE_DIAGNOSTICS: 'true',
+      },
+      timeout: 55_000,
+    }),
+    { trace: localTrace, startPhase: 'electron_launch_started', completePhase: 'electron_launch_complete' },
+  );
+  // Stage 3C-CI-FIX4 §A4: tee stdio streams to separate log files
+  // immediately so a subsequent timeout still produces artefacts.
+  const electronStdout = join(iso.logsDir, 'electron-main.stdout.log');
+  const electronStderr = join(iso.logsDir, 'electron-main.stderr.log');
+  const preloadLog = join(iso.logsDir, 'preload.log');
+  const rendererLog = join(iso.logsDir, 'renderer.log');
+  const fsMod = require('node:fs') as typeof import('node:fs');
   app.process().stdout?.on('data', (d) => {
-    try { const f = join(iso.logsDir, 'electron.log'); require('node:fs').appendFileSync(f, String(d)); } catch { /* best-effort */ }
+    try { fsMod.appendFileSync(electronStdout, String(d)); }
+    catch { /* best-effort */ }
   });
   app.process().stderr?.on('data', (d) => {
-    try { const f = join(iso.logsDir, 'electron.log'); require('node:fs').appendFileSync(f, String(d)); } catch { /* best-effort */ }
+    try { fsMod.appendFileSync(electronStderr, String(d)); }
+    catch { /* best-effort */ }
   });
-  const page = await app.firstWindow({ timeout: 30_000 });
+
+  // Stage 3C-CI-FIX4 §A3: first_window is a separate bounded phase.
+  const page = await withNativeTimeout(
+    'first_window',
+    60_000,
+    app.firstWindow({ timeout: 55_000 }),
+    { trace: localTrace, startPhase: 'first_window_wait_started', completePhase: 'first_window_observed' },
+  );
+
+  // Stage 3C-CI-FIX4 §A5: attach renderer + preload + page listeners
+  // as soon as the page is available. Every message is sanitized-out
+  // by the receiving stream — no tokens leak because the running
+  // desktop main NEVER logs tokens in the first place.
+  page.on('console', (msg) => {
+    try {
+      const text = msg.text();
+      // Route preload/renderer markers to dedicated logs.
+      if (text.includes('HORIZON_NATIVE_PRELOAD_INITIALIZED')) {
+        fsMod.appendFileSync(preloadLog, text + '\n');
+      } else if (text.includes('HORIZON_NATIVE_RENDERER_BOOTSTRAPPED')) {
+        fsMod.appendFileSync(rendererLog, text + '\n');
+      }
+      // All console traffic also lands in renderer.log for review.
+      fsMod.appendFileSync(rendererLog, `[${msg.type()}] ${text}\n`);
+    } catch { /* best-effort */ }
+  });
+  page.on('pageerror', (err) => {
+    try { fsMod.appendFileSync(rendererLog, `[pageerror] ${err.message}\n`); }
+    catch { /* best-effort */ }
+  });
+  page.on('crash', () => {
+    try { fsMod.appendFileSync(rendererLog, `[crash] renderer process crashed\n`); }
+    catch { /* best-effort */ }
+  });
+  page.on('requestfailed', (req) => {
+    try { fsMod.appendFileSync(rendererLog, `[requestfailed] ${req.url()} :: ${req.failure()?.errorText ?? 'unknown'}\n`); }
+    catch { /* best-effort */ }
+  });
+
+  // Stage 3C-CI-FIX4 §A3: renderer DOM load is a separate bounded
+  // phase so a hang in HashRouter/renderer bootstrap is attributable.
+  await withNativeTimeout(
+    'renderer_dom',
+    45_000,
+    page.waitForLoadState('domcontentloaded'),
+    { trace: localTrace, startPhase: 'renderer_dom_wait_started', completePhase: 'renderer_dom_loaded' },
+  );
+
   return { app, page, userDataDir };
 }
 

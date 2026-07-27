@@ -14,7 +14,9 @@
  * kills the server, drops the unique scratch DB, and clears the
  * Redis namespace.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import IORedis from 'ioredis';
 import { createConnection } from 'mysql2/promise';
@@ -29,6 +31,9 @@ import {
   NINETEEN_SCREEN_MANIFEST, assertManifestCoverage, assertSeedCoverageComplete,
   seedNativeFixture, type SeedSummary,
 } from './deterministicSeed';
+import {
+  NativeRunStatus, StartupTrace, sanitizeDiagnosticMessage, writeFailureClassification,
+} from './nativeDiagnostics';
 
 const NAV_ROUTES: ReadonlyArray<{ key: string; hash: string; screenAttr: string; banner?: string }> = [
   { key: 'overview',             hash: '#/overview',                screenAttr: 'overview' },
@@ -63,6 +68,68 @@ let launch: ElectronLaunch | undefined;
 let seedSummary: SeedSummary | undefined;
 let startupTrace: string[] = [];
 let firstReadinessBody: unknown | undefined;
+// Stage 3C-CI-FIX4 §A6/§A7: bounded diagnostics — trace + run status
+// are created at native-test entry and written to the WORKFLOW-LEVEL
+// logs dir so the CI artifact upload always finds them, even when the
+// per-run subdirectory was never created (iso mint failure).
+const WORKFLOW_LOGS_DIR = join(__dirname, 'logs');
+let diagnosticsTrace: StartupTrace | undefined;
+let diagnosticsStatus: NativeRunStatus | undefined;
+
+function captureProcessTree(dstPath: string): void {
+  try {
+    // Non-interactive `ps` snapshot; sanitize each arg column so any
+    // token that a subprocess passed via CLI can't leak.
+    const ps = spawnSync('ps', ['-eo', 'pid,ppid,pgid,comm,args'], { encoding: 'utf8' });
+    const raw = ps.status === 0 ? ps.stdout : `ps unavailable (status=${ps.status})`;
+    writeFileSync(dstPath, sanitizeDiagnosticMessage(raw));
+  } catch (e) {
+    try { writeFileSync(dstPath, `capture_failed: ${String(e).slice(0, 200)}\n`); }
+    catch { /* best-effort */ }
+  }
+}
+
+function captureEnvironmentSummary(dstPath: string): void {
+  const summary = {
+    contract: 'stage3c-native-environment.v1',
+    nodeVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    pid: process.pid,
+    ppid: process.ppid,
+    cwd: process.cwd(),
+    display: process.env.DISPLAY ?? null,
+    ciRunId: process.env.GITHUB_RUN_ID ?? null,
+    gitCommit: process.env.GITHUB_SHA ?? 'local',
+    runner: process.env.RUNNER_OS ?? null,
+    diagnosticsOptIn: process.env.HORIZON_NATIVE_DIAGNOSTICS ?? null,
+    nodeEnv: process.env.NODE_ENV ?? null,
+    dryRun: process.env.DRY_RUN ?? null,
+    orderSubmissionEnabled: process.env.ORDER_SUBMISSION_ENABLED ?? null,
+    horizonProviderMode: process.env.HORIZON_PROVIDER_MODE ?? null,
+    isoAvailable: iso != null,
+    serverPid: server?.proc?.pid ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    electronPid: (launch as any)?.app?.process?.().pid ?? null,
+  };
+  try { writeFileSync(dstPath, JSON.stringify(summary, null, 2)); }
+  catch { /* best-effort */ }
+}
+
+async function tryCapturePageArtefacts(logsDir: string): Promise<void> {
+  if (!launch?.page) return;
+  try {
+    await launch.page.screenshot({ path: join(logsDir, 'failure.png'), fullPage: true });
+  } catch { /* best-effort */ }
+  try {
+    const html = await launch.page.content();
+    writeFileSync(join(logsDir, 'failure-dom.html'), html);
+  } catch { /* best-effort */ }
+  try {
+    const url = launch.page.url();
+    writeFileSync(join(logsDir, 'current-url.txt'), url);
+  } catch { /* best-effort */ }
+}
 
 async function navigateAndWaitFor(hashRoute: string, screenAttr: string, timeoutMs = 25_000): Promise<{ frame: string; leftLoading: boolean }> {
   if (!launch) throw new Error('launch missing');
@@ -92,64 +159,190 @@ async function navigateAndWaitFor(hashRoute: string, screenAttr: string, timeout
 // ---------------------------------------------------------------------------
 
 beforeAll(async () => {
-  servicesAvailable = await externalServicesAvailable();
-  if (!servicesAvailable) {
+  // Stage 3C-CI-FIX4 §A6: native entry — replace the workflow's
+  // ci-bootstrap.txt placeholder with a live status file, initialise
+  // the shared startup-trace, and record `native_test_entered`.
+  mkdirSync(WORKFLOW_LOGS_DIR, { recursive: true });
+  const bootstrapRunId = `${process.pid}_${process.env.GITHUB_RUN_ID ?? 'local'}`;
+  diagnosticsTrace = new StartupTrace(WORKFLOW_LOGS_DIR);
+  diagnosticsStatus = new NativeRunStatus(WORKFLOW_LOGS_DIR, bootstrapRunId);
+  // Overwrite the workflow's placeholder ci-bootstrap.txt so a subsequent
+  // review can tell native-test entry actually happened.
+  try {
+    writeFileSync(join(WORKFLOW_LOGS_DIR, 'ci-bootstrap.txt'),
+      `workflow_run_id=${process.env.GITHUB_RUN_ID ?? 'local'}\n`
+      + `commit=${process.env.GITHUB_SHA ?? 'local'}\n`
+      + `runner_os=${process.env.RUNNER_OS ?? process.platform}\n`
+      + `native_test_started=true\n`
+      + `harness_launched_at=${new Date().toISOString()}\n`
+      + `note=native beforeAll entered; startup-trace.jsonl and native-run-status.json are authoritative.\n`);
+  } catch { /* best-effort */ }
+  diagnosticsTrace.record('native_test_entered', 'started', { pid: process.pid });
+  captureEnvironmentSummary(join(WORKFLOW_LOGS_DIR, 'environment-summary.json'));
+  captureProcessTree(join(WORKFLOW_LOGS_DIR, 'process-tree-before.txt'));
+
+  try {
+    servicesAvailable = await externalServicesAvailable();
+    if (!servicesAvailable) {
+      // eslint-disable-next-line no-console
+      console.warn('[stage3c-native] MariaDB or Redis unavailable — native suite will skip');
+      diagnosticsTrace.record('native_test_entered', 'failed', { reason: 'external_services_unavailable' });
+      return;
+    }
+    iso = mintIsolation();
+    // Once iso exists, also emit trace + status inside the per-run
+    // directory so per-run evidence stays adjacent to per-run logs.
+    // The workflow-level trace continues in parallel.
+    diagnosticsTrace.record('isolation_minted', 'completed', { runId: iso.runId, dbName: iso.dbName, redisNamespace: iso.redisNamespace });
+    diagnosticsStatus.setPhase('isolation_minted');
+    startupTrace.push('mariadb_ready', 'redis_ready');
+    diagnosticsTrace.record('mariadb_ready', 'completed', {});
+    diagnosticsTrace.record('redis_ready', 'completed', {});
+    diagnosticsStatus.setPhase('mariadb_ready');
+
+    await ensureDbCreated(iso);
+    startupTrace.push('scratch_db_created');
+    diagnosticsTrace.record('scratch_db_created', 'completed', { dbName: iso.dbName });
+    diagnosticsStatus.setPhase('scratch_db_created');
+
+    diagnosticsTrace.record('migrations_started', 'started', {});
+    diagnosticsStatus.setPhase('migrations_started');
+    await applyMigrations(iso.dbUrl);
+    startupTrace.push('migrations_applied');
+    diagnosticsTrace.record('migrations_complete', 'completed', {});
+    diagnosticsStatus.setPhase('migrations_complete');
+
+    diagnosticsTrace.record('seed_started', 'started', {});
+    diagnosticsStatus.setPhase('seed_started');
+    seedSummary = await seedNativeFixture(iso.dbUrl);
+    diagnosticsTrace.record('seed_complete', 'completed', {});
+    diagnosticsStatus.setPhase('seed_complete');
+    // Coverage gate — the REQUIRED minimum must land (14 tables covering
+    // the screens whose absence would leave a placeholder). Recommended
+    // rows (10 additional Phase 2 observer tables with complex FK graphs)
+    // are surfaced as INFO but do not block the run — those screens render
+    // honest `empty`/`degraded` envelopes from real query responses when
+    // the seed's FK dependency cannot be satisfied. See
+    // deterministicSeed.ts for REQUIRED_MINIMUM_SEED_ROWS + RECOMMENDED_SEED_ROWS.
+    const coverage = assertSeedCoverageComplete(seedSummary);
     // eslint-disable-next-line no-console
-    console.warn('[stage3c-native] MariaDB or Redis unavailable — native suite will skip');
-    return;
+    console.log(`[stage3c-native] seed_coverage: required=${coverage.requiredMet}/${coverage.requiredMet + coverage.requiredMissing.length} recommended=${coverage.recommendedMet}/${coverage.recommendedMet + coverage.recommendedMissing.length}`);
+    if (coverage.recommendedMissing.length > 0) {
+      // eslint-disable-next-line no-console
+      console.log('[stage3c-native] recommended_seed_gaps: ' + JSON.stringify(coverage.recommendedMissing));
+    }
+    diagnosticsTrace.record('seed_coverage_complete', 'completed', { requiredMet: coverage.requiredMet, recommendedMet: coverage.recommendedMet });
+    // Stage 3C-ENV-FIX §2 — mandatory 19-screen manifest coverage.
+    // Every screen whose expectedState is 'healthy' MUST have its
+    // required seed tables populated. Screens whose expectedState is
+    // explicitly 'empty'/'stale'/'degraded'/'unavailable' are permitted
+    // — the manifest is the auditable declaration.
+    const manifestCoverage = assertManifestCoverage(seedSummary);
+    if (!manifestCoverage.ok) {
+      throw new Error(`manifest_coverage_incomplete: ${manifestCoverage.violations.join('; ')}`);
+    }
+    diagnosticsTrace.record('manifest_coverage_complete', 'completed', { screens: NINETEEN_SCREEN_MANIFEST.length });
+    startupTrace.push('seed_applied');
+    startupTrace.push(`seed_coverage_required=${coverage.requiredMet}`);
+    startupTrace.push(`seed_coverage_recommended=${coverage.recommendedMet}`);
+    startupTrace.push(`manifest_coverage_complete=${NINETEEN_SCREEN_MANIFEST.length}`);
+
+    diagnosticsTrace.record('server_spawn_started', 'started', {});
+    diagnosticsStatus.setPhase('server_spawn_started');
+    server = await spawnServer(iso);
+    startupTrace.push('server_spawned');
+    diagnosticsTrace.record('server_spawn_complete', 'completed', { pid: server.proc.pid ?? null, port: server.port });
+    diagnosticsStatus.setPhase('server_spawn_complete');
+
+    diagnosticsTrace.record('server_readiness_started', 'started', { deadlineMs: 90_000 });
+    diagnosticsStatus.setPhase('server_readiness_started');
+    const readiness = await waitForReadiness(server, 90_000);
+    if (!readiness.ok) {
+      diagnosticsTrace.record('server_readiness_complete', 'failed', { ms: readiness.ms });
+      throw new Error('server_readiness_timeout');
+    }
+    firstReadinessBody = readiness.body;
+    startupTrace.push(`server_ready_in_${readiness.ms}ms`);
+    diagnosticsTrace.record('server_readiness_complete', 'completed', { ms: readiness.ms });
+    diagnosticsStatus.setPhase('server_readiness_complete');
+
+    diagnosticsTrace.record('operator_setup_started', 'started', {});
+    diagnosticsStatus.setPhase('operator_setup_started');
+    await ensureLocalOperator(server);
+    startupTrace.push('operator_provisioned');
+    diagnosticsTrace.record('operator_setup_complete', 'completed', {});
+    diagnosticsStatus.setPhase('operator_setup_complete');
+
+    // Electron launch is internally split into 3 bounded phases inside
+    // launchElectron — each records its own start/complete on the trace.
+    launch = await launchElectron(iso, server, diagnosticsTrace);
+    startupTrace.push('electron_launched');
+    diagnosticsStatus.setPhase('renderer_dom_loaded');
+    startupTrace.push('renderer_dom_loaded');
+    diagnosticsStatus.markCompleted();
+  } catch (err) {
+    // Stage 3C-CI-FIX4 §A7: any failure in beforeAll must leave a
+    // complete evidence bundle before rethrowing. We write:
+    //   - failure-classification.json (classified error code + phase)
+    //   - environment-summary.json (env + pid snapshot)
+    //   - process-tree.txt (ps -eo dump, sanitized)
+    //   - failure.png / failure-dom.html / current-url.txt when a page exists
+    //   - startup-trace.jsonl + native-run-status.json are already open
+    // to the workflow-level logs dir. We also mirror to iso.logsDir
+    // when iso was minted so per-run evidence stays adjacent.
+    const failureDirs = [WORKFLOW_LOGS_DIR];
+    if (iso?.logsDir) failureDirs.push(iso.logsDir);
+    for (const dir of failureDirs) {
+      try {
+        mkdirSync(dir, { recursive: true });
+        writeFailureClassification(dir, err, {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          electronPid: (launch as any)?.app?.process?.().pid ?? null,
+          serverPid: server?.proc?.pid ?? null,
+        });
+        captureEnvironmentSummary(join(dir, 'environment-summary.json'));
+        captureProcessTree(join(dir, 'process-tree.txt'));
+      } catch { /* best-effort */ }
+    }
+    // Extra: capture renderer state if page exists.
+    await tryCapturePageArtefacts(WORKFLOW_LOGS_DIR);
+    if (iso?.logsDir) await tryCapturePageArtefacts(iso.logsDir);
+    diagnosticsTrace?.record('native_test_entered', 'failed', { reason: sanitizeDiagnosticMessage(err instanceof Error ? err.message : String(err)) });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const errAny = err as any;
+    if (diagnosticsStatus && typeof errAny?.message === 'string') {
+      const m = errAny.message.match(/^native_startup_timeout:(\w+)$/);
+      const map: Record<string, 'electron_launch' | 'first_window' | 'renderer_dom' | 'renderer_ready'> = {
+        electron_launch: 'electron_launch',
+        first_window: 'first_window',
+        renderer_dom: 'renderer_dom',
+        renderer_ready: 'renderer_ready',
+      };
+      const cls = m ? (map[m[1] as string] ?? 'unknown') : 'unknown';
+      diagnosticsStatus.markFailed(cls);
+    } else {
+      diagnosticsStatus?.markFailed('unknown');
+    }
+    throw err;
+  } finally {
+    captureProcessTree(join(WORKFLOW_LOGS_DIR, 'process-tree-after-beforeall.txt'));
   }
-  iso = mintIsolation();
-  startupTrace.push('mariadb_ready', 'redis_ready');
-  await ensureDbCreated(iso);
-  startupTrace.push('scratch_db_created');
-  await applyMigrations(iso.dbUrl);
-  startupTrace.push('migrations_applied');
-  seedSummary = await seedNativeFixture(iso.dbUrl);
-  // Coverage gate — the REQUIRED minimum must land (14 tables covering
-  // the screens whose absence would leave a placeholder). Recommended
-  // rows (10 additional Phase 2 observer tables with complex FK graphs)
-  // are surfaced as INFO but do not block the run — those screens render
-  // honest `empty`/`degraded` envelopes from real query responses when
-  // the seed's FK dependency cannot be satisfied. See
-  // deterministicSeed.ts for REQUIRED_MINIMUM_SEED_ROWS + RECOMMENDED_SEED_ROWS.
-  const coverage = assertSeedCoverageComplete(seedSummary);
-  // eslint-disable-next-line no-console
-  console.log(`[stage3c-native] seed_coverage: required=${coverage.requiredMet}/${coverage.requiredMet + coverage.requiredMissing.length} recommended=${coverage.recommendedMet}/${coverage.recommendedMet + coverage.recommendedMissing.length}`);
-  if (coverage.recommendedMissing.length > 0) {
-    // eslint-disable-next-line no-console
-    console.log('[stage3c-native] recommended_seed_gaps: ' + JSON.stringify(coverage.recommendedMissing));
-  }
-  // Stage 3C-ENV-FIX §2 — mandatory 19-screen manifest coverage.
-  // Every screen whose expectedState is 'healthy' MUST have its
-  // required seed tables populated. Screens whose expectedState is
-  // explicitly 'empty'/'stale'/'degraded'/'unavailable' are permitted
-  // — the manifest is the auditable declaration.
-  const manifestCoverage = assertManifestCoverage(seedSummary);
-  if (!manifestCoverage.ok) {
-    throw new Error(`manifest_coverage_incomplete: ${manifestCoverage.violations.join('; ')}`);
-  }
-  startupTrace.push('seed_applied');
-  startupTrace.push(`seed_coverage_required=${coverage.requiredMet}`);
-  startupTrace.push(`seed_coverage_recommended=${coverage.recommendedMet}`);
-  startupTrace.push(`manifest_coverage_complete=${NINETEEN_SCREEN_MANIFEST.length}`);
-  server = await spawnServer(iso);
-  startupTrace.push('server_spawned');
-  const readiness = await waitForReadiness(server, 90_000);
-  if (!readiness.ok) throw new Error('server_readiness_timeout');
-  firstReadinessBody = readiness.body;
-  startupTrace.push(`server_ready_in_${readiness.ms}ms`);
-  await ensureLocalOperator(server);
-  startupTrace.push('operator_provisioned');
-  launch = await launchElectron(iso, server);
-  startupTrace.push('electron_launched');
-  // Give the renderer a moment to hydrate before assertions start.
-  await launch.page.waitForLoadState('domcontentloaded');
-  startupTrace.push('renderer_dom_loaded');
 }, 300_000);
 
 afterAll(async () => {
-  if (!iso) return;
-  await teardown(iso, server, launch);
+  diagnosticsTrace?.record('shutdown_started', 'started', {});
+  diagnosticsStatus?.setPhase('shutdown_started');
+  captureProcessTree(join(WORKFLOW_LOGS_DIR, 'process-tree-before-teardown.txt'));
+  if (iso) {
+    try { await teardown(iso, server, launch); }
+    catch (e) {
+      diagnosticsTrace?.record('cleanup_complete', 'failed', { error: sanitizeDiagnosticMessage(e instanceof Error ? e.message : String(e)) });
+    }
+  }
+  captureProcessTree(join(WORKFLOW_LOGS_DIR, 'process-tree-after-teardown.txt'));
+  diagnosticsTrace?.record('cleanup_complete', 'completed', {});
+  diagnosticsStatus?.setPhase('cleanup_complete');
+  diagnosticsStatus?.markCompleted();
 }, 60_000);
 
 // ---------------------------------------------------------------------------

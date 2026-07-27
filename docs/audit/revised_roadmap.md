@@ -193,6 +193,56 @@ which `blocking_gaps.md` categories it consumes.
   native_electron_unpacked_integration_verified +
   all_19_screens_runtime_verified`.
 
+### Stage 3C-CI-FIX4 — bounded native diagnostics + Windows test isolation
+
+- **Entry**: Stage 3C-CI-FIX3 committed (`e6aa0c0`); Stage 3C-CI-FIX3
+  CI showed the native workflow hitting a 15-minute Playwright
+  `_electron.launch` hang with no attributable phase, and the
+  Windows workflow failing on cross-platform path assertions +
+  service-dependent tests running without provisioned services.
+- **Exit criteria delivered**:
+  - New diagnostics module `apps/desktop/tests/native/nativeDiagnostics.ts`
+    with `NATIVE_STARTUP_PHASES`, `StartupTrace` (synchronous JSONL),
+    `withNativeTimeout(phase, ms, promise)` (deterministic
+    `native_startup_timeout:<phase>` error code), `NativeRunStatus`
+    (`stage3c-native-run-status.v1`), `writeFailureClassification`
+    (`stage3c-native-failure.v1`), `sanitizeDiagnosticMessage`
+    (Bearer / mysql:// / hex-token redaction), and
+    `nativeDiagnosticsEnabled` (strict test-only opt-in — packaged
+    builds structurally cannot enable).
+  - `electronHarness.launchElectron` split into three separately
+    bounded phases: electron_launch 60s, first_window 60s,
+    renderer_dom 45s. A hang in any phase produces a specific
+    error code + a `failed` JSONL entry.
+  - `nativeElectron.integration.test.ts` `beforeAll` wrapped in
+    try/catch/finally; on failure emits
+    `failure-classification.json` + `environment-summary.json` +
+    `process-tree.txt` + `failure.png` / `failure-dom.html` /
+    `current-url.txt` to both workflow-level and per-run log dirs
+    before rethrowing. `ci-bootstrap.txt` overwritten at native
+    entry so `native_test_started=true` reflects real state.
+  - Test-suite scoping partitioned into three configs:
+    portable (`vitest.config.ts`, excludes native + service-dependent
+    tests), external (`vitest.external.config.ts`, service-dependent
+    with `singleFork:true`), native (`vitest.native.config.ts`,
+    xvfb + electron). Windows runs portable only.
+  - Windows path portability fixed: `stage1_runtime_assets.test.ts`
+    uses `path.normalize` equality helper instead of forward-slash
+    substring assertions.
+  - CI workflow: external-services suite runs BEFORE native harness
+    with `HORIZON_REQUIRE_EXTERNAL_SERVICES=true`; Chromium
+    user-data cache dirs excluded from artefact upload.
+  - New unit tests: 13 in `nativeDiagnostics.test.ts` + 20 in
+    `ci_test_isolation.test.ts`.
+- **Verdict achieved**: `stage3c_native_bounded_diagnostics_landed +
+  stage3c_windows_unit_isolation_landed +
+  stage3c_native_runtime_verification_pending_ci_run`.
+- **Next**: trigger `.github/workflows/stage3c-native.yml`; upon
+  green + `native-run-status.json.completed=true` +
+  `failureClassification:null` + `evidence.json` matching §21.8,
+  reclaim the runtime verdicts. If the workflow fails, the artefact
+  bundle now names the failing phase attributively.
+
 ## Stage 4 — Real report generation
 
 - **Entry**: Stage 3 committed.

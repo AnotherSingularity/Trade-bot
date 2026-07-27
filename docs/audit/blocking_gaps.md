@@ -174,14 +174,27 @@ blocker analysis.
 29. Trigger `.github/workflows/stage3c-native.yml` (via
     workflow_dispatch or a push to `claude/horizon-trade-bot-mcbcfo`).
     Ubuntu-latest is non-root by default; the workflow provisions
-    MariaDB 11 + Redis 7 as services, installs xvfb + Chromium
-    runtime deps, builds shared + server + desktop, runs the native
-    suite via `npm run test:native`, and uploads
+    MariaDB 10.11.6 + Redis 7.4-alpine as services, installs xvfb +
+    redis-tools + Chromium runtime deps, builds shared + server +
+    desktop, runs the mandatory external-services suite BEFORE the
+    native harness (fast-fails on any schema/probe regression instead
+    of burning Electron wall-clock), then runs the native suite via
+    `npm run test:native`, and uploads
     `apps/desktop/tests/native/logs/**` as
-    `stage3c-native-evidence-<runId>`. Green run + `evidence.json`
-    with `assertionResults.passed === 55` + `screenMatrix.length === 19`
-    + `processLeakResult.ok === true` + zero Create Order counters is
-    what reclaims the full Stage 3 verdict.
+    `stage3c-native-evidence-<runId>` — with Chromium user-data
+    cache dirs excluded from the artefact so review stays legible.
+    Green run + `evidence.json` with `assertionResults.passed === 55`
+    + `screenMatrix.length === 19` + `processLeakResult.ok === true`
+    + zero Create Order counters + `native-run-status.json.completed === true`
+    + `failureClassification: null` is what reclaims the full Stage
+    3 verdict. On failure, the artefact bundle now names the
+    failing phase attributively via the Stage 3C-CI-FIX4 diagnostic
+    contracts: `startup-trace.jsonl` (per-phase JSONL trace),
+    `failure-classification.json` (classified error code +
+    sanitized message), `native-run-status.json` (which phase was
+    live when the failure occurred), `environment-summary.json`,
+    `process-tree.txt`, and (when Electron reached a page) `failure.png`
+    + `failure-dom.html` + `current-url.txt`.
 
 ## Category I — Backend integration (unblocks observer maturity to `runtime_wired`)
 

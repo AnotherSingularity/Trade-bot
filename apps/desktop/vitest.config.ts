@@ -21,10 +21,26 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-    // Stage 3C — native Electron integration tests run under their
-    // own config (vitest.native.config.ts) with xvfb-run + real
-    // services. Never surface here.
-    exclude: ['tests/native/**', 'node_modules/**', 'dist/**'],
+    // Stage 3C-CI-FIX4 §B3: portable unit config excludes every
+    // service-dependent path so Windows CI runs green without
+    // MariaDB/Redis. The mandatory external suite is at
+    // vitest.external.config.ts; the native suite at
+    // vitest.native.config.ts.
+    exclude: [
+      'tests/native/**',
+      'tests/**/*external*.test.ts',
+      'tests/stage1_schema_fingerprint.test.ts',
+      'tests/stage1_mariadb_probe.test.ts',
+      'tests/stage1_redis_probe.test.ts',
+      'tests/stage1fix_external_services_integration.test.ts',
+      'tests/stage2_end_to_end_integration.test.ts',
+      'tests/stage2fix_bootstrap_scope.test.ts',
+      'tests/stage2fix_db_isolation.test.ts',
+      'tests/stage1_supervisor_integration.test.ts',
+      'tests/stage1_command_runner.test.ts',
+      'node_modules/**',
+      'dist/**',
+    ],
     globals: true,
     testTimeout: 15_000,
     environmentMatchGlobs: [

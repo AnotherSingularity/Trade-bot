@@ -1,8 +1,14 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, normalize } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RuntimeAssetError, inferDevProjectRoot, resolveRuntimeAssets } from '../src/main/runtimeAssets';
+
+// Stage 3C-CI-FIX4 §B1: normalise path separators before comparison
+// so tests pass on Windows (path.join uses '\\') and POSIX (uses '/').
+function eqPath(actual: string, expected: string): void {
+  expect(normalize(actual)).toBe(normalize(expected));
+}
 
 describe('stage1 §2 — runtime asset resolver', () => {
   let root: string;
@@ -28,8 +34,8 @@ describe('stage1 §2 — runtime asset resolver', () => {
       userDataDirectory: userData, logDirectory: logs, reportDirectory: reports,
     });
     expect(assets.mode).toBe('development');
-    expect(assets.composeFile).toContain('docker-compose.prod.yml');
-    expect(assets.serverEntry).toContain('apps/server/src/index.ts');
+    eqPath(assets.composeFile, join(r, 'docker-compose.prod.yml'));
+    eqPath(assets.serverEntry, join(r, 'apps', 'server', 'src', 'index.ts'));
   });
 
   it('T-S1.8: resolves in packaged mode', () => {
@@ -45,7 +51,7 @@ describe('stage1 §2 — runtime asset resolver', () => {
       userDataDirectory: userData, logDirectory: logs, reportDirectory: reports,
     });
     expect(assets.mode).toBe('packaged');
-    expect(assets.serverEntry).toContain('server/dist/index.js');
+    eqPath(assets.serverEntry, join(root, 'server', 'dist', 'index.js'));
   });
 
   it('T-S1.9: missing server asset blocks startup', () => {
