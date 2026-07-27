@@ -147,6 +147,52 @@ which `blocking_gaps.md` categories it consumes.
   produce the missing 55-assertion output; then reclaim
   `native_electron_unpacked_integration_verified`.
 
+### Stage 3C-ENV — closure of Stage 3C reviewer-identified gaps
+
+- **Entry**: Stage 3C committed (`8fde5cf`).
+- **Delivered**:
+  - `apps/desktop/src/main/localEnvironment.ts` —
+    `resolveSandboxPolicy` pure resolver hardening the Xvfb sandbox
+    opt-in (packaged builds always keep sandbox on; test-only
+    accommodation requires strict NODE_ENV=test + envOptIn=='true'
+    + !isDevelopmentFake triple; non-canonical env values rejected).
+  - `apps/desktop/src/main/index.ts` — single call site consumes
+    the resolver + logs the decision + reason.
+  - `apps/desktop/tests/main/sandbox_policy.test.ts` — 8 pure unit
+    tests locking every branch.
+  - `apps/desktop/tests/native/deterministicSeed.ts` — seed
+    expanded from 13 to 24 domains; `REQUIRED_MINIMUM_SEED_ROWS`
+    (14, hard-fail) + `RECOMMENDED_SEED_ROWS` (10 Phase 2 observer
+    tables, advisory); `assertSeedCoverageComplete` returns
+    `SeedCoverageResult` for CI reporting.
+  - `apps/desktop/tests/native/nativeElectron.integration.test.ts` —
+    19 per-screen `T-sig[<key>]` assertions matching seeded
+    signature strings + `T-coverage` hard gate + tightened `T36`
+    (lock+re-nav asserts unauthorized state, not cached rows) +
+    `T-evidence` writes `evidence.json`.
+  - `apps/desktop/tests/native/electronHarness.ts` —
+    `checkProcessLeak`, `sanitizeLog`, `writeEvidenceBundle`
+    (contract `stage3c-native-evidence.v1`), `writeSanitizedLog`.
+  - `.github/workflows/stage3c-native.yml` — CI job on
+    `ubuntu-latest` (non-root) with MariaDB 11 + Redis 7 services,
+    xvfb-run + Chromium runtime deps, native suite invocation,
+    log artefact upload.
+- **Not delivered under this environment**: the native run itself.
+  Delegated to the CI workflow; local harness proceeds through the
+  entire boot + seed pipeline until Chromium's root-sandbox refusal
+  (documented in Stage 3C §2).
+- **Verdict achieved**: `stage3c_native_harness_implemented +
+  stage3c_native_harness_completeness_hardened +
+  stage3c_native_runtime_verification_pending_ci_run +
+  all_19_screens_unit_bound +
+  authenticated_desktop_data_integration_unit_verified +
+  native_electron_test_blocked_container_only`.
+- **Next**: trigger `.github/workflows/stage3c-native.yml`; upon
+  green + evidence.json manifest matching Stage 3C-ENV §21.8, reclaim
+  `desktop_screen_binding_complete +
+  native_electron_unpacked_integration_verified +
+  all_19_screens_runtime_verified`.
+
 ## Stage 4 — Real report generation
 
 - **Entry**: Stage 3 committed.

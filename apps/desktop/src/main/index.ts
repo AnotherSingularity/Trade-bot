@@ -22,7 +22,7 @@ import path from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { handleIpcCall, type IpcHostContext } from './ipc';
 import { ConsoleSink, Logger } from './logging';
-import { resolveDesktopEnvironment, validateDesktopEnvironment } from './localEnvironment';
+import { resolveDesktopEnvironment, resolveSandboxPolicy, validateDesktopEnvironment } from './localEnvironment';
 import { InMemorySecretsAdapter, KeytarSecretsAdapter, type SecretsAdapter, collectCredentialStatuses } from './secrets';
 import { mintBootstrapToken } from './bootstrapToken';
 import { createAuthTokenStorage } from './secureStorage';
@@ -51,15 +51,25 @@ import { DesktopIncidentSink } from './incidents';
 
 const logger = new Logger(new ConsoleSink(), 'main');
 
-// Stage 3C — Xvfb/headless-linux container support: if the operator
-// explicitly opts in with HORIZON_ELECTRON_NO_SANDBOX=true, disable
-// the Chromium sandbox for every child process (renderer, GPU, utility).
-// Required in the Linux CI harness because Chromium refuses to launch
-// as root without --no-sandbox. Ignored in packaged production builds.
-if (process.env.HORIZON_ELECTRON_NO_SANDBOX === 'true' && !app.isPackaged) {
-  app.commandLine.appendSwitch('no-sandbox');
-  app.commandLine.appendSwitch('disable-gpu-sandbox');
-  app.commandLine.appendSwitch('disable-dev-shm-usage');
+// Stage 3C-ENV — hardened sandbox policy. The single call to
+// resolveSandboxPolicy is the ONLY gate that can weaken Chromium
+// sandboxing. Packaged installers structurally cannot enter the
+// disable branch (Rule 1 in localEnvironment.ts). The runtime log
+// records the decision + reason so review can prove the boundary
+// held from CI artefacts.
+const sandboxDecision = resolveSandboxPolicy({
+  isPackaged: app.isPackaged,
+  nodeEnv: process.env.NODE_ENV,
+  envOptIn: process.env.HORIZON_ELECTRON_NO_SANDBOX,
+  isDevelopmentFake: process.env.HORIZON_DEVELOPMENT_FAKE === 'true',
+});
+logger.info('sandbox_policy_resolved', {
+  disableSandbox: sandboxDecision.disableSandbox,
+  reason: sandboxDecision.reason,
+  isPackaged: app.isPackaged,
+});
+if (sandboxDecision.disableSandbox) {
+  for (const s of sandboxDecision.appliedSwitches) app.commandLine.appendSwitch(s);
 }
 
 async function createMainWindow(): Promise<BrowserWindow> {

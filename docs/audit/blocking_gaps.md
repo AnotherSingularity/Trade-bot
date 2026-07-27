@@ -171,6 +171,18 @@ blocker analysis.
     `su`-to-user is blocked in this session's classifier), OR on
     a native Windows dev machine. Expected wall-clock: 2-5 min.
 
+29. Trigger `.github/workflows/stage3c-native.yml` (via
+    workflow_dispatch or a push to `claude/horizon-trade-bot-mcbcfo`).
+    Ubuntu-latest is non-root by default; the workflow provisions
+    MariaDB 11 + Redis 7 as services, installs xvfb + Chromium
+    runtime deps, builds shared + server + desktop, runs the native
+    suite via `npm run test:native`, and uploads
+    `apps/desktop/tests/native/logs/**` as
+    `stage3c-native-evidence-<runId>`. Green run + `evidence.json`
+    with `assertionResults.passed === 55` + `screenMatrix.length === 19`
+    + `processLeakResult.ok === true` + zero Create Order counters is
+    what reclaims the full Stage 3 verdict.
+
 ## Category I — Backend integration (unblocks observer maturity to `runtime_wired`)
 
 28. Wire Phase 2A-2F observer harnesses into a real shadow tick.

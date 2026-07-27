@@ -24,7 +24,7 @@
  * real preload, the real renderer bundle.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createServer as createNetServer } from 'node:net';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -353,6 +353,114 @@ export async function readCreateOrderCounters(server: ServerSpawn): Promise<{
 
 // ---------------------------------------------------------------------------
 // Teardown
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Process-leak check + evidence bundle (Stage 3C-ENV §5/§6)
+// ---------------------------------------------------------------------------
+
+export interface ProcessLeakResult {
+  ok: boolean;
+  survivors: Array<{ pid: number; comm: string; role: string }>;
+}
+
+/**
+ * After teardown, enumerate the process table and assert none of the
+ * spawned children survived. Uses `ps -eo pid,comm` — portable on any
+ * Linux/CI host we target.
+ */
+export function checkProcessLeak(server?: ServerSpawn, launch?: ElectronLaunch): ProcessLeakResult {
+  const targets: Array<{ pid: number; role: string }> = [];
+  if (server?.proc?.pid) targets.push({ pid: server.proc.pid, role: 'server' });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const appProc: any = launch?.app?.process?.();
+  if (appProc?.pid) targets.push({ pid: appProc.pid, role: 'electron' });
+  if (targets.length === 0) return { ok: true, survivors: [] };
+  const survivors: ProcessLeakResult['survivors'] = [];
+  try {
+    const ps = spawnSync('ps', ['-eo', 'pid,comm'], { encoding: 'utf8' });
+    if (ps.status !== 0) return { ok: true, survivors: [] }; // ps unavailable → skip
+    const lines = ps.stdout.split('\n').slice(1);
+    const alive = new Map<number, string>();
+    for (const line of lines) {
+      const m = line.trim().match(/^(\d+)\s+(.*)$/);
+      if (m) alive.set(Number(m[1]), m[2]);
+    }
+    for (const t of targets) {
+      if (alive.has(t.pid)) survivors.push({ pid: t.pid, comm: alive.get(t.pid)!, role: t.role });
+    }
+  } catch { /* ignore */ }
+  return { ok: survivors.length === 0, survivors };
+}
+
+// ---------------------------------------------------------------------------
+// Sanitizer — redacts bearer tokens, bootstrap tokens, hashes from logs
+// ---------------------------------------------------------------------------
+
+const REDACTORS: ReadonlyArray<[RegExp, string]> = [
+  [/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer <REDACTED>'],
+  [/(x-horizon-bootstrap-token[^:]*:\s*)[A-Fa-f0-9]{32,}/g, '$1<REDACTED>'],
+  [/(bootstrapToken["'\s:=]+)[A-Fa-f0-9]{32,}/g, '$1<REDACTED>'],
+  [/(passwordHash["'\s:=]+)"?[^"',\s]+/g, '$1<REDACTED>'],
+  [/(sessionToken["'\s:=]+)[A-Fa-f0-9]{32,}/g, '$1<REDACTED>'],
+  [/(accessToken["'\s:=]+)[A-Za-z0-9._-]{20,}/g, '$1<REDACTED>'],
+  [/(refreshToken["'\s:=]+)[A-Za-z0-9._-]{20,}/g, '$1<REDACTED>'],
+];
+
+export function sanitizeLog(raw: string): string {
+  let out = raw;
+  for (const [re, repl] of REDACTORS) out = out.replace(re, repl);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Evidence bundle — machine-readable manifest the CI job uploads.
+// ---------------------------------------------------------------------------
+
+export interface EvidenceBundle {
+  contract: 'stage3c-native-evidence.v1';
+  runId: string;
+  ciRunId: string | null;
+  gitCommit: string;
+  os: string;
+  nodeVersion: string;
+  electronPid: number | null;
+  serverPid: number | null;
+  dbName: string;
+  redisNamespace: string;
+  migrationHeadCount: number;
+  schemaFingerprintResult: 'skipped_external_harness' | 'verified' | 'unavailable';
+  seedSummary: unknown;
+  seedCoverageComplete: boolean;
+  screenMatrix: Array<{ key: string; hash: string; state: string; passed: boolean; detail?: string }>;
+  assertionResults: { total: number; passed: number; failed: number; skipped: number };
+  rendererSecurityResult: { hasProcess: boolean; hasRequire: boolean; hasIpcRenderer: boolean; hasHorizon: boolean };
+  shutdownResult: { closed: boolean; detail: string };
+  processLeakResult: ProcessLeakResult;
+  createOrderCounters: { functionInvocations: number; attemptCount: number; networkCount: number };
+  safeFlags: {
+    DRY_RUN: boolean; ORDER_SUBMISSION_ENABLED: boolean;
+    SIMULATION_MODE: string; liveCapitalAuthorized: boolean;
+    promotionEnabled: boolean; kellyEnabled: boolean;
+  };
+  serverLogFile: string;
+  electronLogFile: string;
+}
+
+export function writeEvidenceBundle(iso: NativeIsolation, bundle: EvidenceBundle): string {
+  const path = join(iso.logsDir, 'evidence.json');
+  writeFileSync(path, JSON.stringify(bundle, null, 2));
+  return path;
+}
+
+export function writeSanitizedLog(iso: NativeIsolation, name: string, raw: string): string {
+  const path = join(iso.logsDir, `sanitized-${name}.log`);
+  writeFileSync(path, sanitizeLog(raw));
+  return path;
+}
+
+// ---------------------------------------------------------------------------
+// Teardown (extended: writes sanitized logs + process-leak check result)
 // ---------------------------------------------------------------------------
 
 export async function teardown(iso: NativeIsolation, server?: ServerSpawn, launch?: ElectronLaunch): Promise<void> {

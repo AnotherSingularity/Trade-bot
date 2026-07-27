@@ -1,0 +1,128 @@
+name: stage3c-native-electron
+
+# Stage 3C-ENV — the reproducible native Electron integration test.
+# Runs on a non-root Linux runner where Chromium's sandbox check does
+# not FATAL the renderer child processes. Manual dispatch is the
+# primary trigger; every push to the tracked branch also runs it so
+# fresh evidence is available for review.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/horizon-trade-bot-mcbcfo
+      - main
+
+jobs:
+  native:
+    name: Stage 3C native Electron
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Xvfb + Chromium runtime deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb \
+            libnss3 \
+            libatk-bridge2.0-0 \
+            libgtk-3-0 \
+            libgbm1 \
+            libxkbcommon0 \
+            libasound2t64
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Typecheck (shared)
+        working-directory: packages/shared
+        run: npx tsc --noEmit
+
+      - name: Typecheck (server)
+        working-directory: apps/server
+        run: npx tsc --noEmit
+
+      - name: Build server
+        working-directory: apps/server
+        run: npm run build
+
+      - name: Typecheck + build desktop (tsc + vite + esbuild bundle)
+        working-directory: apps/desktop
+        run: npm run build
+
+      - name: Wait for MariaDB
+        run: |
+          for i in $(seq 1 30); do
+            if mysqladmin -h 127.0.0.1 -u root -ppassword ping >/dev/null 2>&1; then
+              echo "mariadb ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "mariadb did not become ready" >&2
+          exit 1
+
+      - name: Wait for Redis
+        run: |
+          for i in $(seq 1 30); do
+            if redis-cli -h 127.0.0.1 ping | grep -q PONG; then
+              echo "redis ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "redis did not become ready" >&2
+          exit 1
+
+      - name: Run Stage 3C native Electron integration test
+        working-directory: apps/desktop
+        run: npm run test:native
+        env:
+          NATIVE_DEBUG: '0'
+
+      - name: Upload native harness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage3c-native-evidence-${{ github.run_id }}
+          path: apps/desktop/tests/native/logs/**
+          retention-days: 30
+
+      - name: Emit evidence.json summary to job log
+        if: always()
+        working-directory: apps/desktop/tests/native/logs
+        run: |
+          for f in */evidence.json; do
+            echo "=== $f ==="
+            cat "$f"
+          done || echo "no evidence.json produced"
