@@ -21,6 +21,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    // Stage 3C — native Electron integration tests run under their
+    // own config (vitest.native.config.ts) with xvfb-run + real
+    // services. Never surface here.
+    exclude: ['tests/native/**', 'node_modules/**', 'dist/**'],
     globals: true,
     testTimeout: 15_000,
     environmentMatchGlobs: [

@@ -49,3 +49,8 @@ drizzle/meta/_journal.json.bak
 
 # Redis snapshot dump created by redis-server
 dump.rdb
+
+# Stage 3C — native Electron harness runtime artefacts. Fresh
+# per-run scratch directories (Electron userData, harness logs,
+# Chromium caches) — never committed.
+apps/desktop/tests/native/logs/

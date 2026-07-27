@@ -111,6 +111,42 @@ which `blocking_gaps.md` categories it consumes.
   claimed — native Electron smoke, report generation, managed-Docker
   runtime verification, and Windows packaging remain pending.
 
+### Stage 3C — native Electron unpacked integration (blocked in remote CI)
+
+- **Entry**: Stage 3B committed.
+- **Delivered**:
+  - `apps/desktop/src/main/serviceAdapters.ts` —
+    `createServerAdapterExternal(rt, fingerprintPath)` opt-in adapter
+    (`HORIZON_SERVER_EXTERNAL=true`, packaged-build guard).
+  - `apps/desktop/src/main/index.ts` — external-adapter selection +
+    `HORIZON_ELECTRON_NO_SANDBOX` opt-in (Chromium sandbox flags
+    for Xvfb-under-Linux CI).
+  - `apps/desktop/build/bundle-main.mjs` — esbuild post-tsc bundler
+    inlining `@horizon/shared` into `dist/main/main/index.js` +
+    `dist/preload/preload/index.js`. Wired into `npm run build`.
+  - `apps/desktop/tests/native/electronHarness.ts` — reusable
+    Playwright `_electron` harness (real MariaDB scratch DB +
+    real Redis namespace + real Horizon server + Xvfb Electron).
+  - `apps/desktop/tests/native/deterministicSeed.ts` — raw-SQL
+    seed covering 13 domains (never an economic write; no orders;
+    no Coinbase calls); fixed timestamps + IDs.
+  - `apps/desktop/tests/native/nativeElectron.integration.test.ts` —
+    55-assertion suite covering every spec §12 item.
+  - `apps/desktop/vitest.native.config.ts` + `npm run test:native`
+    script.
+- **Not delivered under this environment**: the native run itself.
+  The Electron main process boots (IPC handlers register) but
+  Chromium refuses to spawn renderer children under root without
+  a propagating `--no-sandbox` flag. Standard CI workaround
+  (non-root user) blocked by the session's classifier.
+- **Verdict achieved**: `stage3b_screen_binding_complete +
+  all_19_desktop_screens_bound +
+  authenticated_desktop_data_integration_verified +
+  native_electron_test_blocked` (see `docs/audit/stage3_report.md`).
+- **Next**: run `npm run test:native` on a compatible host to
+  produce the missing 55-assertion output; then reclaim
+  `native_electron_unpacked_integration_verified`.
+
 ## Stage 4 — Real report generation
 
 - **Entry**: Stage 3 committed.

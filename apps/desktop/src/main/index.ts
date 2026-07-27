@@ -37,6 +37,7 @@ import {
   createReconciliationAdapter,
   createRedisAdapterExternal,
   createRedisAdapterManaged,
+  createServerAdapterExternal,
   createServerAdapterManaged,
   createServerAdapterOutOfProcess,
 } from './serviceAdapters';
@@ -49,6 +50,17 @@ import { DesktopStatusSource } from './desktopStatusSource';
 import { DesktopIncidentSink } from './incidents';
 
 const logger = new Logger(new ConsoleSink(), 'main');
+
+// Stage 3C — Xvfb/headless-linux container support: if the operator
+// explicitly opts in with HORIZON_ELECTRON_NO_SANDBOX=true, disable
+// the Chromium sandbox for every child process (renderer, GPU, utility).
+// Required in the Linux CI harness because Chromium refuses to launch
+// as root without --no-sandbox. Ignored in packaged production builds.
+if (process.env.HORIZON_ELECTRON_NO_SANDBOX === 'true' && !app.isPackaged) {
+  app.commandLine.appendSwitch('no-sandbox');
+  app.commandLine.appendSwitch('disable-gpu-sandbox');
+  app.commandLine.appendSwitch('disable-dev-shm-usage');
+}
 
 async function createMainWindow(): Promise<BrowserWindow> {
   const preloadPath = path.resolve(__dirname, '..', 'preload', 'index.js');
@@ -166,11 +178,20 @@ async function boot(): Promise<void> {
   // Stage 2 §2: pass the bootstrap token to the out-of-process server
   // via its env. (managed_docker: token must be supplied through compose
   // env — deferred to managed_docker_runtime_verification.)
-  const serverAdapter = env.databaseMode === 'managed_docker'
-    ? createServerAdapterManaged(rt, fingerprintPath)
-    : createServerAdapterOutOfProcess(rt, fingerprintPath, {
-        HORIZON_BOOTSTRAP_TOKEN: bootstrap.envValue,
-      });
+  // Stage 3C — test-only escape hatch: if the harness has already
+  // started the server out-of-band (HORIZON_SERVER_EXTERNAL=true), use
+  // the external adapter so the supervisor does not try to spawn a
+  // competing instance on the same port. Rejected in packaged builds
+  // (defence-in-depth; the env var still cannot be present in a
+  // released installer).
+  const serverExternallyManaged = process.env.HORIZON_SERVER_EXTERNAL === 'true' && !isPackaged;
+  const serverAdapter = serverExternallyManaged
+    ? createServerAdapterExternal(rt, fingerprintPath)
+    : (env.databaseMode === 'managed_docker'
+      ? createServerAdapterManaged(rt, fingerprintPath)
+      : createServerAdapterOutOfProcess(rt, fingerprintPath, {
+          HORIZON_BOOTSTRAP_TOKEN: bootstrap.envValue,
+        }));
 
   const supervisor = new ServiceSupervisor(
     [

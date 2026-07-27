@@ -153,6 +153,24 @@ are in `revised_roadmap.md`.
     full §N sequence (install → launch → login → navigate → export →
     shutdown → relaunch → uninstall) on a clean Windows VM.
 
+## Category K — Native Electron unpacked integration on Linux (§Stage 3C)
+
+The Stage 3C harness is complete in-repo
+(`apps/desktop/tests/native/electronHarness.ts` + deterministic
+seed + 55-assertion integration test file + esbuild bundler +
+external-server adapter opt-in). What remains is the environment
+required to run it — Chromium refuses to spawn renderer children
+under root without --no-sandbox, and the sandbox-disable flag
+does not propagate to child processes in the current remote-execution
+container. Reproducible on any Linux host with a non-root user or
+on native Windows. See `docs/audit/stage3_report.md` for the full
+blocker analysis.
+
+28. Run `npm run test:native` on a Linux host under a non-root user
+    (creating one via `useradd + chown` is standard CI setup;
+    `su`-to-user is blocked in this session's classifier), OR on
+    a native Windows dev machine. Expected wall-clock: 2-5 min.
+
 ## Category I — Backend integration (unblocks observer maturity to `runtime_wired`)
 
 28. Wire Phase 2A-2F observer harnesses into a real shadow tick.
@@ -181,6 +199,7 @@ are in `revised_roadmap.md`.
 | F. Per-screen data binding | 0 (closed in Stage 3A + Stage 3B) | — |
 | G. Windows packaging | 4 | Windows CI + installer |
 | H. Native Windows smoke | 1 | §N |
+| K. Native Electron Linux run | 1 | Stage 3C native evidence (harness complete; env-blocked) |
 | I. Backend integration | 2 | observer maturity |
 | J. Documentation | 3 | operator UX |
 
