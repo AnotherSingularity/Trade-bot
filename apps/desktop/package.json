@@ -36,6 +36,7 @@
     "electron": "^33.4.0",
     "electron-builder": "^25.1.8",
     "jsdom": "^26.0.0",
+    "playwright": "^1.62.0",
     "typescript": "^5.9.3",
     "vite": "^6.0.7",
     "vitest": "^3.2.6"
@@ -65,7 +66,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "Horizon Trade Setup ${version}.${ext}",
