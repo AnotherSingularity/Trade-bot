@@ -312,6 +312,12 @@ export async function launchElectron(iso: NativeIsolation, server: ServerSpawn, 
         // Stage 3C-CI-FIX4 §A5: preload + renderer emit the fixed
         // native-only initialization markers (nativeDiagnosticsEnabled).
         HORIZON_NATIVE_DIAGNOSTICS: 'true',
+        // Stage 3C-CI-FIX7 §B4: preload writes markers directly to
+        // this file sink. `page.on('console')` sits in the renderer
+        // realm and does NOT capture preload console output — the
+        // preload.log was empty in FIX6 for that exact reason. This
+        // sink is filled from inside preload before any bridge work.
+        HORIZON_NATIVE_PRELOAD_LOG_PATH: join(iso.logsDir, 'preload.log'),
       },
       timeout: 55_000,
     }),

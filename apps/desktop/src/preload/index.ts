@@ -4,9 +4,87 @@
  * The ONLY channel from renderer to main. contextBridge is used; the
  * renderer sees ONLY the typed `window.horizon` API defined here.
  * No filesystem, no shell, no arbitrary IPC.
+ *
+ * Stage 3C-CI-FIX7 §B1/§B3/§B4: preload initialisation is wrapped in
+ * a top-level diagnostic boundary. Under strict native-test diagnostics
+ * only, per-phase markers are written to a test-only file sink whose
+ * path is passed via `HORIZON_NATIVE_PRELOAD_LOG_PATH`. Packaged
+ * installers and production builds cannot enable this — the main
+ * process strips the env vars before subprocess spawn, and
+ * `nativeDiagnosticsOn` requires the strict NODE_ENV=test + canonical
+ * 'true' triple.
  */
 
-import { contextBridge, ipcRenderer } from 'electron';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+// Stage 3C-CI-FIX7 §B1: file-sink writer. Uses Node's `fs` (preload
+// has full Node access; contextIsolation restricts only what reaches
+// the renderer, not what preload itself can call). The sink write is
+// best-effort; a failure is captured but never blocks preload boot.
+const nativeDiagnosticsOn =
+  process.env.NODE_ENV === 'test'
+  && process.env.HORIZON_NATIVE_DIAGNOSTICS === 'true';
+const preloadLogPath = nativeDiagnosticsOn
+  ? (process.env.HORIZON_NATIVE_PRELOAD_LOG_PATH ?? null)
+  : null;
+
+function emitPreloadMarker(marker: string, extra: Record<string, unknown> = {}): void {
+  if (!nativeDiagnosticsOn) return;
+  const line = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    marker,
+    pid: process.pid,
+    ...extra,
+  }) + '\n';
+  try {
+    if (preloadLogPath) {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const fs = require('node:fs') as typeof import('node:fs');
+      fs.appendFileSync(preloadLogPath, line);
+    }
+  } catch { /* best-effort */ }
+  try {
+    // Also route via console for the renderer/main captures — belt +
+    // suspenders. `page.on('console')` may miss it (preload runs in
+    // its own realm), but ELECTRON_ENABLE_LOGGING=1 routes preload
+    // console output to main stdout which the harness tees.
+    // eslint-disable-next-line no-console
+    console.log(marker);
+  } catch { /* best-effort */ }
+}
+
+emitPreloadMarker('HORIZON_NATIVE_PRELOAD_MODULE_ENTERED', {
+  logPath: preloadLogPath,
+});
+
+// Top-level diagnostic boundary — any error during preload
+// initialisation surfaces with a specific classification code AND
+// re-throws so main receives an observable failure.
+function preloadFail(code: string, err: unknown): never {
+  const msg = err instanceof Error ? err.message : String(err);
+  // Redact the same secret patterns the sanitiser handles at higher
+  // levels; here we just trim + trivially strip anything that looks
+  // like a bearer token.
+  const sanitized = msg
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer <REDACTED>')
+    .replace(/[A-Fa-f0-9]{32,}/g, '<HEX_REDACTED>')
+    .slice(0, 500);
+  emitPreloadMarker('HORIZON_NATIVE_PRELOAD_FAILED', { code, message: sanitized });
+  throw new Error(`${code}:${sanitized}`);
+}
+
+let contextBridge: typeof import('electron').contextBridge;
+let ipcRenderer: typeof import('electron').ipcRenderer;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const electron = require('electron') as typeof import('electron');
+  contextBridge = electron.contextBridge;
+  ipcRenderer = electron.ipcRenderer;
+  if (!contextBridge) throw new Error('contextBridge_missing');
+} catch (e) {
+  preloadFail('preload_electron_import_failed', e);
+}
+
 import {
   IPC_ALLOWLIST,
   IPC_CHANNELS,
@@ -44,10 +122,6 @@ interface HorizonBridge {
   requestControlledConfigurationChange(input: RequestControlledChange): Promise<ControlledChangeResponse>;
   getApplicationVersion(): Promise<AppVersionResponse>;
   getServiceHealth(): Promise<{ services: ServiceHealth[] }>;
-  // Stage 2 §16 — auth bridge. Renderer receives ONLY the sanitized
-  // state or an operation response with the sanitized state embedded.
-  // No access token, refresh token, password hash, salt, or bootstrap
-  // token ever crosses this boundary.
   auth: {
     getState(): Promise<SanitizedAuthState>;
     setup(input: { username: string; password: string; passwordConfirmation: string }): Promise<AuthOperationResponse>;
@@ -58,12 +132,6 @@ interface HorizonBridge {
     changePassword(input: { currentPassword: string; newPassword: string; newPasswordConfirmation: string }): Promise<AuthOperationResponse>;
     revokeAll(): Promise<AuthOperationResponse>;
   };
-  /**
-   * Stage 3 §5 — desktop-data bridge. `key` MUST be one of the compile-time
-   * DesktopDataRequestKey values; unknown keys reject at the IPC boundary.
-   * The renderer receives the sanitized envelope or a sanitized error —
-   * never a raw server response, connection string, or bearer token.
-   */
   desktopData<K extends DesktopDataRequestKey>(
     key: K,
     input?: unknown,
@@ -81,77 +149,89 @@ async function invoke<T>(channel: string, payload: unknown): Promise<T> {
   return result.data;
 }
 
-const api: HorizonBridge = {
-  getDesktopStatus: () => invoke(IPC_CHANNELS.getDesktopStatus, {}),
-  startLocalServices: (input) => invoke(IPC_CHANNELS.startLocalServices, input),
-  stopLocalServices: () => invoke(IPC_CHANNELS.stopLocalServices, {}),
-  restartLocalServices: (input) => invoke(IPC_CHANNELS.restartLocalServices, input ?? {}),
-  openLogFolder: () => invoke(IPC_CHANNELS.openLogFolder, {}),
-  exportReport: (input) => invoke(IPC_CHANNELS.exportReport, input),
-  selectExportFolder: () => invoke(IPC_CHANNELS.selectExportFolder, {}),
-  readSafeConfiguration: () => invoke(IPC_CHANNELS.readSafeConfiguration, {}),
-  requestControlledConfigurationChange: (input) => invoke(IPC_CHANNELS.requestControlledConfigurationChange, input),
-  getApplicationVersion: () => invoke(IPC_CHANNELS.getApplicationVersion, {}),
-  getServiceHealth: () => invoke(IPC_CHANNELS.getServiceHealth, {}),
-  auth: {
-    getState: () => invoke(IPC_CHANNELS.authGetState, {}),
-    setup: (input) => invoke(IPC_CHANNELS.authSetup, input),
-    login: (input) => invoke(IPC_CHANNELS.authLogin, input),
-    logout: () => invoke(IPC_CHANNELS.authLogout, {}),
-    lock: () => invoke(IPC_CHANNELS.authLock, {}),
-    refresh: () => invoke(IPC_CHANNELS.authRefresh, {}),
-    changePassword: (input) => invoke(IPC_CHANNELS.authChangePassword, input),
-    revokeAll: () => invoke(IPC_CHANNELS.authRevokeAll, {}),
-  },
-  desktopData: async (key, input) => {
-    // Compile-time refusal: only enumerated keys reach the boundary.
-    if (!(DESKTOP_DATA_KEYS as readonly string[]).includes(key)) {
-      return { ok: false, key, error: { code: 'unknown_desktop_data_key', detail: null } };
-    }
-    const req: DesktopDataChannelRequest = input === undefined
-      ? { key } as DesktopDataChannelRequest
-      : { key, input } as DesktopDataChannelRequest;
-    const result = await ipcRenderer.invoke(IPC_CHANNELS.desktopData, req) as {
-      ok: boolean; data: DesktopDataChannelResponse | null; error: string | null;
-    };
-    if (!result.ok || !result.data) {
-      return { ok: false, key, error: { code: result.error ?? 'ipc_call_failed', detail: null } };
-    }
-    return result.data.ok
-      ? { ok: true, key, envelope: result.data.envelope as DesktopDataResponse<typeof key> }
-      : { ok: false, key, error: result.data.error };
-  },
-};
+let api: HorizonBridge;
+try {
+  api = {
+    getDesktopStatus: () => invoke(IPC_CHANNELS.getDesktopStatus, {}),
+    startLocalServices: (input) => invoke(IPC_CHANNELS.startLocalServices, input),
+    stopLocalServices: () => invoke(IPC_CHANNELS.stopLocalServices, {}),
+    restartLocalServices: (input) => invoke(IPC_CHANNELS.restartLocalServices, input ?? {}),
+    openLogFolder: () => invoke(IPC_CHANNELS.openLogFolder, {}),
+    exportReport: (input) => invoke(IPC_CHANNELS.exportReport, input),
+    selectExportFolder: () => invoke(IPC_CHANNELS.selectExportFolder, {}),
+    readSafeConfiguration: () => invoke(IPC_CHANNELS.readSafeConfiguration, {}),
+    requestControlledConfigurationChange: (input) => invoke(IPC_CHANNELS.requestControlledConfigurationChange, input),
+    getApplicationVersion: () => invoke(IPC_CHANNELS.getApplicationVersion, {}),
+    getServiceHealth: () => invoke(IPC_CHANNELS.getServiceHealth, {}),
+    auth: {
+      getState: () => invoke(IPC_CHANNELS.authGetState, {}),
+      setup: (input) => invoke(IPC_CHANNELS.authSetup, input),
+      login: (input) => invoke(IPC_CHANNELS.authLogin, input),
+      logout: () => invoke(IPC_CHANNELS.authLogout, {}),
+      lock: () => invoke(IPC_CHANNELS.authLock, {}),
+      refresh: () => invoke(IPC_CHANNELS.authRefresh, {}),
+      changePassword: (input) => invoke(IPC_CHANNELS.authChangePassword, input),
+      revokeAll: () => invoke(IPC_CHANNELS.authRevokeAll, {}),
+    },
+    desktopData: async (key, input) => {
+      if (!(DESKTOP_DATA_KEYS as readonly string[]).includes(key)) {
+        return { ok: false, key, error: { code: 'unknown_desktop_data_key', detail: null } };
+      }
+      const req: DesktopDataChannelRequest = input === undefined
+        ? { key } as DesktopDataChannelRequest
+        : { key, input } as DesktopDataChannelRequest;
+      const result = await ipcRenderer.invoke(IPC_CHANNELS.desktopData, req) as {
+        ok: boolean; data: DesktopDataChannelResponse | null; error: string | null;
+      };
+      if (!result.ok || !result.data) {
+        return { ok: false, key, error: { code: result.error ?? 'ipc_call_failed', detail: null } };
+      }
+      return result.data.ok
+        ? { ok: true, key, envelope: result.data.envelope as DesktopDataResponse<typeof key> }
+        : { ok: false, key, error: result.data.error };
+    },
+  };
+} catch (e) {
+  preloadFail('preload_bridge_definition_failed', e);
+}
 
 // Sanity: every allowlisted channel must be reachable through the bridge.
-// The `auth` group is one bridge property carrying 8 channels; `desktopData`
-// is one bridge property that carries the Stage 3 discriminated union
-// (dispatches all 22 keys through a single IPC channel).
 const allowedChannels = new Set(IPC_ALLOWLIST.map((e) => e.channel));
-const bridgeChannelCount = Object.keys(api).length - 1 + Object.keys(api.auth).length;
+const bridgeChannelCount = Object.keys(api!).length - 1 + Object.keys(api!.auth).length;
 if (allowedChannels.size !== bridgeChannelCount) {
-  console.error('[preload] allowlist size mismatch — refusing to expose bridge', {
-    allowed: allowedChannels.size,
-    exposed: bridgeChannelCount,
-  });
-} else {
-  // Stage 3C-CI-FIX4 §A5: strict native-diagnostics opt-in.
-  // The main process deletes HORIZON_NATIVE_DIAGNOSTICS from
-  // process.env when app.isPackaged is true — so a packaged
-  // installer cannot reach the ON branch here. Even so, we require
-  // strict NODE_ENV=test + strict 'true' env value; non-canonical
-  // values ('1', 'yes', 'YES', ' true ') are rejected.
-  const nativeDiagnosticsOn =
-    process.env.NODE_ENV === 'test'
-    && process.env.HORIZON_NATIVE_DIAGNOSTICS === 'true';
-  const bridged = { ...api, nativeDiagnosticsEnabled: nativeDiagnosticsOn };
-  contextBridge.exposeInMainWorld('horizon', bridged);
-  if (nativeDiagnosticsOn) {
-    // Fixed marker consumed by the native harness page.on('console')
-    // capture. The receiving stream writes it to preload.log.
-    // eslint-disable-next-line no-console
-    console.log('HORIZON_NATIVE_PRELOAD_INITIALIZED');
-  }
+  preloadFail('preload_bridge_allowlist_mismatch', new Error(
+    `allowed=${allowedChannels.size} exposed=${bridgeChannelCount}`,
+  ));
+}
+
+emitPreloadMarker('HORIZON_NATIVE_PRELOAD_BRIDGE_EXPOSING');
+
+try {
+  const bridged = { ...api!, nativeDiagnosticsEnabled: nativeDiagnosticsOn };
+  contextBridge!.exposeInMainWorld('horizon', bridged);
+} catch (e) {
+  preloadFail('preload_bridge_exposure_failed', e);
+}
+
+emitPreloadMarker('HORIZON_NATIVE_PRELOAD_BRIDGE_EXPOSED');
+
+// Stage 3C-CI-FIX7 §C3: durable preload flag on the main world.
+// Set via `contextBridge.exposeInMainWorld` under the same
+// diagnostics-only gate. Not exposed on packaged builds because
+// nativeDiagnosticsOn is false there.
+if (nativeDiagnosticsOn) {
+  try {
+    contextBridge!.exposeInMainWorld('__HORIZON_NATIVE_PRELOAD_READY__', true);
+  } catch { /* best-effort */ }
+}
+
+emitPreloadMarker('HORIZON_NATIVE_PRELOAD_INITIALIZED');
+
+// Fixed console marker consumed by the renderer harness — legacy
+// path from FIX4 kept for backward compatibility.
+if (nativeDiagnosticsOn) {
+  // eslint-disable-next-line no-console
+  console.log('HORIZON_NATIVE_PRELOAD_INITIALIZED');
 }
 
 export type { HorizonBridge };

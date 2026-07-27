@@ -1134,3 +1134,200 @@ under its own bounded phase timeout, uploads the targeted
 artefacts, records the exact phase in `startup-trace.jsonl` +
 `failure-classification.json` + `native-run-status.json`, and
 leaves `completed=false`.
+
+## 25. Stage 3C-CI-FIX7 — preload bridge restoration + Electron version pin
+
+Native run #6 at `144135f` exited deterministically with
+`native_startup_timeout:renderer_ready` after ~90 s. The added
+diagnostic markers proved:
+
+- Electron launch, first BrowserWindow, and DOM load all succeeded.
+- React root mounted (`hasRoot=true`, `rootChildrenCount=1`).
+- Renderer body text read: `Horizon Trade / Waiting for server /
+  preload_bridge_missing`.
+- `renderer-state-after-first-window.json`: `horizonKeys=null`,
+  `durableReadyFlag=false`.
+- `preload.log`: empty (the FIX6 preload console output never
+  reached the sink).
+
+Root cause narrowed to a single defect: **the preload path
+`__dirname/../preload/index.js` resolved from `dist/main/main/` to
+`dist/main/preload/index.js`** — which does not exist. The bundled
+preload actually lives at `dist/preload/preload/index.js` (four
+directories deeper than the resolver assumed). Electron therefore
+loaded a `BrowserWindow` with no preload, `window.horizon` was
+never exposed, and the honest `preload_bridge_missing` UI state
+appeared.
+
+The `native-run-status.json` from the same run also incorrectly
+recorded `completed:true` with `failureClassification:renderer_ready`.
+
+Windows run #18 at `144135f` progressed through portable tests +
+typecheck + build + build-manifest generation + desktop build,
+then failed at `electron-builder`:
+
+```
+Cannot compute electron version from installed node modules
+version ("^33.4.0") is not fixed in project
+```
+
+FIX7 addresses both. No product logic changed. No migration touched.
+
+### 25.1 Centralised preload resolver
+
+New module `apps/desktop/src/main/preloadEntry.ts` exports
+`resolvePreloadEntry({appPath, resourcesPath, isPackaged})` returning
+`{path, layout, bytes}`. The resolver:
+- Emits an absolute path for both packaged (`<resourcesPath>/app/
+  dist/preload/preload/index.cjs`) and unpackaged (`<appPath>/dist/
+  preload/preload/index.cjs`) layouts.
+- Verifies existence BEFORE `BrowserWindow` creation.
+- Verifies the extension is `.cjs`.
+- Throws `preload_entry_missing:<sanitized-path>` on failure.
+- Sanitises path output to the last four segments so runner-
+  specific parent directories never appear in logs.
+
+`main/index.ts.createMainWindow()` now delegates to it and logs
+`preload_entry_resolved` with `{path, layout, bytes}`.
+
+### 25.2 Deterministic CJS preload bundle
+
+`apps/desktop/build/bundle-main.mjs` now writes preload to
+`dist/preload/preload/index.cjs` (was `.js`). The bundler already
+uses `format:'cjs'` — the extension change removes any ambiguity
+about how Electron/Node interprets the file, regardless of any
+future `"type":"module"` addition to `apps/desktop/package.json`.
+Main entry stays `.js` (unchanged).
+
+### 25.3 Preload markers + top-level diagnostic boundary
+
+`apps/desktop/src/preload/index.ts` rewritten with:
+- File-sink writer that appends JSONL markers to the path in
+  `HORIZON_NATIVE_PRELOAD_LOG_PATH` — set by the native harness
+  before `BrowserWindow` creation. This works around the
+  `page.on('console')` blind spot for preload realm output
+  (which was the cause of FIX6's empty `preload.log`).
+- Markers emitted under strict test diagnostics only:
+    HORIZON_NATIVE_PRELOAD_MODULE_ENTERED (module top)
+    HORIZON_NATIVE_PRELOAD_BRIDGE_EXPOSING (before contextBridge)
+    HORIZON_NATIVE_PRELOAD_BRIDGE_EXPOSED (after contextBridge)
+    HORIZON_NATIVE_PRELOAD_INITIALIZED (after full init)
+- Top-level `preloadFail(code, err)` boundary that emits
+  `HORIZON_NATIVE_PRELOAD_FAILED:<code>` with a sanitised message
+  and rethrows. Distinguishes:
+    preload_electron_import_failed
+    preload_bridge_definition_failed
+    preload_bridge_exposure_failed
+    preload_bridge_allowlist_mismatch
+- `contextBridge.exposeInMainWorld('__HORIZON_NATIVE_PRELOAD_READY__',
+  true)` under diagnostics — a durable readiness flag readable
+  from the renderer.
+
+### 25.4 Bridge-proof readiness probe
+
+`initializeAndAwaitRendererReady` in the native test now requires
+BOTH:
+- `window.__HORIZON_NATIVE_PRELOAD_READY__ === true` (preload
+  contextBridge exposure completed), AND
+- `window.horizon` with `desktopData` function + `auth` object.
+
+React-mount-only readiness is explicitly rejected. The
+`preload_bridge_missing` UI banner remains an honest failure state
+— FIX7 makes the real preload bridge appear, it does not suppress
+the banner.
+
+### 25.5 native-run-status completion guarded
+
+`NativeRunStatusFields` gains two new independent flags:
+`assertionsComplete` (flipped by the final `T-summary` `it()`),
+`cleanupComplete` (flipped by `afterAll` after teardown, regardless
+of run outcome). `markCompleted()` now REFUSES to set
+`completed:true` unless all three stage flags are true AND
+`failureClassification === null`. The FIX6 defect (completed=true
+on a hung run) can no longer occur.
+
+### 25.6 Windows Electron pin
+
+`apps/desktop/package.json`:
+- `"electron": "33.4.11"` (was `"^33.4.0"`).
+- `build.electronVersion: "33.4.11"` added.
+
+`package-lock.json` regenerated. `electron-builder` can now resolve
+the Electron version deterministically without a floating range.
+
+### 25.7 New unit tests (15)
+
+`apps/desktop/tests/main/preload_entry.test.ts` covers:
+- resolver returns absolute .cjs path in unpackaged mode
+- resolver returns absolute .cjs path in packaged mode
+- missing file throws `preload_entry_missing:...`
+- returned path always ends `.cjs`
+- returned path is absolute
+- `sanitizePreloadPath` trims to last 4 segments
+- bundler emits `.cjs` (not `.js`) for preload
+- bundler uses `format:'cjs'`
+- electron is external
+- Electron dep uses exact semver (no `^`/`~`/`*`/`latest`)
+- `build.electronVersion` matches the dependency
+- installed Electron version matches declared
+- no CI workflow invokes `npx electron`
+- `NativeRunStatus.markCompleted()` guarded: refuses when any of
+  startupComplete/assertionsComplete/cleanupComplete is false
+- startup failure leaves `completed:false` even when cleanup ran
+  (regression for the FIX6 defect)
+
+`renderer_ready_watchdog.test.ts` updated to the FIX7 semantics
+(happy path now requires all three flags).
+
+### 25.8 Verification (local)
+
+- `packages/shared npx tsc --noEmit` — clean
+- `apps/server npx tsc --noEmit` — clean
+- `apps/desktop npx tsc` — no new errors (7 pre-existing baseline)
+- `apps/desktop npm test` — 40 files / 525 tests / 0 fail
+- `apps/desktop npm run build` — main + preload (.cjs) + renderer clean
+- `HORIZON_BUILD_COMMIT=fix7-local npm run build:manifest -- dist`
+  — clean
+- `git diff --stat apps/server/drizzle/migrations/` — empty
+
+### 25.9 Absolute constraints preserved
+
+- Migrations 0000-0021 byte-identical.
+- No product logic changes.
+- DRY_RUN=true / ORDER_SUBMISSION_ENABLED=false unchanged.
+- No Coinbase credentials.
+- No production providers.
+- No observer enforcement / promotion / Kelly.
+- No live capital.
+- `preload_bridge_missing` UI banner PRESERVED as an honest
+  failure state (FIX7 fixes the underlying preload load; it does
+  not remove the banner).
+- No renderer-side mock of `window.horizon`.
+- No Playwright injection of a fake bridge.
+- No `nodeIntegration` enablement.
+- No `contextIsolation` disablement.
+- No raw `ipcRenderer` exposure.
+- No additional secrets exposed to renderer.
+
+### 25.10 Verdict claimed after FIX7 (still pending CI)
+
+```
+stage3c_preload_bridge_restored
+stage3c_electron_version_pinned
+stage3c_native_run_status_completion_guarded
+stage3c_native_runtime_verification_pending_ci_run
+desktop_windows_packaging_pending_ci_run
+```
+
+Reclaiming the runtime verdict still requires a green
+`stage3c-native-electron` run whose:
+- `native-run-status.completed=true`
+- `failureClassification=null`
+- `preload.log` contains `HORIZON_NATIVE_PRELOAD_INITIALIZED`
+- `renderer-state-after-first-window.json.horizonKeys` is a
+  non-null array containing `desktopData`, `auth`, etc.
+- all 55 assertions pass.
+
+Windows verdict requires an actual `.exe` (or unpacked directory)
+artefact — packaging beyond electron-builder version resolution
+does not yet constitute installer verification.

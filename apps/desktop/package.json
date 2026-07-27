@@ -37,7 +37,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.4.0",
+    "electron": "33.4.11",
     "electron-builder": "^25.1.8",
     "jsdom": "^26.0.0",
     "playwright": "^1.62.0",
@@ -49,6 +49,7 @@
   "build": {
     "appId": "com.horizon.trade.desktop",
     "productName": "Horizon Trade",
+    "electronVersion": "33.4.11",
     "directories": {
       "output": "release",
       "buildResources": "resources"

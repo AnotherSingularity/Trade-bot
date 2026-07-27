@@ -23,6 +23,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { handleIpcCall, type IpcHostContext } from './ipc';
 import { ConsoleSink, Logger } from './logging';
 import { resolveDesktopEnvironment, resolveSandboxPolicy, validateDesktopEnvironment } from './localEnvironment';
+import { resolvePreloadEntry, sanitizePreloadPath } from './preloadEntry';
 import { InMemorySecretsAdapter, KeytarSecretsAdapter, type SecretsAdapter, collectCredentialStatuses } from './secrets';
 import { mintBootstrapToken } from './bootstrapToken';
 import { createAuthTokenStorage } from './secureStorage';
@@ -87,13 +88,30 @@ if (sandboxDecision.disableSandbox) {
 }
 
 async function createMainWindow(): Promise<BrowserWindow> {
-  const preloadPath = path.resolve(__dirname, '..', 'preload', 'index.js');
+  // Stage 3C-CI-FIX7 §A3: preload path resolution goes through the
+  // centralized `resolvePreloadEntry` — which verifies the file
+  // exists BEFORE `BrowserWindow` creation and fails startup with
+  // `preload_entry_missing:<sanitized-path>` when not. The FIX6 CI
+  // run proved the previous inline resolver (`__dirname/../preload/
+  // index.js` from `dist/main/main/`) resolved to `dist/main/preload/
+  // index.js` which does not exist — the actual bundled preload is
+  // at `dist/preload/preload/index.cjs`.
+  const preloadResult = resolvePreloadEntry({
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    isPackaged: app.isPackaged,
+  });
+  logger.info('preload_entry_resolved', {
+    path: sanitizePreloadPath(preloadResult.path),
+    layout: preloadResult.layout,
+    bytes: preloadResult.bytes,
+  });
   const rendererIndexUrl = process.env.HORIZON_RENDERER_URL
     ?? `file://${path.resolve(__dirname, '..', 'renderer', 'index.html')}`;
   const config = buildSafeWindowConfig({
     width: 1440,
     height: 900,
-    preloadPath,
+    preloadPath: preloadResult.path,
     rendererIndexUrl,
     title: 'Horizon Trade',
   });

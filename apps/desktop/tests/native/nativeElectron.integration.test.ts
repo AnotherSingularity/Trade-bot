@@ -576,10 +576,27 @@ async function pollForRendererReady(page: import('playwright').Page): Promise<vo
       ok = await page.evaluate(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const g = globalThis as any;
-        // Accept the durable window flag first — survives listener races.
-        if (g.__HORIZON_NATIVE_RENDERER_READY__ === true) return true;
+        // Stage 3C-CI-FIX7 §C1: bridge PROOF, not just React mount.
+        // Readiness now requires the real preload bridge to be
+        // exposed — the FIX6 evidence showed React mounted while
+        // window.horizon remained absent. Accepted signals:
+        //   1. preload's durable flag (survives console-listener race), AND
+        //   2. window.horizon is an object with allowlisted methods.
+        // The renderer's own durable flag is ALSO accepted so a
+        // bridge that arrives ahead of the react mount still counts.
+        const preloadReady = g.__HORIZON_NATIVE_PRELOAD_READY__ === true;
         const h = g.horizon;
-        return !!(h && typeof h === 'object' && typeof h.desktopData === 'function' && typeof h.auth === 'object');
+        const bridgeOk = !!(h && typeof h === 'object'
+          && typeof h.desktopData === 'function'
+          && typeof h.auth === 'object');
+        // Both must be true — a `preload_bridge_missing` UI state
+        // where `horizon` is absent MUST NOT be reported ready.
+        if (preloadReady && bridgeOk) return true;
+        // Fallback: renderer marker AND bridge — protects if the
+        // preload durable-flag exposure was blocked by an older
+        // preload version, provided the bridge itself is present.
+        if (g.__HORIZON_NATIVE_RENDERER_READY__ === true && bridgeOk) return true;
+        return false;
       });
     } catch {
       // page.evaluate can reject during navigation / crash — swallow
@@ -617,10 +634,14 @@ afterAll(async () => {
   diagnosticsTrace?.record('process_leak_check_complete', 'completed', {});
   diagnosticsTrace?.record('cleanup_complete', teardownOk ? 'completed' : 'failed', {});
   diagnosticsStatus?.setPhase('cleanup_complete');
-  // Stage 3C-CI-FIX5 §4: only flip `completed:true` when startup ran
-  // clean AND teardown ran clean. A hung or errored run must never
-  // leave `completed:true`.
-  if (teardownOk) diagnosticsStatus?.markCompleted();
+  // Stage 3C-CI-FIX7 §D1: independent flags for each stage.
+  // cleanupComplete flips true when teardown ran (regardless of
+  // whether the run itself succeeded — a failed run should still
+  // show cleanupComplete=true when cleanup itself finished). The
+  // guarded markCompleted() flips `completed:true` only when startup
+  // + assertions + cleanup all succeeded AND no failure recorded.
+  if (teardownOk) diagnosticsStatus?.markCleanupComplete();
+  diagnosticsStatus?.markCompleted();
 }, 60_000);
 
 // ---------------------------------------------------------------------------
@@ -1396,6 +1417,11 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
     console.log('[stage3c-native] seed_summary=' + JSON.stringify(seedSummary));
     // eslint-disable-next-line no-console
     console.log('[stage3c-native] first_readiness_body=' + JSON.stringify(firstReadinessBody));
+    // Stage 3C-CI-FIX7 §D1: this is the FINAL assertion in the
+    // sequential describe. Reaching it means every prior it() passed.
+    // Flip `assertionsComplete=true` so afterAll's guarded
+    // markCompleted() can honestly set `completed:true`.
+    diagnosticsStatus?.markAssertionsComplete();
     // Unused-vars silencer for MARIADB_ROOT (imported for docs discoverability).
     void MARIADB_ROOT;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars

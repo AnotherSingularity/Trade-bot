@@ -210,13 +210,19 @@ export interface NativeRunStatusFields {
   nativeTestStarted: boolean;
   startedAt: string;
   currentPhase: NativeStartupPhase | 'not_started';
-  // Stage 3C-CI-FIX5 §4: startup vs full-run completion are split.
-  // `startupComplete` flips true once beforeAll's watchdog has fully
-  // wrapped up (renderer_ready observed). `completed` only flips true
-  // after all native assertions, shutdown, leak verification, and
-  // evidence emission are done. A hung suite must never leave
-  // `completed:true`.
+  // Stage 3C-CI-FIX5 §4 / FIX7 §D1: independent stage flags.
+  // `startupComplete`   — flipped when renderer_ready observed.
+  // `assertionsComplete` — flipped when all 55 native assertions passed.
+  // `cleanupComplete`    — flipped after teardown + leak checks; may
+  //                        be true even on failure (cleanup happens
+  //                        after a failed startup too).
+  // `completed`          — TRUE ONLY WHEN all three flags above are true
+  //                        AND `failureClassification` is null. The
+  //                        setter enforces this invariant; a startup
+  //                        failure can never leave `completed:true`.
   startupComplete: boolean;
+  assertionsComplete: boolean;
+  cleanupComplete: boolean;
   completed: boolean;
   failureClassification: FailureClassification | null;
 }
@@ -237,6 +243,8 @@ export class NativeRunStatus {
       startedAt: new Date().toISOString(),
       currentPhase: 'not_started',
       startupComplete: false,
+      assertionsComplete: false,
+      cleanupComplete: false,
       completed: false,
       failureClassification: null,
     };
@@ -255,8 +263,30 @@ export class NativeRunStatus {
     this.flush();
   }
 
+  // Stage 3C-CI-FIX7 §D1: called after every native assertion passes.
+  markAssertionsComplete(): void {
+    this.state.assertionsComplete = true;
+    this.flush();
+  }
+
+  // Stage 3C-CI-FIX7 §D1: called after teardown + leak checks —
+  // regardless of whether the run itself succeeded. A failed run
+  // may legitimately have `cleanupComplete=true` and `completed=false`.
+  markCleanupComplete(): void {
+    this.state.cleanupComplete = true;
+    this.flush();
+  }
+
+  // Stage 3C-CI-FIX7 §D1: guarded — only flips `completed:true` when
+  // startup + assertions + cleanup all completed AND no failure is
+  // recorded. Any other state coerces to `completed:false`.
   markCompleted(): void {
-    this.state.completed = true;
+    const canComplete =
+      this.state.startupComplete
+      && this.state.assertionsComplete
+      && this.state.cleanupComplete
+      && this.state.failureClassification === null;
+    this.state.completed = canComplete;
     this.flush();
   }
 

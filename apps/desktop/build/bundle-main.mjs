@@ -53,12 +53,17 @@ async function bundle(entry, out) {
   });
 }
 
+// Stage 3C-CI-FIX7 §A2: preload output uses the unambiguous `.cjs`
+// extension so Electron never has to infer module format via
+// `package.json`'s `type` field. The bundler already emits CJS
+// (`format: 'cjs'`), so the extension change is purely a labelling
+// safety measure.
 await bundle(
   resolve(ROOT, 'src/main/index.ts'),
   join(DIST, 'main/main/index.js'),
 );
 await bundle(
   resolve(ROOT, 'src/preload/index.ts'),
-  join(DIST, 'preload/preload/index.js'),
+  join(DIST, 'preload/preload/index.cjs'),
 );
 console.log('desktop main + preload bundled');

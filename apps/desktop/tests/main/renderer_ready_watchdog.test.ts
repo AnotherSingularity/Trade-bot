@@ -124,7 +124,11 @@ describe('Stage 3C-CI-FIX5 §9 — renderer-ready watchdog regression', () => {
     expect(nrs.startupComplete).toBe(true);
     expect(nrs.completed).toBe(false);
 
-    // Only after full teardown does `completed` flip.
+    // Stage 3C-CI-FIX7 §D1: `completed:true` now requires startup +
+    // assertions + cleanup all complete AND no failure. This test
+    // exercises the full happy path.
+    status.markAssertionsComplete();
+    status.markCleanupComplete();
     status.markCompleted();
     const nrs2 = JSON.parse(readFileSync(status.location(), 'utf8')) as {
       startupComplete: boolean; completed: boolean;
