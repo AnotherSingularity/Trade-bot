@@ -3,16 +3,19 @@
   "version": "3.0.0",
   "private": true,
   "description": "Horizon Trade — Windows Desktop Operator Console (Phase 3A)",
-  "main": "dist/main/index.js",
+  "main": "dist/main/index.cjs",
   "scripts": {
     "dev:main": "tsc -p tsconfig.main.json --watch",
     "dev:renderer": "vite",
-    "build:main": "tsc -p tsconfig.main.json",
-    "build:preload": "tsc -p tsconfig.preload.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "typecheck:main": "tsc -p tsconfig.main.json --noEmit",
+    "typecheck:preload": "tsc -p tsconfig.preload.json --noEmit",
+    "typecheck:renderer": "tsc -p tsconfig.renderer.json --noEmit",
     "build:renderer": "vite build",
     "build:bundle": "node build/bundle-main.mjs",
     "build:manifest": "tsx build/generate-build-manifest.ts",
-    "build": "npm run build:main && npm run build:preload && npm run build:renderer && npm run build:bundle",
+    "verify:runtime-layout": "tsx build/verify-runtime-layout.ts",
+    "build": "npm run clean && npm run typecheck:main && npm run typecheck:preload && npm run typecheck:renderer && npm run build:renderer && npm run build:bundle",
     "package:win": "electron-builder --win --publish never",
     "lint": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "typecheck": "npm run lint",
@@ -66,7 +69,7 @@
       "node_modules/@horizon/shared/**/*"
     ],
     "extraMetadata": {
-      "main": "dist/main/index.js"
+      "main": "dist/main/index.cjs"
     },
     "win": {
       "target": [

@@ -42,7 +42,13 @@ import { StartupTrace, withNativeTimeout } from './nativeDiagnostics';
 export const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..');
 export const SERVER_CWD = join(REPO_ROOT, 'apps/server');
 export const DESKTOP_DIST = join(REPO_ROOT, 'apps/desktop/dist');
-export const DESKTOP_MAIN_ENTRY = join(DESKTOP_DIST, 'main/main/index.js');
+// Stage 3C-CI-FIX8 §1: canonical runtime layout.
+// Bundled outputs (from apps/desktop/build/bundle-main.mjs):
+//   dist/main/index.cjs       — Electron main
+//   dist/preload/index.cjs    — sandboxed preload
+//   dist/renderer/index.html  — Vite renderer entry
+export const DESKTOP_MAIN_ENTRY = join(DESKTOP_DIST, 'main/index.cjs');
+export const DESKTOP_ROOT = join(REPO_ROOT, 'apps/desktop');
 export const ELECTRON_BIN = join(REPO_ROOT, 'node_modules/.bin/electron');
 export const MARIADB_ROOT = { host: '127.0.0.1', port: 3306, user: 'root', password: 'password' } as const;
 export const REDIS_URL = 'redis://127.0.0.1:6379';
@@ -283,23 +289,34 @@ export async function launchElectron(iso: NativeIsolation, server: ServerSpawn, 
       env: {
         ...process.env,
         DISPLAY: process.env.DISPLAY ?? ':99',
-        NODE_ENV: 'development',
+        // Stage 3C-CI-FIX8 §3: NODE_ENV=test is REQUIRED for the strict
+        // native-diagnostics gate + the sandbox test-only opt-in AND
+        // the preload diagnostic IPC channel. HORIZON_ENVIRONMENT
+        // stays 'development' so the service adapter factory picks
+        // the unpackaged path (production forbids stubs).
+        NODE_ENV: 'test',
         HORIZON_ENVIRONMENT: 'development',
         HORIZON_SERVER_EXTERNAL: 'true',
         HORIZON_MARIADB_URL: iso.dbUrl,
         HORIZON_REDIS_URL: REDIS_URL,
         HORIZON_SERVER_HEALTH_URL: server.healthUrl,
         HORIZON_BOOTSTRAP_TOKEN: server.bootstrapToken,
+        // HORIZON_PROJECT_ROOT points at the REPO root (server assets).
+        // HORIZON_DESKTOP_ROOT points at the DESKTOP package (main/preload/
+        // renderer entries). These are distinct: the FIX7 CI run failed
+        // because `app.getAppPath()` returned `/` in the explicit-main-file
+        // launch. The FIX8 resolver validates HORIZON_DESKTOP_ROOT first.
         HORIZON_PROJECT_ROOT: REPO_ROOT,
+        HORIZON_DESKTOP_ROOT: DESKTOP_ROOT,
         HORIZON_AUTH_REQUIRED: 'true',
         HORIZON_USE_KEYTAR: 'false',
         HORIZON_DATABASE_MODE: 'external_services',
         HORIZON_DEVELOPMENT_FAKE: 'false',
         HORIZON_SCHEMA_VERSION: '0021',
         HORIZON_REPORT_DIR: reportDir,
-        // Main is bundled to dist/main/main/index.js; the renderer index.html
-        // is at dist/renderer/index.html. Override the default resolver
-        // which assumes an untouched tsc layout.
+        // The main's resolveDesktopRuntimeLayout will fall through to
+        // the canonical renderer path — no override needed. Kept as
+        // an escape hatch for developers who point at a stale renderer.
         HORIZON_RENDERER_URL: `file://${join(DESKTOP_DIST, 'renderer/index.html')}`,
         HORIZON_ELECTRON_NO_SANDBOX: 'true',
         // Electron/Chromium refuse to run as root without --no-sandbox

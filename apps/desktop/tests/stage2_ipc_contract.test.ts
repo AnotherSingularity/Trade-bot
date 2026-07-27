@@ -39,7 +39,7 @@ describe('stage2 §16 auth IPC contract', () => {
 
   it('I2: unauth-required channels are get-state, setup, login, refresh; the rest need a session', () => {
     const requiresSession = Object.fromEntries(
-      IPC_ALLOWLIST.filter((e) => authChannels.includes(e.channel)).map((e) => [e.channel, e.requiresAuthenticatedSession]),
+      IPC_ALLOWLIST.filter((e) => (authChannels as readonly string[]).includes(e.channel)).map((e) => [e.channel, e.requiresAuthenticatedSession]),
     );
     expect(requiresSession[IPC_CHANNELS.authGetState]).toBe(false);
     expect(requiresSession[IPC_CHANNELS.authSetup]).toBe(false);

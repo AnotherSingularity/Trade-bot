@@ -23,7 +23,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { handleIpcCall, type IpcHostContext } from './ipc';
 import { ConsoleSink, Logger } from './logging';
 import { resolveDesktopEnvironment, resolveSandboxPolicy, validateDesktopEnvironment } from './localEnvironment';
-import { resolvePreloadEntry, sanitizePreloadPath } from './preloadEntry';
+import { resolveDesktopRuntimeLayout, sanitizePreloadPath } from './runtimeLayout';
 import { InMemorySecretsAdapter, KeytarSecretsAdapter, type SecretsAdapter, collectCredentialStatuses } from './secrets';
 import { mintBootstrapToken } from './bootstrapToken';
 import { createAuthTokenStorage } from './secureStorage';
@@ -88,30 +88,32 @@ if (sandboxDecision.disableSandbox) {
 }
 
 async function createMainWindow(): Promise<BrowserWindow> {
-  // Stage 3C-CI-FIX7 §A3: preload path resolution goes through the
-  // centralized `resolvePreloadEntry` — which verifies the file
-  // exists BEFORE `BrowserWindow` creation and fails startup with
-  // `preload_entry_missing:<sanitized-path>` when not. The FIX6 CI
-  // run proved the previous inline resolver (`__dirname/../preload/
-  // index.js` from `dist/main/main/`) resolved to `dist/main/preload/
-  // index.js` which does not exist — the actual bundled preload is
-  // at `dist/preload/preload/index.cjs`.
-  const preloadResult = resolvePreloadEntry({
-    appPath: app.getAppPath(),
-    resourcesPath: process.resourcesPath,
+  // Stage 3C-CI-FIX8 §2: canonical runtime layout resolver.
+  // FIX7's resolver trusted `app.getAppPath()` and, in the native
+  // explicit-main-file launch, that returned `/` — producing
+  // `preload_entry_missing:/dist/preload/preload/index.cjs`. This
+  // resolver accepts `HORIZON_DESKTOP_ROOT` as the trusted override,
+  // falls back to inferring from the bundled main directory, then to
+  // `app.getAppPath()` — each candidate validated before use.
+  const layout = resolveDesktopRuntimeLayout({
     isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    mainDir: __dirname,
+    desktopRootOverride: process.env.HORIZON_DESKTOP_ROOT,
   });
-  logger.info('preload_entry_resolved', {
-    path: sanitizePreloadPath(preloadResult.path),
-    layout: preloadResult.layout,
-    bytes: preloadResult.bytes,
+  logger.info('desktop_runtime_layout_resolved', {
+    layout: layout.layout,
+    applicationRoot: sanitizePreloadPath(layout.applicationRoot),
+    main: sanitizePreloadPath(layout.mainEntry),
+    preload: sanitizePreloadPath(layout.preloadEntry),
+    renderer: sanitizePreloadPath(layout.rendererEntry),
   });
-  const rendererIndexUrl = process.env.HORIZON_RENDERER_URL
-    ?? `file://${path.resolve(__dirname, '..', 'renderer', 'index.html')}`;
+
+  const rendererIndexUrl = process.env.HORIZON_RENDERER_URL ?? layout.rendererUrl;
   const config = buildSafeWindowConfig({
     width: 1440,
     height: 900,
-    preloadPath: preloadResult.path,
+    preloadPath: layout.preloadEntry,
     rendererIndexUrl,
     title: 'Horizon Trade',
   });
@@ -121,6 +123,60 @@ async function createMainWindow(): Promise<BrowserWindow> {
   await win.loadURL(rendererIndexUrl);
   win.show();
   return win;
+}
+
+// Stage 3C-CI-FIX8 §4: fixed test-only diagnostic IPC channel.
+// Registered BEFORE `createMainWindow` (called from boot()) so a
+// preload marker sent immediately at bridge exposure can never race
+// the listener. Structurally disabled in packaged mode; only accepts
+// the frozen marker enum; never exposed via `window.horizon`.
+const NATIVE_DIAGNOSTIC_MARKERS = new Set([
+  'HORIZON_NATIVE_PRELOAD_MODULE_ENTERED',
+  'HORIZON_NATIVE_PRELOAD_BRIDGE_EXPOSING',
+  'HORIZON_NATIVE_PRELOAD_BRIDGE_EXPOSED',
+  'HORIZON_NATIVE_PRELOAD_INITIALIZED',
+  'HORIZON_NATIVE_PRELOAD_FAILED',
+]);
+
+function nativeDiagnosticsEnabledForMain(): boolean {
+  if (app.isPackaged) return false;
+  if (process.env.NODE_ENV !== 'test') return false;
+  if (process.env.HORIZON_NATIVE_DIAGNOSTICS !== 'true') return false;
+  return true;
+}
+
+function registerNativeDiagnosticChannel(): void {
+  if (!nativeDiagnosticsEnabledForMain()) return;
+  const fs = require('node:fs') as typeof import('node:fs');
+  ipcMain.on('horizon.nativeDiagnostic', (_evt, raw) => {
+    if (!nativeDiagnosticsEnabledForMain()) return;
+    if (!raw || typeof raw !== 'object') return;
+    const marker = String((raw as { marker?: unknown }).marker ?? '');
+    if (!NATIVE_DIAGNOSTIC_MARKERS.has(marker)) return;
+    const detailRaw = String((raw as { detail?: unknown }).detail ?? '').slice(0, 500);
+    // Strip anything that could carry a secret before persistence.
+    const detail = detailRaw
+      .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer <REDACTED>')
+      .replace(/[A-Fa-f0-9]{32,}/g, '<HEX_REDACTED>');
+    const line = JSON.stringify({
+      timestamp: new Date().toISOString(),
+      marker,
+      detail: detail || null,
+      pid: process.pid,
+    }) + '\n';
+    // Sink path comes from the harness via HORIZON_NATIVE_PRELOAD_LOG_PATH
+    // — set immediately before spawning Electron. Packaged builds do not
+    // set this env, and would fail the `nativeDiagnosticsEnabledForMain`
+    // gate anyway.
+    const preloadLogPath = process.env.HORIZON_NATIVE_PRELOAD_LOG_PATH;
+    try {
+      if (preloadLogPath) {
+        fs.mkdirSync(path.dirname(preloadLogPath), { recursive: true });
+        fs.appendFileSync(preloadLogPath, line);
+      }
+    } catch { /* best-effort */ }
+    logger.info('native_preload_marker', { marker });
+  });
 }
 
 async function boot(): Promise<void> {
@@ -358,6 +414,12 @@ async function boot(): Promise<void> {
     ipcMain.handle(entry.channel, async (_event, payload) => handleIpcCall(ctx, entry.channel, payload));
   }
   logger.info('ipc handlers registered', { count: IPC_ALLOWLIST.length });
+
+  // Stage 3C-CI-FIX8 §4: register the test-only diagnostic listener
+  // BEFORE any BrowserWindow is created so the preload's very first
+  // marker (module-entered) is never lost to a listener race. The
+  // registration is a no-op unless strict test diagnostics are on.
+  registerNativeDiagnosticChannel();
 
   await app.whenReady();
   await createMainWindow();

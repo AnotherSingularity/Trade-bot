@@ -17,59 +17,53 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-// Stage 3C-CI-FIX7 §B1: file-sink writer. Uses Node's `fs` (preload
-// has full Node access; contextIsolation restricts only what reaches
-// the renderer, not what preload itself can call). The sink write is
-// best-effort; a failure is captured but never blocks preload boot.
+// Stage 3C-CI-FIX8 §4: SANDBOX-SAFE marker transport.
+// FIX7 wrote markers via `require('node:fs').appendFileSync(...)`.
+// A sandboxed preload cannot rely on arbitrary filesystem access;
+// the FIX7 CI run showed the preload.log stayed empty. FIX8 sends
+// markers over a fixed test-only IPC channel that the main process
+// registers BEFORE window creation. Main owns the sink file. The
+// channel and its marker enum are hardcoded on both sides.
 const nativeDiagnosticsOn =
   process.env.NODE_ENV === 'test'
   && process.env.HORIZON_NATIVE_DIAGNOSTICS === 'true';
-const preloadLogPath = nativeDiagnosticsOn
-  ? (process.env.HORIZON_NATIVE_PRELOAD_LOG_PATH ?? null)
-  : null;
 
-function emitPreloadMarker(marker: string, extra: Record<string, unknown> = {}): void {
+const NATIVE_DIAGNOSTIC_CHANNEL = 'horizon.nativeDiagnostic';
+
+// Bound to `ipcRenderer` after successful electron import below —
+// held ONLY inside preload's closure. Never exposed to the renderer.
+let sendNativeMarker: ((marker: string, detail?: string) => void) = () => {};
+
+function emitPreloadMarker(marker: string, detail?: string): void {
   if (!nativeDiagnosticsOn) return;
-  const line = JSON.stringify({
-    timestamp: new Date().toISOString(),
-    marker,
-    pid: process.pid,
-    ...extra,
-  }) + '\n';
+  try { sendNativeMarker(marker, detail); }
+  catch { /* best-effort */ }
   try {
-    if (preloadLogPath) {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const fs = require('node:fs') as typeof import('node:fs');
-      fs.appendFileSync(preloadLogPath, line);
-    }
-  } catch { /* best-effort */ }
-  try {
-    // Also route via console for the renderer/main captures — belt +
-    // suspenders. `page.on('console')` may miss it (preload runs in
-    // its own realm), but ELECTRON_ENABLE_LOGGING=1 routes preload
-    // console output to main stdout which the harness tees.
+    // Belt-and-suspenders: also log to console. ELECTRON_ENABLE_LOGGING=1
+    // routes preload console output to main stdout, which the harness
+    // tees to `electron-main.stdout.log`. The IPC channel is the primary
+    // sink; the console line is a fallback for post-hoc greps.
     // eslint-disable-next-line no-console
     console.log(marker);
   } catch { /* best-effort */ }
 }
 
-emitPreloadMarker('HORIZON_NATIVE_PRELOAD_MODULE_ENTERED', {
-  logPath: preloadLogPath,
-});
+// Emitted BEFORE electron is required — carries no detail. Reaches the
+// main-process listener via IPC once ipcRenderer is bound (see below);
+// this call is a no-op until then. The main log will show the marker
+// arriving right after `preload_electron_import_failed` guard passes.
+emitPreloadMarker('HORIZON_NATIVE_PRELOAD_MODULE_ENTERED');
 
 // Top-level diagnostic boundary — any error during preload
 // initialisation surfaces with a specific classification code AND
 // re-throws so main receives an observable failure.
 function preloadFail(code: string, err: unknown): never {
   const msg = err instanceof Error ? err.message : String(err);
-  // Redact the same secret patterns the sanitiser handles at higher
-  // levels; here we just trim + trivially strip anything that looks
-  // like a bearer token.
   const sanitized = msg
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer <REDACTED>')
     .replace(/[A-Fa-f0-9]{32,}/g, '<HEX_REDACTED>')
-    .slice(0, 500);
-  emitPreloadMarker('HORIZON_NATIVE_PRELOAD_FAILED', { code, message: sanitized });
+    .slice(0, 400);
+  emitPreloadMarker('HORIZON_NATIVE_PRELOAD_FAILED', `${code}:${sanitized}`);
   throw new Error(`${code}:${sanitized}`);
 }
 
@@ -81,6 +75,13 @@ try {
   contextBridge = electron.contextBridge;
   ipcRenderer = electron.ipcRenderer;
   if (!contextBridge) throw new Error('contextBridge_missing');
+  // Bind the marker sender ONLY inside preload's closure. This
+  // reference is never passed through `contextBridge.exposeInMainWorld`
+  // — the renderer cannot reach it.
+  sendNativeMarker = (marker: string, detail?: string): void => {
+    try { ipcRenderer.send(NATIVE_DIAGNOSTIC_CHANNEL, { marker, detail: detail ?? null }); }
+    catch { /* best-effort */ }
+  };
 } catch (e) {
   preloadFail('preload_electron_import_failed', e);
 }

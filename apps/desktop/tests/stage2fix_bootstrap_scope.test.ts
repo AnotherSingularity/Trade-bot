@@ -281,14 +281,14 @@ describe.sequential('stage2-fix §5 bootstrap-scope narrowness', () => {
     if (!available) return;
     const conn = await createConnection({ uri: TEST_DB_URL });
     try {
-      const [tables] = await conn.query<Array<{ table_name: string }>>(
+      const [tables] = await conn.query(
         "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type='BASE TABLE'",
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ) as unknown as [any[], unknown];
       for (const t of tables) {
         const name = String(t.table_name ?? t.TABLE_NAME);
         // Query every text-like column for the bootstrap token substring.
-        const [cols] = await conn.query<Array<{ column_name: string; data_type: string }>>(
+        const [cols] = await conn.query(
           `SELECT column_name, data_type FROM information_schema.columns
            WHERE table_schema = DATABASE() AND table_name = ?`,
           [name],
@@ -299,7 +299,7 @@ describe.sequential('stage2-fix §5 bootstrap-scope narrowness', () => {
           .filter((c) => ['varchar', 'text', 'longtext', 'mediumtext', 'tinytext', 'json', 'char', 'enum'].includes(c.type));
         if (textCols.length === 0) continue;
         const whereClause = textCols.map((c) => `\`${c.name}\` LIKE '%${BOOTSTRAP}%'`).join(' OR ');
-        const [rows] = await conn.query<Array<{ n: number }>>(
+        const [rows] = await conn.query(
           `SELECT COUNT(*) AS n FROM \`${name}\` WHERE ${whereClause}`,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ) as unknown as [any[], unknown];
@@ -356,7 +356,7 @@ describe.sequential('stage2-fix §5 bootstrap-scope narrowness', () => {
     expect(r.status).toBe(401);
     const conn = await createConnection({ uri: TEST_DB_URL });
     try {
-      const [rows] = await conn.query<Array<{ sanitizedMetadata: unknown; eventType: string }>>(
+      const [rows] = await conn.query(
         `SELECT eventType, sanitizedMetadata FROM operator_auth_events WHERE eventType = 'bootstrap_rejected'`,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ) as unknown as [any[], unknown];

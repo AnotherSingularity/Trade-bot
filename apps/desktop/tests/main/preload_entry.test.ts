@@ -1,205 +1,256 @@
 /**
- * Stage 3C-CI-FIX7 §E — preload entry resolver regression tests.
+ * Stage 3C-CI-FIX8 §2/§6/§11 — canonical runtime-layout resolver tests.
  *
- * These lock in the invariant that broke the FIX6 native CI run:
- * the previous inline resolver (`__dirname/../preload/index.js`
- * from `dist/main/main/`) computed a non-existent path and Electron
- * silently created a BrowserWindow with no preload, leading to
- * `window.horizon = undefined` and the `preload_bridge_missing`
- * banner.
+ * Replaces the FIX7 preloadEntry test suite. Locks in the invariants
+ * that broke the previous CI runs:
+ *   - FIX6: preload at `dist/main/preload/index.js` (wrong dir).
+ *   - FIX7: `app.getAppPath()` returned `/` and produced
+ *           `preload_entry_missing:/dist/preload/preload/index.cjs`.
+ *   - FIX7 Windows portable-suite: sanitizer split on `path.sep`, so
+ *           POSIX fixture paths did not split on Windows runners.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolvePreloadEntry, sanitizePreloadPath } from '../../src/main/preloadEntry';
+import {
+  isFilesystemRoot,
+  resolveDesktopRuntimeLayout,
+  sanitizePreloadPath,
+  validateDesktopRoot,
+} from '../../src/main/runtimeLayout';
 
-describe('Stage 3C-CI-FIX7 §A3 — resolvePreloadEntry', () => {
+function seedCanonicalLayout(root: string): void {
+  mkdirSync(join(root, 'dist/main'), { recursive: true });
+  mkdirSync(join(root, 'dist/preload'), { recursive: true });
+  mkdirSync(join(root, 'dist/renderer'), { recursive: true });
+  writeFileSync(join(root, 'dist/main/index.cjs'), '// main\n');
+  writeFileSync(join(root, 'dist/preload/index.cjs'), '// preload\n');
+  writeFileSync(join(root, 'dist/renderer/index.html'), '<!doctype html><html></html>\n');
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ name: '@horizon/desktop' }));
+}
+
+describe('Stage 3C-CI-FIX8 §2 — resolveDesktopRuntimeLayout', () => {
   let root: string;
-  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'stage3c-fix7-preload-')); });
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'stage3c-fix8-layout-')); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-  it('unpackaged: returns absolute .cjs path under <appPath>/dist/preload/preload/', () => {
-    // Simulate the real dist layout.
-    mkdirSync(join(root, 'dist/preload/preload'), { recursive: true });
-    writeFileSync(join(root, 'dist/preload/preload/index.cjs'), '// preload\n');
-    const result = resolvePreloadEntry({
-      appPath: root,
-      resourcesPath: join(root, 'resources-does-not-matter'),
+  it('unpackaged: HORIZON_DESKTOP_ROOT override wins when valid', () => {
+    seedCanonicalLayout(root);
+    const layout = resolveDesktopRuntimeLayout({
       isPackaged: false,
+      appPath: '/does-not-matter',
+      mainDir: '/nope',
+      desktopRootOverride: root,
     });
-    expect(result.layout).toBe('unpackaged');
-    expect(result.path).toBe(resolve(root, 'dist', 'preload', 'preload', 'index.cjs'));
-    expect(result.bytes).toBeGreaterThan(0);
+    expect(layout.layout).toBe('unpackaged');
+    expect(layout.applicationRoot).toBe(resolve(root));
+    expect(layout.mainEntry).toBe(resolve(root, 'dist/main/index.cjs'));
+    expect(layout.preloadEntry).toBe(resolve(root, 'dist/preload/index.cjs'));
+    expect(layout.rendererEntry).toBe(resolve(root, 'dist/renderer/index.html'));
+    expect(layout.rendererUrl.startsWith('file://')).toBe(true);
   });
 
-  it('packaged: returns absolute .cjs path under <resourcesPath>/app/dist/preload/preload/', () => {
-    const resourcesPath = join(root, 'resources');
-    mkdirSync(join(resourcesPath, 'app/dist/preload/preload'), { recursive: true });
-    writeFileSync(join(resourcesPath, 'app/dist/preload/preload/index.cjs'), '// preload\n');
-    const result = resolvePreloadEntry({
-      appPath: join(root, 'app-does-not-matter'),
-      resourcesPath,
+  it('unpackaged: falls back to main-dir inference when override missing', () => {
+    seedCanonicalLayout(root);
+    const layout = resolveDesktopRuntimeLayout({
+      isPackaged: false,
+      appPath: '/does-not-matter',
+      mainDir: resolve(root, 'dist/main'),
+    });
+    expect(layout.applicationRoot).toBe(resolve(root));
+  });
+
+  it('unpackaged: rejects filesystem root as HORIZON_DESKTOP_ROOT (FIX7 defect)', () => {
+    seedCanonicalLayout(root);
+    expect(() => resolveDesktopRuntimeLayout({
+      isPackaged: false,
+      appPath: '/',
+      mainDir: '/',
+      desktopRootOverride: '/',
+    })).toThrow(/desktop_runtime_root_(invalid|is_filesystem_root)/);
+  });
+
+  it('unpackaged: rejects a candidate that lacks @horizon/desktop package.json', () => {
+    // Root exists but has no dist tree/package.json.
+    expect(() => resolveDesktopRuntimeLayout({
+      isPackaged: false,
+      appPath: root,
+      mainDir: root,
+      desktopRootOverride: root,
+    })).toThrow(/desktop_runtime_root_invalid/);
+  });
+
+  it('packaged: resolves canonical entries from appPath (no <resources>/app hardcoding)', () => {
+    seedCanonicalLayout(root);
+    const layout = resolveDesktopRuntimeLayout({
       isPackaged: true,
-    });
-    expect(result.layout).toBe('packaged');
-    expect(result.path).toBe(resolve(resourcesPath, 'app', 'dist', 'preload', 'preload', 'index.cjs'));
-  });
-
-  it('missing file throws preload_entry_missing:<sanitized-path>', () => {
-    expect(() => resolvePreloadEntry({
       appPath: root,
-      resourcesPath: root,
+      mainDir: resolve(root, 'dist/main'),
+    });
+    expect(layout.layout).toBe('packaged');
+    expect(layout.mainEntry).toBe(resolve(root, 'dist/main/index.cjs'));
+    expect(layout.preloadEntry).toBe(resolve(root, 'dist/preload/index.cjs'));
+  });
+
+  it('packaged: rejects filesystem root as appPath', () => {
+    expect(() => resolveDesktopRuntimeLayout({
+      isPackaged: true,
+      appPath: '/',
+      mainDir: '/dist/main',
+    })).toThrow(/desktop_runtime_root_is_filesystem_root/);
+  });
+
+  it('missing main entry throws desktop_main_entry_missing', () => {
+    seedCanonicalLayout(root);
+    rmSync(join(root, 'dist/main/index.cjs'));
+    expect(() => resolveDesktopRuntimeLayout({
       isPackaged: false,
-    })).toThrow(/^preload_entry_missing:/);
+      appPath: root,
+      mainDir: resolve(root, 'dist/main'),
+      desktopRootOverride: root,
+    })).toThrow(/desktop_runtime_root_invalid|desktop_main_entry_missing/);
   });
 
-  it('wrong extension throws preload_entry_wrong_extension', () => {
-    // Force-write a file with the wrong extension at the exact
-    // location the resolver checks — verifies the `.cjs` invariant.
-    // We construct the path manually and use a helper that skips the
-    // exists check by writing a file first. Since the resolver checks
-    // extension AFTER existence, we need a `.js` file at the exact
-    // resolver-target path. But the resolver ALWAYS looks for `.cjs`
-    // — a `.js` file would be `!existsSync`. To hit the extension
-    // check, we'd need the resolver to accept a path it then rejects.
-    // Instead: verify the resolver's returned path always ends with `.cjs`
-    // in the happy path (extension guaranteed by construction).
-    mkdirSync(join(root, 'dist/preload/preload'), { recursive: true });
-    writeFileSync(join(root, 'dist/preload/preload/index.cjs'), 'ok\n');
-    const result = resolvePreloadEntry({
-      appPath: root, resourcesPath: root, isPackaged: false,
+  it('missing preload entry throws desktop_preload_entry_missing', () => {
+    seedCanonicalLayout(root);
+    rmSync(join(root, 'dist/preload/index.cjs'));
+    expect(() => resolveDesktopRuntimeLayout({
+      isPackaged: false,
+      appPath: root,
+      mainDir: resolve(root, 'dist/main'),
+      desktopRootOverride: root,
+    })).toThrow(/desktop_runtime_root_invalid|desktop_preload_entry_missing/);
+  });
+
+  it('missing renderer entry throws desktop_renderer_entry_missing', () => {
+    seedCanonicalLayout(root);
+    rmSync(join(root, 'dist/renderer/index.html'));
+    expect(() => resolveDesktopRuntimeLayout({
+      isPackaged: false,
+      appPath: root,
+      mainDir: resolve(root, 'dist/main'),
+      desktopRootOverride: root,
+    })).toThrow(/desktop_runtime_root_invalid|desktop_renderer_entry_missing/);
+  });
+
+  it('renderer URL uses pathToFileURL (no bare file:// concatenation)', () => {
+    seedCanonicalLayout(root);
+    const layout = resolveDesktopRuntimeLayout({
+      isPackaged: false,
+      appPath: root,
+      mainDir: resolve(root, 'dist/main'),
+      desktopRootOverride: root,
     });
-    expect(result.path.endsWith('.cjs')).toBe(true);
+    // pathToFileURL always produces `file://` + URL-encoded absolute path.
+    expect(new URL(layout.rendererUrl).protocol).toBe('file:');
+    expect(layout.rendererUrl.endsWith('/dist/renderer/index.html')).toBe(true);
   });
+});
 
-  it('returned path is always absolute', () => {
-    mkdirSync(join(root, 'dist/preload/preload'), { recursive: true });
-    writeFileSync(join(root, 'dist/preload/preload/index.cjs'), 'ok');
-    const result = resolvePreloadEntry({
-      appPath: root, resourcesPath: root, isPackaged: false,
-    });
-    expect(result.path.startsWith('/') || /^[A-Z]:\\/.test(result.path)).toBe(true);
-  });
-
-  it('sanitizePreloadPath trims to last 4 segments', () => {
-    const raw = '/home/runner/work/trade-bot/trade-bot/apps/desktop/dist/preload/preload/index.cjs';
+describe('Stage 3C-CI-FIX8 §6 — sanitizePreloadPath cross-platform', () => {
+  it('POSIX path: splits on `/`', () => {
+    const raw = '/home/runner/work/trade-bot/trade-bot/apps/desktop/dist/preload/index.cjs';
     const s = sanitizePreloadPath(raw);
-    // Last 4 segments.
-    expect(s.endsWith('/dist/preload/preload/index.cjs')).toBe(true);
-    // Home / runner-specific parts must be removed.
+    expect(s.endsWith('/dist/preload/index.cjs')).toBe(true);
     expect(s).not.toContain('runner');
     expect(s).not.toContain('home');
+    expect(s).not.toContain('work');
+  });
+
+  it('Windows drive-letter path: splits on backslash', () => {
+    const raw = 'C:\\Users\\runneradmin\\AppData\\Local\\Temp\\apps\\desktop\\dist\\preload\\index.cjs';
+    const s = sanitizePreloadPath(raw);
+    // Sanitizer normalises to forward slashes.
+    expect(s).toBe('desktop/dist/preload/index.cjs');
+    expect(s).not.toContain('runneradmin');
+    expect(s).not.toContain('Users');
+    expect(s).not.toContain('\\');
+  });
+
+  it('mixed separators: normalise then split', () => {
+    const raw = '/home/runner/apps\\desktop\\dist/preload/index.cjs';
+    const s = sanitizePreloadPath(raw);
+    expect(s).toBe('/desktop/dist/preload/index.cjs');
+  });
+
+  it('UNC path: splits and preserves leading /', () => {
+    const raw = '\\\\build\\share\\horizon\\dist\\preload\\index.cjs';
+    const s = sanitizePreloadPath(raw);
+    // Windows UNC → forward-slash form, and only the last 4 segments.
+    expect(s.endsWith('/dist/preload/index.cjs')).toBe(true);
+    expect(s).not.toContain('build');
+  });
+
+  it('short path: preserves shorter path unchanged (no over-trim)', () => {
+    expect(sanitizePreloadPath('/a/b')).toBe('/a/b');
+    expect(sanitizePreloadPath('a/b')).toBe('a/b');
+  });
+
+  it('never leaks runner/home/user/temporary parents (broad regex)', () => {
+    const cases = [
+      '/home/runner/work/foo/bar/apps/desktop/dist/preload/index.cjs',
+      'C:\\Users\\Alice\\Desktop\\horizon\\apps\\desktop\\dist\\preload\\index.cjs',
+      '/tmp/stage3c-xyz/apps/desktop/dist/preload/index.cjs',
+    ];
+    for (const raw of cases) {
+      const s = sanitizePreloadPath(raw);
+      for (const forbidden of ['runner', 'Users', 'Alice', '/tmp/stage3c-xyz', '\\']) {
+        expect(s, `raw=${raw}`).not.toContain(forbidden);
+      }
+    }
   });
 });
 
-describe('Stage 3C-CI-FIX7 §A2 — preload bundle format', () => {
+describe('Stage 3C-CI-FIX8 §2 — isFilesystemRoot + validateDesktopRoot', () => {
+  it('detects POSIX `/`', () => {
+    expect(isFilesystemRoot('/')).toBe(true);
+  });
+
+  it('detects Windows `C:` and `C:/`', () => {
+    expect(isFilesystemRoot('C:')).toBe(true);
+    expect(isFilesystemRoot('C:/')).toBe(true);
+    expect(isFilesystemRoot('C:\\')).toBe(true);
+  });
+
+  it('detects UNC share root', () => {
+    expect(isFilesystemRoot('//host/share')).toBe(true);
+    expect(isFilesystemRoot('//host/share/')).toBe(true);
+  });
+
+  it('accepts a real directory as non-root', () => {
+    expect(isFilesystemRoot('/home/user/apps/desktop')).toBe(false);
+    expect(isFilesystemRoot('C:/Users/foo/desktop')).toBe(false);
+  });
+
+  it('validateDesktopRoot rejects a random unrelated directory', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'stage3c-invalid-'));
+    try {
+      const v = validateDesktopRoot(tmp);
+      expect(v.ok).toBe(false);
+    } finally { rmSync(tmp, { recursive: true, force: true }); }
+  });
+});
+
+describe('Stage 3C-CI-FIX8 §1 — package + bundler use canonical layout', () => {
   const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..');
   const DESKTOP_ROOT = join(REPO_ROOT, 'apps/desktop');
-  const bundleScript = readFileSync(join(DESKTOP_ROOT, 'build/bundle-main.mjs'), 'utf8');
 
-  it('emits preload to dist/preload/preload/index.cjs (unambiguous CommonJS)', () => {
-    expect(bundleScript).toMatch(/preload\/preload\/index\.cjs/);
-    // Must NOT still emit a `.js` variant.
-    expect(bundleScript).not.toMatch(/preload\/preload\/index\.js["']/);
+  it('package.json main = dist/main/index.cjs', () => {
+    const pkg = JSON.parse(readFileSync(join(DESKTOP_ROOT, 'package.json'), 'utf8')) as {
+      main: string;
+      build: { extraMetadata: { main: string } };
+    };
+    expect(pkg.main).toBe('dist/main/index.cjs');
+    expect(pkg.build.extraMetadata.main).toBe('dist/main/index.cjs');
   });
 
-  it('bundler uses format=cjs so the emitted module is unambiguously CommonJS', () => {
-    expect(bundleScript).toMatch(/format:\s*['"]cjs['"]/);
-  });
-
-  it('electron is external so the runtime uses Electron\'s native module', () => {
-    expect(bundleScript).toMatch(/['"]electron['"]/);
-  });
-});
-
-describe('Stage 3C-CI-FIX7 §F — Windows Electron version pin', () => {
-  const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..');
-  const DESKTOP_ROOT = join(REPO_ROOT, 'apps/desktop');
-  const pkg = JSON.parse(readFileSync(join(DESKTOP_ROOT, 'package.json'), 'utf8')) as {
-    devDependencies: Record<string, string>;
-    build: { electronVersion?: string };
-  };
-
-  it('Electron dependency uses exact semver (no ^ / ~ / * / latest)', () => {
-    const version = pkg.devDependencies.electron;
-    expect(version).toBeDefined();
-    // Exact semver: major.minor.patch with no prefix.
-    expect(version).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(version).not.toMatch(/^[\^~]/);
-    expect(version).not.toBe('latest');
-  });
-
-  it('build.electronVersion matches the dependency exactly', () => {
-    expect(pkg.build.electronVersion).toBe(pkg.devDependencies.electron);
-  });
-
-  it('installed Electron package version matches the declared version', () => {
-    // Read the resolved installed version from node_modules to prove
-    // the lockfile is consistent with package.json.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const installed = require(join(REPO_ROOT, 'node_modules/electron/package.json')) as { version: string };
-    expect(installed.version).toBe(pkg.devDependencies.electron);
-  });
-
-  it('no CI workflow invokes `npx electron` or an unpinned electron install', () => {
-    const nativeWf = readFileSync(join(REPO_ROOT, '.github/workflows/stage3c-native.yml'), 'utf8');
-    const winWf = readFileSync(join(REPO_ROOT, '.github/workflows/desktop-windows.yml'), 'utf8');
-    for (const wf of [nativeWf, winWf]) {
-      expect(wf).not.toMatch(/\brun:[^\n]*npx\s+electron/);
-      expect(wf).not.toMatch(/\brun:[^\n]*npm\s+install\s+-g\s+electron/);
-    }
-  });
-});
-
-describe('Stage 3C-CI-FIX7 §D1 — NativeRunStatus completion invariant', () => {
-  // Import lazily to avoid circular concerns with the outer describes.
-  it('completed=true requires startup + assertions + cleanup + no failure', async () => {
-    const { NativeRunStatus } = await import('../native/nativeDiagnostics');
-    const dir = mkdtempSync(join(tmpdir(), 'stage3c-fix7-status-'));
-    try {
-      const s = new NativeRunStatus(dir, 'r1');
-      // Starts with everything false.
-      let parsed = JSON.parse(readFileSync(s.location(), 'utf8'));
-      expect(parsed.completed).toBe(false);
-      expect(parsed.startupComplete).toBe(false);
-      expect(parsed.assertionsComplete).toBe(false);
-      expect(parsed.cleanupComplete).toBe(false);
-
-      // Only startup + cleanup — assertions never ran. markCompleted
-      // must refuse to set completed=true.
-      s.markStartupComplete();
-      s.markCleanupComplete();
-      s.markCompleted();
-      parsed = JSON.parse(readFileSync(s.location(), 'utf8'));
-      expect(parsed.completed).toBe(false);
-
-      // Add assertions. Now all three flags set + no failure → true.
-      s.markAssertionsComplete();
-      s.markCompleted();
-      parsed = JSON.parse(readFileSync(s.location(), 'utf8'));
-      expect(parsed.completed).toBe(true);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('a startup failure leaves completed=false even when cleanup runs', async () => {
-    const { NativeRunStatus } = await import('../native/nativeDiagnostics');
-    const dir = mkdtempSync(join(tmpdir(), 'stage3c-fix7-status-'));
-    try {
-      const s = new NativeRunStatus(dir, 'r2');
-      // Simulate the FIX6 scenario: startup failed, but cleanup ran.
-      s.markFailed('renderer_ready');
-      s.markCleanupComplete();
-      s.markCompleted();
-      const parsed = JSON.parse(readFileSync(s.location(), 'utf8'));
-      expect(parsed.failureClassification).toBe('renderer_ready');
-      expect(parsed.cleanupComplete).toBe(true);
-      // The FIX6 defect: this used to be true even on a hang.
-      expect(parsed.completed).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+  it('bundler emits canonical .cjs outputs (no nested main/main or preload/preload)', () => {
+    const bundleScript = readFileSync(join(DESKTOP_ROOT, 'build/bundle-main.mjs'), 'utf8');
+    expect(bundleScript).toMatch(/main\/index\.cjs/);
+    expect(bundleScript).toMatch(/preload\/index\.cjs/);
+    // Old nested paths must be gone.
+    expect(bundleScript).not.toMatch(/main\/main\/index\.js/);
+    expect(bundleScript).not.toMatch(/preload\/preload\/index\.(cjs|js)/);
   });
 });

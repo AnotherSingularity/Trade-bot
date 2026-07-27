@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { DESKTOP_DATA_KEYS } from '@horizon/shared';
 import { DesktopDataClient, isKnownDesktopDataKey, knownProcedurePaths, sanitizeError } from '../src/main/desktopDataClient';
 
-function makeClient(fetchImpl: typeof fetch, opts?: Partial<Parameters<typeof DesktopDataClient['prototype']['call']>[0]>) {
+function makeClient(fetchImpl: typeof fetch, _opts?: Partial<Parameters<typeof DesktopDataClient['prototype']['call']>[0]>) {
   return new DesktopDataClient({
     serverBaseUrl: 'http://127.0.0.1:0',
     getAccessToken: () => 'test-access-token',

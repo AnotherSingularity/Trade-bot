@@ -77,17 +77,28 @@ jobs:
         run: npm run build:manifest -- dist
         env:
           HORIZON_BUILD_COMMIT: ${{ github.sha }}
+      # Stage 3C-CI-FIX8 §8.1: verify canonical runtime layout BEFORE
+      # electron-builder runs. Fails fast on package.json/main mismatch,
+      # missing bundled entries, or an unpinned Electron version.
+      - name: Verify runtime layout
+        working-directory: apps/desktop
+        run: npm run verify:runtime-layout
       - name: Package Windows NSIS installer
         working-directory: apps/desktop
         run: npm run package:win
         env:
           HORIZON_BUILD_COMMIT: ${{ github.sha }}
+      # Stage 3C-CI-FIX8 §8.4: upload on always() so a failed installer
+      # step still leaves diagnostics. Uploads whatever was produced —
+      # unpacked directory, installer exe, manifest, verifier output.
       - name: Upload installer artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: horizon-trade-desktop-installer
           path: |
             apps/desktop/release/*.exe
+            apps/desktop/release/win-unpacked/**
             apps/desktop/dist/build-manifest.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14

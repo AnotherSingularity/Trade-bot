@@ -53,17 +53,18 @@ async function bundle(entry, out) {
   });
 }
 
-// Stage 3C-CI-FIX7 §A2: preload output uses the unambiguous `.cjs`
-// extension so Electron never has to infer module format via
-// `package.json`'s `type` field. The bundler already emits CJS
-// (`format: 'cjs'`), so the extension change is purely a labelling
-// safety measure.
+// Stage 3C-CI-FIX8 §1.1: canonical runtime layout.
+//   apps/desktop/dist/main/index.cjs      (esbuild CJS bundle)
+//   apps/desktop/dist/preload/index.cjs   (esbuild CJS bundle)
+//   apps/desktop/dist/renderer/index.html (Vite build)
+// One canonical path used by main, preload resolver, renderer URL,
+// electron-builder metadata, build manifest, and native harness.
 await bundle(
   resolve(ROOT, 'src/main/index.ts'),
-  join(DIST, 'main/main/index.js'),
+  join(DIST, 'main/index.cjs'),
 );
 await bundle(
   resolve(ROOT, 'src/preload/index.ts'),
-  join(DIST, 'preload/preload/index.cjs'),
+  join(DIST, 'preload/index.cjs'),
 );
-console.log('desktop main + preload bundled');
+console.log('desktop main + preload bundled (canonical layout)');
