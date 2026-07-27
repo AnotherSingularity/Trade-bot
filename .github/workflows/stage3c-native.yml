@@ -54,20 +54,40 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install Xvfb + Chromium runtime deps
+      # Stage 3C-ENV-FIX2 §1: install redis-tools so redis-cli is
+      # available on the runner. Stage 3C-ENV-FIX2 run classified the
+      # prior CI failure as environment/setup — the "Wait for Redis"
+      # step above depends on `redis-cli` which is NOT part of the
+      # default ubuntu-latest image.
+      - name: Install native Electron dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             xvfb \
+            redis-tools \
             libnss3 \
+            libatk1.0-0 \
             libatk-bridge2.0-0 \
+            libcups2 \
+            libdrm2 \
             libgtk-3-0 \
             libgbm1 \
             libxkbcommon0 \
+            libxcomposite1 \
+            libxdamage1 \
+            libxfixes3 \
+            libxrandr2 \
             libasound2t64
 
       - name: Install workspace dependencies
         run: npm ci
+
+      # Stage 3C-ENV-FIX2 §2: create the log directory unconditionally
+      # so downstream steps (upload-artifact, evidence summary) always
+      # have a valid path to reference, even when the native harness
+      # never launches.
+      - name: Prepare native evidence directory
+        run: mkdir -p apps/desktop/tests/native/logs
 
       - name: Typecheck (shared)
         working-directory: packages/shared
@@ -115,6 +135,10 @@ jobs:
         env:
           NATIVE_DEBUG: '0'
 
+      # Stage 3C-ENV-FIX2 §3: artefact upload must tolerate an empty
+      # log tree (env/setup failures never produce logs). `if-no-files-found: warn`
+      # keeps the step non-fatal so a subsequent env failure still
+      # yields a diagnosable run rather than a bare "artifact missing".
       - name: Upload native harness evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -122,12 +146,18 @@ jobs:
           name: stage3c-native-evidence-${{ github.run_id }}
           path: apps/desktop/tests/native/logs/**
           retention-days: 30
+          if-no-files-found: warn
 
-      - name: Emit evidence.json summary to job log
+      # Stage 3C-ENV-FIX2 §3: search from the repo root instead of
+      # cd'ing into the log directory. The prior step tried
+      # `working-directory: apps/desktop/tests/native/logs`, which
+      # errors before Bash starts if the directory doesn't exist.
+      - name: Print native evidence summary
         if: always()
-        working-directory: apps/desktop/tests/native/logs
+        shell: bash
         run: |
-          for f in */evidence.json; do
-            echo "=== $f ==="
-            cat "$f"
-          done || echo "no evidence.json produced"
+          find apps/desktop/tests/native/logs -name evidence.json -type f -print0 |
+          while IFS= read -r -d '' file; do
+            echo "===== $file ====="
+            cat "$file"
+          done
