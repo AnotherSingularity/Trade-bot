@@ -25,6 +25,7 @@ import { join } from 'node:path';
 
 export const NATIVE_STARTUP_PHASES = [
   'native_test_entered',
+  'before_all_started',
   'isolation_minted',
   'mariadb_ready',
   'redis_ready',
@@ -89,6 +90,21 @@ export function sanitizeDiagnosticMessage(raw: string): string {
     .replace(/(password\s*=\s*)'?[^\s',)]+/gi, '$1<REDACTED>')
     .replace(/[A-Fa-f0-9]{32,}/g, '<HEX_REDACTED>')
     .slice(0, 4096);
+}
+
+// Stage 3C-CI-FIX5 §6: process-tree output can exceed 4KB on a real
+// Linux runner. This variant of the sanitizer applies the same
+// redaction ruleset PER LINE and never truncates the total output
+// — needed for `ps -eo pid,ppid,pgid,comm,args` dumps.
+export function sanitizeProcessTreeText(raw: string): string {
+  const linePasses = (line: string): string => line
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer <REDACTED>')
+    .replace(/mysql:\/\/[^@\s]+@/g, 'mysql://<REDACTED>@')
+    .replace(/(x-horizon-bootstrap-token[^:]*:\s*)[A-Fa-f0-9]{32,}/gi, '$1<REDACTED>')
+    .replace(/(bootstrapToken["'\s:=]+)[A-Fa-f0-9]{16,}/g, '$1<REDACTED>')
+    .replace(/(password\s*=\s*)'?[^\s',)]+/gi, '$1<REDACTED>')
+    .replace(/[A-Fa-f0-9]{32,}/g, '<HEX_REDACTED>');
+  return raw.split('\n').map(linePasses).join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +210,13 @@ export interface NativeRunStatusFields {
   nativeTestStarted: boolean;
   startedAt: string;
   currentPhase: NativeStartupPhase | 'not_started';
+  // Stage 3C-CI-FIX5 §4: startup vs full-run completion are split.
+  // `startupComplete` flips true once beforeAll's watchdog has fully
+  // wrapped up (renderer_ready observed). `completed` only flips true
+  // after all native assertions, shutdown, leak verification, and
+  // evidence emission are done. A hung suite must never leave
+  // `completed:true`.
+  startupComplete: boolean;
   completed: boolean;
   failureClassification: FailureClassification | null;
 }
@@ -213,6 +236,7 @@ export class NativeRunStatus {
       nativeTestStarted: true,
       startedAt: new Date().toISOString(),
       currentPhase: 'not_started',
+      startupComplete: false,
       completed: false,
       failureClassification: null,
     };
@@ -221,6 +245,13 @@ export class NativeRunStatus {
 
   setPhase(phase: NativeStartupPhase): void {
     this.state.currentPhase = phase;
+    this.flush();
+  }
+
+  // Stage 3C-CI-FIX5 §4: called when beforeAll finishes without a
+  // failure (renderer_ready observed). Does NOT flip `completed`.
+  markStartupComplete(): void {
+    this.state.startupComplete = true;
     this.flush();
   }
 
@@ -272,6 +303,11 @@ export function classifyFailure(err: unknown): { classification: FailureClassifi
       authentication: 'authentication',
       screen_navigation: 'screen_contract',
       shutdown: 'shutdown',
+      // Stage 3C-CI-FIX5 §3: the outer beforeAll watchdog fires only
+      // if a previously-untraced hang consumed its budget. The
+      // classification stays 'unknown' because the fault site is by
+      // definition unclassified (a phase we did not name).
+      before_all: 'unknown',
     };
     return {
       classification: map[phaseString] ?? 'unknown',

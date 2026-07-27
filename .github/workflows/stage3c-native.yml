@@ -163,30 +163,44 @@ jobs:
         env:
           NATIVE_DEBUG: '0'
 
-      # Stage 3C-CI-FIX4 §A9: exclude the Chromium user-data cache
-      # tree from the artefact — noise that overwhelms the actual
-      # diagnostics. Preserve only DevToolsActivePort + Preferences
-      # + Local State. Everything else in electron-userdata/ is
-      # per-run Chromium cache noise.
+      # Stage 3C-CI-FIX5 §8: ARTEFACT ALLOWLIST (not blacklist).
+      # FIX4 tried to exclude specific Chromium cache directories but
+      # the run artefact still contained e.g. DawnWebGPUCache and
+      # other profile bloat. FIX5 inverts to an explicit include list:
+      # only diagnostics files and their small companions ship.
+      # electron-userdata/ is NEVER uploaded recursively; if a specific
+      # profile file becomes useful, it can be copied to a separate
+      # diagnostic folder by the harness first.
       - name: Upload native evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: stage3c-native-evidence-${{ github.run_id }}
           path: |
-            apps/desktop/tests/native/logs
-            !apps/desktop/tests/native/logs/**/electron-userdata/Cache/**
-            !apps/desktop/tests/native/logs/**/electron-userdata/Code Cache/**
-            !apps/desktop/tests/native/logs/**/electron-userdata/GPUCache/**
-            !apps/desktop/tests/native/logs/**/electron-userdata/Service Worker/**
-            !apps/desktop/tests/native/logs/**/electron-userdata/Network/**
-            !apps/desktop/tests/native/logs/**/electron-userdata/Session Storage/**
-            !apps/desktop/tests/native/logs/**/electron-userdata/Local Storage/**
-            !apps/desktop/tests/native/logs/**/electron-userdata/blob_storage/**
-            !apps/desktop/tests/native/logs/**/electron-userdata/ShaderCache/**
-            !apps/desktop/tests/native/logs/**/electron-userdata/GrShaderCache/**
-            !apps/desktop/tests/native/logs/**/electron-userdata/DawnCache/**
-            !apps/desktop/tests/native/logs/**/electron-userdata/DawnGraphiteCache/**
+            apps/desktop/tests/native/logs/*.jsonl
+            apps/desktop/tests/native/logs/*.json
+            apps/desktop/tests/native/logs/*.txt
+            apps/desktop/tests/native/logs/*.log
+            apps/desktop/tests/native/logs/*.png
+            apps/desktop/tests/native/logs/*.html
+            apps/desktop/tests/native/logs/**/startup-trace.jsonl
+            apps/desktop/tests/native/logs/**/native-run-status.json
+            apps/desktop/tests/native/logs/**/failure-classification.json
+            apps/desktop/tests/native/logs/**/environment-summary.json
+            apps/desktop/tests/native/logs/**/process-tree*.txt
+            apps/desktop/tests/native/logs/**/evidence.json
+            apps/desktop/tests/native/logs/**/electron-main.stdout.log
+            apps/desktop/tests/native/logs/**/electron-main.stderr.log
+            apps/desktop/tests/native/logs/**/playwright-api.log
+            apps/desktop/tests/native/logs/**/preload.log
+            apps/desktop/tests/native/logs/**/renderer.log
+            apps/desktop/tests/native/logs/**/server.log
+            apps/desktop/tests/native/logs/**/server.live.log
+            apps/desktop/tests/native/logs/**/sanitized-*.log
+            apps/desktop/tests/native/logs/**/teardown-errors.log
+            apps/desktop/tests/native/logs/**/failure.png
+            apps/desktop/tests/native/logs/**/failure-dom.html
+            apps/desktop/tests/native/logs/**/current-url.txt
           retention-days: 30
           if-no-files-found: error
 

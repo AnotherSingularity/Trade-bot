@@ -959,3 +959,178 @@ Reclaiming the full 3C verdict still requires a green
 carries `evidence.json` + `native-run-status.json` with
 `completed:true` + `failureClassification:null` + all 55 assertions
 + all 19 manifest screens.
+
+## 24. Stage 3C-CI-FIX5 — renderer-ready watchdog + Windows manifest tooling
+
+Native run #5 at `edd9d04` progressed through `electron_launch_complete`
+→ `first_window_observed` → `renderer_dom_loaded`, then the trace
+stopped with no `renderer_ready_wait_started` entry. The hang was
+in untraced post-DOM code (the first `it()` calling `page.evaluate`
+before the preload had exposed `window.horizon`). Four diagnostic
+defects were also present: `native-run-status.json.completed=true`
+on a hung run, no `failure-classification.json`, empty Electron /
+preload / renderer log files, and process-tree files truncated to
+exactly 4 096 bytes.
+
+Windows run #17 at `edd9d04` passed the portable unit suite,
+typecheck, and desktop build — then failed at
+`npx ts-node build/generate-build-manifest.ts dist` because CI
+downloaded an unpinned `ts-node@10.9.2` that lacks the correct
+ESM loader for the repo's mixed ESM/CJS surface.
+
+FIX5 closes both. No product logic changed. Migrations 0000-0021
+byte-identical.
+
+### 24.1 Bounded renderer-ready phase
+
+`apps/desktop/tests/native/nativeElectron.integration.test.ts`
+adds the missing bounded phase. Immediately after
+`renderer_dom_loaded` the harness records
+`renderer_ready_wait_started` (before ANY page.evaluate, listener
+attachment, IPC call, or selector lookup) and races the entire
+post-DOM initialisation against a 60-second timeout via
+`withNativeTimeout('renderer_ready', 60_000,
+initializeAndAwaitRendererReady(page))`. The probe polls for
+`window.horizon` with the correct shape — the smallest observable
+proof that the preload ran and the IPC bridge is live. If it
+never appears, the timeout fires with the deterministic error code
+`native_startup_timeout:renderer_ready`.
+
+### 24.2 Outer beforeAll watchdog (180s)
+
+`withNativeTimeout('before_all', 180_000, startupWork(), ...)`
+wraps the entire startup so a future edit that introduces a new
+untraced hang cannot consume the workflow's 30-minute budget.
+`before_all` timeout fires only when an unclassified fault occurs
+— the error code names the gap itself.
+
+### 24.3 Status file: startupComplete vs completed
+
+FIX4's `native-run-status.json` incorrectly showed `completed:true`
+even though beforeAll hung. FIX5 splits the semantics via a new
+method `markStartupComplete()` and a new field `startupComplete`.
+The flag flips true when `renderer_ready` observed. `completed:true`
+now only flips in `afterAll` after every native assertion, shutdown,
+process-leak verification, and evidence emission finishes cleanly.
+A hung run can therefore never leave `completed:true`.
+
+Contract `stage3c-native-run-status.v1` gains a `startupComplete`
+field; existing consumers ignore unknown fields.
+
+### 24.4 Failure evidence BEFORE cleanup
+
+The catch block in `beforeAll` now writes the full failure bundle
+(`failure-classification.json`, `environment-summary.json`,
+`process-tree.txt`, and page artefacts when a page exists) FIRST,
+then performs a bounded partial teardown (`boundedPartialTeardown`)
+with 30-second caps on Electron close and server kill. A hung
+cleanup cannot bury the classification.
+
+### 24.5 Process-tree capture — no 4KB truncation
+
+FIX4 ran the `ps -eo pid,ppid,pgid,comm,args` output through
+`sanitizeDiagnosticMessage`, which sliced to 4 096 bytes and hid
+every Electron/Node process. FIX5 introduces
+`sanitizeProcessTreeText(raw)` which applies the same secret-
+redaction ruleset PER LINE and never truncates. `spawnSync` is
+called with an explicit 8 MiB `maxBuffer` so large runners are
+never memory-clipped.
+
+### 24.6 Log-file sinks pre-created
+
+`ensureRequiredLogFilesExist(logsDir)` opens and closes each of
+`electron-main.stdout.log`, `electron-main.stderr.log`,
+`playwright-api.log`, `preload.log`, `renderer.log` at native-test
+entry, so the artefact bundle always shows the sink exists even
+when Electron/Playwright wrote nothing to it (which is itself
+evidence).
+
+### 24.7 Artefact upload: allowlist not blacklist
+
+`.github/workflows/stage3c-native.yml` upload step converted from
+exclusion-glob to inclusion-glob. Only the named diagnostics files
+ship — `startup-trace.jsonl`, `native-run-status.json`,
+`failure-classification.json`, `environment-summary.json`,
+`process-tree*.txt`, `evidence.json`, all electron/preload/renderer
+logs, and page artefacts. `electron-userdata/` never appears in the
+upload block; DawnWebGPUCache and similar profile bloat cannot
+ship regardless of what Chromium creates.
+
+### 24.8 Windows manifest tooling — tsx via declared script
+
+`apps/desktop/package.json` gains
+`"build:manifest": "tsx build/generate-build-manifest.ts"` and
+`tsx@^4.19.2` as a declared devDependency (hoisted to the
+workspace root by npm). `.github/workflows/desktop-windows.yml`
+replaces `npx ts-node build/generate-build-manifest.ts dist` with
+`npm run build:manifest -- dist`. CI never downloads an unpinned
+`ts-node` again; the same command works identically on Windows and
+POSIX; tsx handles the repo's mixed ESM/CJS surface without a
+bespoke loader.
+
+### 24.9 New unit tests
+
+`apps/desktop/tests/main/renderer_ready_watchdog.test.ts` — 3 tests:
+- Deliberate post-DOM hang exits within `renderer_ready` timeout,
+  emits `native_startup_timeout:renderer_ready`, writes
+  `failure-classification.json` with correct classification/phase,
+  writes `native-run-status.json` with `completed=false` +
+  `startupComplete=false` + `failureClassification=renderer_ready`,
+  executes bounded cleanup steps.
+- Successful path flips `startupComplete=true` while keeping
+  `completed=false` until explicit `markCompleted()`.
+- `sanitizeProcessTreeText` preserves 100KB fixture output (line
+  count intact, secrets redacted per-line, no 4KB slice).
+
+`apps/desktop/tests/main/build_manifest.test.ts` — 4 tests:
+- `build:manifest` package script uses tsx (never ts-node/npx).
+- `npm run build:manifest -- <dist>` produces a valid manifest
+  with expected shape + safe flags.
+- `bundleChecksum` deterministic across two identical inputs
+  (portable path handling — this is what fails on Windows if the
+  walker mis-normalises separators).
+- No CI workflow `run:` step invokes `npx ts-node`.
+
+### 24.10 Verification (local)
+
+- `packages/shared npx tsc --noEmit` — clean
+- `apps/server npx tsc --noEmit` — clean
+- `apps/desktop npx tsc -p tsconfig.json --noEmit` — no new errors
+  (7 pre-existing errors identical to pre-change baseline)
+- `apps/desktop npm test` — 39 files / 510 tests / 0 fail
+  (portable suite; +3 renderer_ready_watchdog +4 build_manifest,
+  ci_test_isolation adjusted for FIX5 allowlist)
+- `apps/desktop npm run build` — clean
+- `HORIZON_BUILD_COMMIT=fix5-local npm run build:manifest -- dist`
+  — produces valid `build-manifest.json`
+- `git diff --stat -- apps/server/drizzle/migrations/` — empty
+
+### 24.11 Absolute constraints preserved
+
+- No migrations modified (0000-0021 byte-identical)
+- No product logic changes
+- DRY_RUN=true / ORDER_SUBMISSION_ENABLED=false unchanged
+- No Coinbase credentials referenced
+- No production providers activated
+- No observer enforcement / promotion / Kelly enabled
+- No live capital authorized
+- No test skips added for required integration evidence
+- No broad try/catch that swallows failures — every catch writes
+  evidence and rethrows or records the outcome to the trace
+
+### 24.12 Verdict claimed after Stage 3C-CI-FIX5 (still pending CI)
+
+```
+stage3c_native_bounded_diagnostics_landed
+stage3c_windows_unit_isolation_landed
+stage3c_renderer_ready_watchdog_landed
+stage3c_windows_manifest_tooling_landed
+stage3c_native_runtime_verification_pending_ci_run
+desktop_windows_portability_pending_ci_run
+```
+
+Native failure remains diagnostic progress only if it: exits
+under its own bounded phase timeout, uploads the targeted
+artefacts, records the exact phase in `startup-trace.jsonl` +
+`failure-classification.json` + `native-run-status.json`, and
+leaves `completed=false`.

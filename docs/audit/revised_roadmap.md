@@ -243,6 +243,55 @@ which `blocking_gaps.md` categories it consumes.
   reclaim the runtime verdicts. If the workflow fails, the artefact
   bundle now names the failing phase attributively.
 
+### Stage 3C-CI-FIX5 — renderer-ready watchdog + Windows manifest tooling
+
+- **Entry**: FIX4 CI runs at `edd9d04` proved two narrow failures:
+  native #5 hung immediately after `renderer_dom_loaded` with no
+  `renderer_ready` phase ever recorded (untraced post-DOM code
+  consumed the workflow budget); Windows #17 broke at
+  `npx ts-node build/generate-build-manifest.ts dist` (unpinned
+  dynamic download + ESM loader mismatch).
+- **Exit criteria delivered**:
+  - `withNativeTimeout('renderer_ready', 60_000, initializeAndAwaitRendererReady(page))`
+    wraps the entire post-DOM initialisation. Probe waits for
+    `window.horizon` shape — the smallest observable proof preload
+    ran and the IPC bridge is live.
+  - Outer `withNativeTimeout('before_all', 180_000, ...)` watchdog
+    prevents a future untraced hang from consuming the workflow
+    budget.
+  - `NativeRunStatus` split: new `startupComplete` field + new
+    `markStartupComplete()` method. `completed:true` only flips
+    in `afterAll` after full teardown succeeds. A hung run cannot
+    leave `completed:true`.
+  - `beforeAll` catch block writes failure-classification /
+    environment-summary / process-tree / failure.png / failure-dom /
+    current-url FIRST, then invokes `boundedPartialTeardown()`
+    with 30s caps.
+  - `sanitizeProcessTreeText` applies per-line redaction with no
+    global slice; `spawnSync` uses 8MB `maxBuffer`. Process-tree
+    files no longer truncate at 4096 bytes.
+  - `ensureRequiredLogFilesExist(logsDir)` pre-creates the five
+    diagnostic log sinks at native-test entry.
+  - Native workflow artefact upload flipped from exclusion-glob
+    to inclusion-allowlist. `electron-userdata/` never uploaded
+    recursively; only named diagnostic files ship.
+  - `apps/desktop/package.json` adds `build:manifest` script backed
+    by `tsx` (declared devDep). `.github/workflows/desktop-windows.yml`
+    replaces `npx ts-node ...` with `npm run build:manifest -- dist`.
+  - New unit tests: 3 in `renderer_ready_watchdog.test.ts` +
+    4 in `build_manifest.test.ts`.
+- **Verdict achieved**: `stage3c_renderer_ready_watchdog_landed +
+  stage3c_windows_manifest_tooling_landed +
+  stage3c_native_runtime_verification_pending_ci_run +
+  desktop_windows_portability_pending_ci_run`.
+- **Next**: trigger `.github/workflows/stage3c-native.yml` +
+  `.github/workflows/desktop-windows.yml`; upon green +
+  native-run-status.completed=true + failureClassification:null
+  + all 55 assertions + all 19 manifest screens, reclaim the
+  runtime verdicts. If the native workflow fails, the artefact
+  bundle now names the failing phase attributively AND leaves
+  `completed=false` — no more false "completed:true" on a hang.
+
 ## Stage 4 — Real report generation
 
 - **Entry**: Stage 3 committed.

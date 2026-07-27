@@ -107,23 +107,41 @@ describe('Stage 3C-CI-FIX4 — native workflow: bounded, filtered, ordered', () 
     expect(wf).toMatch(/timeout-minutes:\s*\d+/);
   });
 
-  it('excludes electron-userdata Cache/CodeCache/GPUCache/Session dirs from artefact', () => {
-    for (const dir of [
-      'electron-userdata/Cache/**',
-      'electron-userdata/Code Cache/**',
-      'electron-userdata/GPUCache/**',
-      'electron-userdata/Service Worker/**',
-      'electron-userdata/Network/**',
-      'electron-userdata/Session Storage/**',
-      'electron-userdata/Local Storage/**',
-      'electron-userdata/blob_storage/**',
-      'electron-userdata/ShaderCache/**',
-      'electron-userdata/GrShaderCache/**',
-      'electron-userdata/DawnCache/**',
-      'electron-userdata/DawnGraphiteCache/**',
+  it('artefact upload uses an ALLOWLIST (only named diagnostics files) — never a bare recursive glob', () => {
+    // Stage 3C-CI-FIX5 §8: the artefact block was flipped from
+    // exclusion-glob (blacklist) to allowlist (inclusion-glob) so
+    // Chromium cache directories under electron-userdata can never
+    // accidentally ship — DawnWebGPUCache and similar were still
+    // being uploaded under the blacklist approach.
+    // The allowlist MUST include the diagnostic files we care about
+    // and MUST NOT recursively upload the whole logs tree.
+    for (const required of [
+      'startup-trace.jsonl',
+      'native-run-status.json',
+      'failure-classification.json',
+      'environment-summary.json',
+      'process-tree*.txt',
+      'evidence.json',
+      'electron-main.stdout.log',
+      'electron-main.stderr.log',
+      'playwright-api.log',
+      'preload.log',
+      'renderer.log',
+      'failure.png',
+      'failure-dom.html',
+      'current-url.txt',
     ]) {
-      expect(wf, `native workflow must exclude ${dir} from artefact upload`).toContain(dir);
+      expect(wf, `native workflow must allowlist ${required}`).toContain(required);
     }
+    // The bare-recursive form `apps/desktop/tests/native/logs` on its
+    // own must NOT appear (that would re-introduce the FIX4 problem
+    // of shipping the entire Chromium user-data tree).
+    expect(wf).not.toMatch(/^\s{12}apps\/desktop\/tests\/native\/logs\s*$/m);
+    // And `electron-userdata` must NEVER appear in the upload block
+    // — the allowlist has no reason to reference it.
+    const uploadBlockMatch = wf.match(/Upload native evidence[\s\S]*?retention-days/);
+    expect(uploadBlockMatch).not.toBeNull();
+    expect(uploadBlockMatch![0]).not.toContain('electron-userdata');
   });
 
   it('uploads on always() so failure evidence survives', () => {

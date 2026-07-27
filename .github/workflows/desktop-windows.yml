@@ -65,9 +65,16 @@ jobs:
       - name: Build desktop bundle
         working-directory: apps/desktop
         run: npm run build
+      # Stage 3C-CI-FIX5 §Windows: use the declared `build:manifest`
+      # package script (tsx) rather than `npx ts-node`. Advantages:
+      #   1. tsx is already an installed devDependency — CI never
+      #      dynamically downloads an unpinned package.
+      #   2. tsx transpiles under ESM+CJS without a bespoke loader.
+      #   3. The script is a single source of truth; both CI + a
+      #      developer's local shell invoke it identically.
       - name: Generate build manifest
         working-directory: apps/desktop
-        run: npx ts-node build/generate-build-manifest.ts dist
+        run: npm run build:manifest -- dist
         env:
           HORIZON_BUILD_COMMIT: ${{ github.sha }}
       - name: Package Windows NSIS installer
