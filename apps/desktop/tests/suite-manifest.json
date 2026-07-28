@@ -1,0 +1,118 @@
+{
+  "$schema": "STAGE_3C_SUITE_MANIFEST_V1",
+  "description": "Stage 3C-CI-RESET Part 2 Checkpoint B — authoritative desktop test topology. Every *.test.ts / *.test.tsx file under apps/desktop/tests/ is classified into exactly one bucket. `npm run verify:test-topology` fails CI if a file appears on disk but is missing from this manifest, if a listed file no longer exists, if a file appears in more than one bucket, or if the manifest disagrees with what the vitest configs actually declare.",
+  "generatedFor": "commit df5b295 + 8441e73",
+  "suites": {
+    "portable": {
+      "configFile": "vitest.config.ts",
+      "purpose": "Fast deterministic unit + renderer-component tests. Runs on every host (Linux, Windows, macOS) with no external services.",
+      "runsOnCi": ["linux", "windows", "macos"],
+      "requiresServices": [],
+      "npmScript": "test",
+      "includeMode": "glob",
+      "includeGlob": ["tests/**/*.test.ts", "tests/**/*.test.tsx"]
+    },
+    "external": {
+      "configFile": "vitest.external.config.ts",
+      "purpose": "Mandatory integration suite that requires real MariaDB + Redis on 127.0.0.1. Runs on Linux CI only; NEVER on Windows CI (no services provisioned).",
+      "runsOnCi": ["linux"],
+      "requiresServices": ["mariadb-10.11", "redis-7"],
+      "npmScript": "test:external",
+      "includeMode": "explicit"
+    },
+    "native": {
+      "configFile": "vitest.native.config.ts",
+      "purpose": "Full Electron + Xvfb + real server certification journey. Runs on Linux CI only, single-forked, no automatic retry.",
+      "runsOnCi": ["linux"],
+      "requiresServices": ["mariadb-10.11", "redis-7", "xvfb", "electron"],
+      "npmScript": "test:native",
+      "includeMode": "explicit"
+    },
+    "unassigned": {
+      "configFile": null,
+      "purpose": "Test files that are structurally excluded from the portable suite but not yet claimed by any external / native config. Every entry MUST cite a reason so the audit trail explains why the file is currently not executed on CI. This bucket is a KNOWN GAP inherited from the pre-RESET topology; entries here should be reclassified in a follow-up (not in Checkpoint B, which is scope-limited to making the topology machine-checkable).",
+      "runsOnCi": [],
+      "requiresServices": [],
+      "npmScript": null,
+      "includeMode": "explicit"
+    }
+  },
+  "assignments": {
+    "portable": [
+      "tests/main/auth_contract.test.ts",
+      "tests/main/auth_seam_readiness_classification.test.ts",
+      "tests/main/bootstrap_authority.test.ts",
+      "tests/main/build_manifest.test.ts",
+      "tests/main/ci_test_isolation.test.ts",
+      "tests/main/desktop_api_migration_audit.test.ts",
+      "tests/main/desktop_api_routes.test.ts",
+      "tests/main/nativeDiagnostics.test.ts",
+      "tests/main/operator_login_body.test.ts",
+      "tests/main/preload_entry.test.ts",
+      "tests/main/renderer_ready_watchdog.test.ts",
+      "tests/main/sandbox_policy.test.ts",
+      "tests/main/suite_topology.test.ts",
+      "tests/phase3a_authentication.test.ts",
+      "tests/phase3a_build_manifest.test.ts",
+      "tests/phase3a_environment.test.ts",
+      "tests/phase3a_ipc_contract.test.ts",
+      "tests/phase3a_ipc_handler.test.ts",
+      "tests/phase3a_logging.test.ts",
+      "tests/phase3a_navigation.test.ts",
+      "tests/phase3a_safety_invariants.test.ts",
+      "tests/phase3a_secrets.test.ts",
+      "tests/phase3a_service_supervisor.test.ts",
+      "tests/phase3a_window_security.test.ts",
+      "tests/phase3b_final_certification.test.ts",
+      "tests/renderer/phase3a_health_bar.test.tsx",
+      "tests/renderer/phase3a_screens.test.tsx",
+      "tests/renderer/stage3b_state_matrices.test.tsx",
+      "tests/stage1_adapter_factory.test.ts",
+      "tests/stage1_authoritative_status.test.ts",
+      "tests/stage1_docker_probe.test.ts",
+      "tests/stage1_migration_runner.test.ts",
+      "tests/stage1_runtime_assets.test.ts",
+      "tests/stage1_scanner_readiness.test.ts",
+      "tests/stage1_server_process.test.ts",
+      "tests/stage1_shutdown.test.ts",
+      "tests/stage1_zero_order_invariants.test.ts",
+      "tests/stage1fix_compose_contract.test.ts",
+      "tests/stage1fix_mariadb_engine.test.ts",
+      "tests/stage1fix_readiness_semantics.test.ts",
+      "tests/stage2_api_client.test.ts",
+      "tests/stage2_bootstrap_token.test.ts",
+      "tests/stage2_ipc_contract.test.ts",
+      "tests/stage2_secure_storage.test.ts",
+      "tests/stage2fix_privileged_ipc.test.ts",
+      "tests/stage3_desktop_data_client.test.ts",
+      "tests/stage3_desktop_data_ipc.test.ts"
+    ],
+    "external": [
+      "tests/native/auth_seam_login_body.integration.test.ts",
+      "tests/native/protectionSeedRegression.test.ts",
+      "tests/stage1_mariadb_probe.test.ts",
+      "tests/stage1_redis_probe.test.ts",
+      "tests/stage1_schema_fingerprint.test.ts",
+      "tests/stage1fix_external_services_integration.test.ts",
+      "tests/stage2_end_to_end_integration.test.ts",
+      "tests/stage2fix_bootstrap_scope.test.ts"
+    ],
+    "native": [
+      "tests/native/nativeElectron.integration.test.ts"
+    ],
+    "unassigned": [
+      {
+        "file": "tests/stage1_command_runner.test.ts",
+        "reason": "Spawns real child processes via ChildProcessCommandRunner + writes to os.tmpdir(); pre-RESET topology excluded it from portable but never bound it to external or native. Follow-up: reclassify into a new 'shell-integration' bucket or move to portable if the tmpdir writes are safe under vitest's per-test isolation."
+      },
+      {
+        "file": "tests/stage1_supervisor_integration.test.ts",
+        "reason": "End-to-end service-supervisor integration that stubs out MariaDB/Redis but exercises the real ChildProcessCommandRunner + ServiceSupervisor state machine. Pre-RESET topology excluded it from portable but never bound it to external or native. Follow-up: same bucketing decision as stage1_command_runner."
+      },
+      {
+        "file": "tests/stage2fix_db_isolation.test.ts",
+        "reason": "Regression guard for the scratchDb.ts protected-database refusal path. Pre-RESET topology excluded it from portable but never bound it to external. The test USES createScratchDb/dropScratchDb which need MariaDB, so it belongs in external; follow-up will move it there once the topology reclassification lands."
+      }
+    ]
+  }
+}
