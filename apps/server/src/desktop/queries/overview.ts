@@ -152,7 +152,12 @@ async function countOpenPositions(): Promise<number | null> {
 
 async function countUnresolvedActions(): Promise<number> {
   try {
-    const rows = await db.execute(sql`SELECT COUNT(*) AS n FROM reconciliation_actions WHERE resolvedAt IS NULL`);
+    // Stage 3C-E.1.11 — reconciliation_actions (schema.ts:844) has no
+    // `resolvedAt` column; the authoritative backlog counter is
+    // `reconciliation_runs.intentsStillUnknown` on the most recent run
+    // (each run re-scans and rewrites the counter). This mirrors the
+    // aligned `getSafety` in domains.ts.
+    const rows = await db.execute(sql`SELECT intentsStillUnknown AS n FROM reconciliation_runs ORDER BY id DESC LIMIT 1`);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return Number((rows as any)?.[0]?.[0]?.n ?? (rows as any)?.[0]?.n ?? 0);
   } catch {
@@ -221,23 +226,58 @@ async function computeScannerReadiness(unresolvedActions: number, counters: Retu
 
 async function computeAccountingIntegrity(): Promise<OverviewPayload['accountingIntegrity']> {
   try {
-    const [attribution, brokenLineage, missingAttribution] = await Promise.all([
-      db.execute(sql`SELECT COALESCE(SUM(ABS(unexplainedAmount)), 0) AS s FROM cost_attribution`).catch(() => null),
-      db.execute(sql`SELECT COUNT(*) AS n FROM decision_chains WHERE accepted = 1 AND (championRoutingDecisionId IS NULL OR marketObservationId IS NULL)`).catch(() => null),
-      db.execute(sql`SELECT COUNT(*) AS n FROM positions WHERE status = 'closed' AND id NOT IN (SELECT positionId FROM forecast_vs_realized_attributions WHERE positionId IS NOT NULL)`).catch(() => null),
+    // Stage 3C-E.1.11 — three schema-drift bugs fixed here:
+    //   1. `cost_attribution` is NOT a table in the current schema
+    //      (only a report-kind enum value on desktop_export_jobs);
+    //      accountingDifference is therefore honestly null with a
+    //      dedicated reason code.
+    //   2. `decision_chains` (schema.ts:912) has no `accepted`,
+    //      `championRoutingDecisionId`, or `marketObservationId` columns.
+    //      The semantic intent — "how many accepted-lineage chains are
+    //      broken" — maps to `currentStatus` in the past-authorization
+    //      states (approved / order_pending / partially_filled /
+    //      position_open / position_closed / outcome_labeled) combined
+    //      with `lineageCompleteness = 'broken'`.
+    //   3. forecast_vs_realized_attributions (schema.ts:1211) has no
+    //      `positionId`; attribution links to positions via round_trips
+    //      (attribution.roundTripId → round_trips.id → positions.id).
+    //      The rewrite uses `NOT EXISTS` through that join.
+    // Stage 3C-E.1.11 — no per-query `.catch(() => null)`; a real
+    // schema fault surfaces via the outer try/catch as
+    // `accounting_probe_error`, rather than being silently reported as
+    // a zero backlog.
+    const [brokenLineage, missingAttribution] = await Promise.all([
+      db.execute(sql`
+        SELECT COUNT(*) AS n
+        FROM decision_chains
+        WHERE currentStatus IN ('approved','order_pending','partially_filled','position_open','position_closed','outcome_labeled')
+          AND lineageCompleteness = 'broken'
+      `),
+      db.execute(sql`
+        SELECT COUNT(*) AS n
+        FROM positions p
+        WHERE p.status = 'closed'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM round_trips rt
+            INNER JOIN forecast_vs_realized_attributions fvra ON fvra.roundTripId = rt.id
+            WHERE rt.positionId = p.id
+          )
+      `),
     ]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const diffRaw = (attribution as any)?.[0]?.[0]?.s ?? (attribution as any)?.[0]?.s ?? null;
-    const diff = diffRaw === null ? null : toDecimalStringNullable(diffRaw);
+    const broken = Number((brokenLineage as any)?.[0]?.[0]?.n ?? (brokenLineage as any)?.[0]?.n ?? 0);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const broken = brokenLineage === null ? null : Number((brokenLineage as any)?.[0]?.[0]?.n ?? (brokenLineage as any)?.[0]?.n ?? 0);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const missing = missingAttribution === null ? null : Number((missingAttribution as any)?.[0]?.[0]?.n ?? (missingAttribution as any)?.[0]?.n ?? 0);
+    const missing = Number((missingAttribution as any)?.[0]?.[0]?.n ?? (missingAttribution as any)?.[0]?.n ?? 0);
+    // accountingDifference stays null with a dedicated reason so the
+    // renderer can display "not tracked in this schema" honestly.
     return {
-      accountingDifference: diff,
+      accountingDifference: null,
       brokenAcceptedLineageCount: broken,
       missingMandatoryAttributionCount: missing,
-      reasonCode: diff === null && broken === null && missing === null ? 'accounting_probe_failed' : null,
+      // `accountingDifference` is null because the schema has no
+      // `cost_attribution` table; surface that as the honest reason.
+      reasonCode: 'cost_attribution_table_not_present',
     };
   } catch {
     return { accountingDifference: null, brokenAcceptedLineageCount: null, missingMandatoryAttributionCount: null, reasonCode: 'accounting_probe_error' };
@@ -246,7 +286,27 @@ async function computeAccountingIntegrity(): Promise<OverviewPayload['accounting
 
 async function computeUnprotectedExposure(): Promise<string | null> {
   try {
-    const rows = await db.execute(sql`SELECT COALESCE(SUM(GREATEST(0, requiredQuantity - COALESCE(confirmedQuantity, 0)) * COALESCE((SELECT weightedAvgEntryPrice FROM positions WHERE id = protection_instances.positionId), 0)), 0) AS s FROM protection_instances WHERE state IN ('pending','partial','degraded','unprotected')`);
+    // Stage 3C-E.1.11 — SELECT realigned to the real schema.
+    // protection_instances (schema.ts:1376) uses `requiredBaseQuantity`
+    // / `confirmedBaseQuantity` (never `requiredQuantity` /
+    // `confirmedQuantity`); the state enum's non-terminal-non-confirmed
+    // values are `required`, `pending`, `partially_confirmed`,
+    // `missing`, `degraded`, `inconsistent` (the previous filter's
+    // `partial` / `unprotected` are not schema values). positions
+    // (schema.ts:248) stores the entry price in `avgEntryPrice`
+    // (never `weightedAvgEntryPrice`). The economic definition
+    // (uncovered base quantity multiplied by entry price) is preserved.
+    const rows = await db.execute(sql`
+      SELECT COALESCE(
+        SUM(
+          GREATEST(0, requiredBaseQuantity - COALESCE(confirmedBaseQuantity, 0))
+          * COALESCE((SELECT avgEntryPrice FROM positions WHERE id = protection_instances.positionId), 0)
+        ),
+        0
+      ) AS s
+      FROM protection_instances
+      WHERE state IN ('required','pending','partially_confirmed','missing','degraded','inconsistent')
+    `);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const raw = (rows as any)?.[0]?.[0]?.s ?? (rows as any)?.[0]?.s ?? null;
     return raw === null ? null : toDecimalStringNullable(raw);
