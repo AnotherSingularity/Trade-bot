@@ -25,10 +25,6 @@
  * sent `installationId: null`) and PASSES after the normalization.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { createServer as createNetServer } from 'node:net';
-import { readdirSync, readFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createConnection, type RowDataPacket } from 'mysql2/promise';
 import IORedis from 'ioredis';
@@ -36,7 +32,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AuthenticatedApiClient } from '../../src/main/authenticatedApiClient';
 import { DesktopAuthManager } from '../../src/main/desktopAuthManager';
 import type { AuthTokenStorage } from '../../src/main/secureStorage';
-import { createScratchDb, dropScratchDb, makeScratchDbName, scratchDbUrl } from '../lib/scratchDb';
+import {
+  authSeamOutcomeToShortReason,
+  startAuthSeamServer,
+  stopAuthSeamServer,
+  type AuthSeamServerHandle,
+} from '../lib/authSeamServer';
 
 // -------------------------------------------------------------------------
 // Fixed inputs (matches electronHarness.ts credentials so this seam
@@ -49,6 +50,7 @@ const MARIADB_ROOT = { host: '127.0.0.1', port: 3306, user: 'root', password: 'p
 const REDIS_URL = 'redis://127.0.0.1:6379';
 const ADMIN_USER = 'nativeoperator';
 const ADMIN_PASSWORD = 'Native-3C-passphrase-!';
+const LOGS_BASE_DIR = join(__dirname, 'logs');
 
 // -------------------------------------------------------------------------
 // In-memory AuthTokenStorage — permitted in tests per secureStorage.ts
@@ -63,18 +65,16 @@ class InMemoryAuthTokenStorage implements AuthTokenStorage {
 }
 
 // -------------------------------------------------------------------------
-// Isolation
+// Isolation — the server + scratch DB + Redis namespace lifecycle is
+// owned by apps/desktop/tests/lib/authSeamServer.ts (Checkpoint A.2).
+// This test file only owns the OPERATOR-scope assertions.
 // -------------------------------------------------------------------------
 
 let servicesAvailable = false;
-let dbName: string | undefined;
-let dbUrl: string | undefined;
-let redisNamespace: string | undefined;
-let serverProc: ChildProcess | undefined;
-let serverPort: number | undefined;
+let serverHandle: AuthSeamServerHandle | undefined;
 let serverBaseUrl: string | undefined;
 let bootstrapToken: string | undefined;
-let logsDir: string | undefined;
+let dbUrl: string | undefined;
 
 async function externalServicesAvailable(): Promise<boolean> {
   try {
@@ -89,58 +89,6 @@ async function externalServicesAvailable(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-async function applyMigrations(url: string): Promise<void> {
-  const c = await createConnection({ uri: url });
-  try {
-    const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
-    for (const f of files) {
-      const sql = readFileSync(join(MIGRATIONS_DIR, f), 'utf-8')
-        .replace(/-->\s*statement-breakpoint/g, '')
-        .split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
-      for (const stmt of sql.split(';').map((s) => s.trim()).filter((s) => s.length > 0)) {
-        await c.query(stmt);
-      }
-    }
-  } finally {
-    await c.end();
-  }
-}
-
-async function pickFreePort(): Promise<number> {
-  return await new Promise((res, rej) => {
-    const s = createNetServer();
-    s.listen(0, '127.0.0.1', () => {
-      const addr = s.address();
-      s.close(() => {
-        if (typeof addr === 'object' && addr) res(addr.port);
-        else rej(new Error('no address'));
-      });
-    });
-    s.on('error', rej);
-  });
-}
-
-async function waitForReadiness(baseUrl: string, token: string, deadlineMs = 60_000): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < deadlineMs) {
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 2_500);
-      const res = await fetch(`${baseUrl}/api/system/readiness`, {
-        signal: ctrl.signal,
-        headers: { 'x-horizon-bootstrap-token': token },
-      });
-      clearTimeout(t);
-      if (res.ok) {
-        const body = await res.json() as { ready?: boolean };
-        if (body?.ready) return true;
-      }
-    } catch { /* retry */ }
-    await new Promise((r) => setTimeout(r, 400));
-  }
-  return false;
 }
 
 async function ensureLocalOperator(baseUrl: string, token: string): Promise<void> {
@@ -162,76 +110,46 @@ async function ensureLocalOperator(baseUrl: string, token: string): Promise<void
 beforeAll(async () => {
   servicesAvailable = await externalServicesAvailable();
   if (!servicesAvailable) return;
-  dbName = makeScratchDbName('authseam');
-  await createScratchDb(dbName);
-  dbUrl = scratchDbUrl(dbName);
-  await applyMigrations(dbUrl);
-  redisNamespace = `authseam_${process.pid}_${randomBytes(3).toString('hex')}`;
-  serverPort = await pickFreePort();
-  bootstrapToken = randomBytes(32).toString('hex');
-  logsDir = join(__dirname, 'logs', `authseam_${redisNamespace}`);
-  mkdirSync(logsDir, { recursive: true });
-  serverProc = spawn('npx', ['tsx', 'src/index.ts'], {
-    cwd: SERVER_CWD,
-    env: {
-      ...process.env,
-      NODE_ENV: 'test',
-      PORT: String(serverPort),
-      DATABASE_URL: dbUrl,
-      REDIS_URL,
-      JWT_SECRET: 'stage3c-ci-reset-authseam-secret-please-change',
-      DRY_RUN: 'true',
-      ORDER_SUBMISSION_ENABLED: 'false',
-      CORS_ORIGINS: '*',
-      HORIZON_BOOTSTRAP_TOKEN: bootstrapToken,
-      HORIZON_REDIS_NAMESPACE: redisNamespace,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  // Stage 3C-CI-RESET §1.3: DRAIN THE PIPES IMMEDIATELY.
-  // A `pipe` stdio without a consumer fills the OS pipe buffer and
-  // deadlocks the child once the buffer hits its limit (~64KB on
-  // Linux). Every child line is teed into a per-run log so a
-  // subsequent failure has evidence. Redaction is applied at write.
-  const serverLogPath = join(logsDir!, 'server.live.log');
-  const drain = (kind: 'stdout' | 'stderr', chunk: Buffer): void => {
-    try {
-      const sanitized = String(chunk)
-        .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer <REDACTED>')
-        .replace(/[A-Fa-f0-9]{32,}/g, '<HEX_REDACTED>')
-        .slice(0, 65_536);
-      appendFileSync(serverLogPath, `[${kind}] ${sanitized}`);
-    } catch { /* best-effort */ }
-  };
-  serverProc.stdout?.on('data', (c) => drain('stdout', c));
-  serverProc.stderr?.on('data', (c) => drain('stderr', c));
-  serverBaseUrl = `http://127.0.0.1:${serverPort}`;
-  const ready = await waitForReadiness(serverBaseUrl, bootstrapToken, 60_000);
-  if (!ready) throw new Error('authseam_server_readiness_timeout');
-  await ensureLocalOperator(serverBaseUrl, bootstrapToken);
+  // Wrap boot in try/catch so teardown ALWAYS runs on failure —
+  // Checkpoint A.2 fixed the pre-RESET behaviour where a
+  // beforeAll throw left the scratch DB + Redis namespace + child
+  // process behind.
+  try {
+    serverHandle = await startAuthSeamServer({
+      serverCwd: SERVER_CWD,
+      migrationsDir: MIGRATIONS_DIR,
+      logsBaseDir: LOGS_BASE_DIR,
+      redisUrl: REDIS_URL,
+      deadlineMs: 60_000,
+      pollIntervalMs: 400,
+      perProbeTimeoutMs: 2_500,
+    });
+    const outcome = serverHandle.readinessOutcome;
+    if (outcome == null || outcome.kind !== 'ready') {
+      // Compose the exact classification tag PLUS a bounded slice
+      // of the child's stderr so a CI failure has evidence
+      // pointing at the actual server-side cause.
+      const tag = outcome ? authSeamOutcomeToShortReason(outcome) : 'authseam_no_outcome';
+      const tail = serverHandle.stderrTail().slice(-1_024);
+      throw new Error(`${tag}\n---stderr(last 1KB)---\n${tail}`);
+    }
+    serverBaseUrl = serverHandle.baseUrl ?? undefined;
+    bootstrapToken = serverHandle.bootstrapToken ?? undefined;
+    dbUrl = serverHandle.dbUrl ?? undefined;
+    await ensureLocalOperator(serverBaseUrl!, bootstrapToken!);
+  } catch (e) {
+    // Fail-closed teardown: SIGTERM the child, drop the scratch DB,
+    // clear the Redis namespace. Any of these can be a no-op if
+    // startAuthSeamServer failed BEFORE it created that resource.
+    try { await stopAuthSeamServer(serverHandle); } catch { /* ignore */ }
+    serverHandle = undefined;
+    throw e;
+  }
 }, 180_000);
 
 afterAll(async () => {
-  if (serverProc && serverProc.exitCode == null) {
-    serverProc.kill('SIGTERM');
-    const deadline = Date.now() + 8_000;
-    while (Date.now() < deadline && serverProc.exitCode == null) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    if (serverProc.exitCode == null) serverProc.kill('SIGKILL');
-  }
-  if (dbName) {
-    try { await dropScratchDb(dbName); } catch { /* ignore */ }
-  }
-  if (redisNamespace) {
-    try {
-      const r = new IORedis(REDIS_URL, { lazyConnect: true });
-      await r.connect();
-      const keys = await r.keys(`${redisNamespace}:*`);
-      if (keys.length > 0) await r.del(...keys);
-      await r.quit();
-    } catch { /* ignore */ }
-  }
+  await stopAuthSeamServer(serverHandle);
+  serverHandle = undefined;
 }, 60_000);
 
 // -------------------------------------------------------------------------
