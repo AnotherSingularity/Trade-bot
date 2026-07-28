@@ -27,22 +27,21 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod';
 import * as ts from 'typescript';
 import { buildOperatorLoginBody } from '../../src/main/operatorLoginBody';
+// Stage 3C-CI-RESET §2: import the AUTHORITATIVE server schema from
+// @horizon/shared instead of maintaining a "byte-identical" local
+// copy. A copied schema does not detect drift — the audit called this
+// out as one of the two regressions that shipped past local tests.
+// The shared module is the single source of truth for server + desktop
+// + tests.
+import { OperatorLoginRequestSchema } from '@horizon/shared';
 
-// Byte-identical copy of the server's login body schema from
-// apps/server/src/routes/auth.ts (loginBody). Duplicated here — not
-// imported — so the desktop portable suite has no cross-workspace
-// import and this test is portable. A drift between the two schemas
-// is the exact class of defect this suite is designed to detect;
-// keep them byte-identical.
-const SERVER_LOGIN_BODY_SCHEMA = z.object({
-  username: z.string().min(1).max(64),
-  password: z.string().min(1).max(256),
-  installationId: z.union([z.number().int(), z.string().max(64)]).optional(),
-  clientVersion: z.string().max(64).optional(),
-});
+// Stage 3C-CI-RESET §2: the schema is the SAME object the server
+// route imports (packages/shared/src/operatorAuth.ts). This test
+// therefore actually detects drift; any server-side change trips
+// this file at build time.
+const SERVER_LOGIN_BODY_SCHEMA = OperatorLoginRequestSchema;
 
 const USER = 'nativeoperator';
 const PASS = 'Native-3C-passphrase-!';

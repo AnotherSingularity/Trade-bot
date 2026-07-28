@@ -18,7 +18,6 @@
  */
 
 import { Router, type Request, type Response } from 'express';
-import { z } from 'zod';
 import * as accounts from '../auth/accounts';
 import * as sessions from '../auth/sessions';
 import * as limits from '../auth/loginLimits';
@@ -26,6 +25,16 @@ import { recordAuthEvent } from '../auth/events';
 import { requireOperatorSession } from '../middleware/operatorSession';
 import { requireBootstrapAuthorization } from '../middleware/bootstrapAuth';
 import type { LocalOperatorAccountRow } from '../db/schema';
+// Stage 3C-CI-RESET §2: shared operator-auth HTTP contract. Server
+// routes MUST import the schemas from @horizon/shared so a server-side
+// change is guaranteed to trip every downstream consumer (desktop main,
+// IPC, tests). No local duplication permitted for these schemas.
+import {
+  OperatorSetupRequestSchema,
+  OperatorLoginRequestSchema,
+  OperatorRefreshRequestSchema,
+  OperatorChangePasswordRequestSchema,
+} from '@horizon/shared';
 
 function sanitizeAccount(a: LocalOperatorAccountRow) {
   return {
@@ -48,28 +57,15 @@ function issuedPairToDto(pair: sessions.IssuedTokenPair) {
   };
 }
 
-const setupBody = z.object({
-  username: z.string().min(1).max(64),
-  password: z.string().min(1).max(256),
-  passwordConfirmation: z.string().min(1).max(256),
-});
-
-const loginBody = z.object({
-  username: z.string().min(1).max(64),
-  password: z.string().min(1).max(256),
-  installationId: z.union([z.number().int(), z.string().max(64)]).optional(),
-  clientVersion: z.string().max(64).optional(),
-});
-
-const refreshBody = z.object({
-  refreshToken: z.string().min(1).max(256),
-});
-
-const changePasswordBody = z.object({
-  currentPassword: z.string().min(1).max(256),
-  newPassword: z.string().min(1).max(256),
-  newPasswordConfirmation: z.string().min(1).max(256),
-});
+// Stage 3C-CI-RESET §2: shared schema aliases. The four constants
+// below are the ONLY names by which the route handlers reference
+// these schemas — the identifiers exist to keep the handler code
+// unchanged, but the shape is authoritatively defined in
+// packages/shared/src/operatorAuth.ts.
+const setupBody = OperatorSetupRequestSchema;
+const loginBody = OperatorLoginRequestSchema;
+const refreshBody = OperatorRefreshRequestSchema;
+const changePasswordBody = OperatorChangePasswordRequestSchema;
 
 export function operatorAuthRouter(): Router {
   const router = Router();

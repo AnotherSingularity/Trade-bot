@@ -13,7 +13,7 @@
  *   real server (`apps/server/src/index.ts`) →
  *   real AuthenticatedApiClient → real DesktopAuthManager →
  *   HTTP POST /api/operator-auth/login →
- *   real operator_sessions row.
+ *   real operator_auth_sessions row.
  *
  * NOT a mocked-fetch test. NOT an Electron test — no Playwright, no
  * Xvfb, no renderer. That means it can run alongside protection-seed-regression
@@ -28,9 +28,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { createServer as createNetServer } from 'node:net';
-import { readdirSync, readFileSync, mkdirSync } from 'node:fs';
+import { readdirSync, readFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createConnection } from 'mysql2/promise';
+import { createConnection, type RowDataPacket } from 'mysql2/promise';
 import IORedis from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AuthenticatedApiClient } from '../../src/main/authenticatedApiClient';
@@ -179,7 +179,7 @@ beforeAll(async () => {
       PORT: String(serverPort),
       DATABASE_URL: dbUrl,
       REDIS_URL,
-      JWT_SECRET: 'stage3c-ci-fix10a-authseam-secret-please-change',
+      JWT_SECRET: 'stage3c-ci-reset-authseam-secret-please-change',
       DRY_RUN: 'true',
       ORDER_SUBMISSION_ENABLED: 'false',
       CORS_ORIGINS: '*',
@@ -188,6 +188,23 @@ beforeAll(async () => {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  // Stage 3C-CI-RESET §1.3: DRAIN THE PIPES IMMEDIATELY.
+  // A `pipe` stdio without a consumer fills the OS pipe buffer and
+  // deadlocks the child once the buffer hits its limit (~64KB on
+  // Linux). Every child line is teed into a per-run log so a
+  // subsequent failure has evidence. Redaction is applied at write.
+  const serverLogPath = join(logsDir!, 'server.live.log');
+  const drain = (kind: 'stdout' | 'stderr', chunk: Buffer): void => {
+    try {
+      const sanitized = String(chunk)
+        .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer <REDACTED>')
+        .replace(/[A-Fa-f0-9]{32,}/g, '<HEX_REDACTED>')
+        .slice(0, 65_536);
+      appendFileSync(serverLogPath, `[${kind}] ${sanitized}`);
+    } catch { /* best-effort */ }
+  };
+  serverProc.stdout?.on('data', (c) => drain('stdout', c));
+  serverProc.stderr?.on('data', (c) => drain('stderr', c));
   serverBaseUrl = `http://127.0.0.1:${serverPort}`;
   const ready = await waitForReadiness(serverBaseUrl, bootstrapToken, 60_000);
   if (!ready) throw new Error('authseam_server_readiness_timeout');
@@ -291,21 +308,23 @@ describe.sequential('Stage 3C-CI-FIX10A §4 — desktop→server auth seam (inst
     expect(state.failureReason).toBeNull();
   });
 
-  it('S3: a session row was persisted to operator_sessions (real DB verification)', async () => {
-    // Every successful login creates a row in operator_sessions with
+  it('S3: a session row was persisted to operator_auth_sessions (real DB verification)', async () => {
+    // Every successful login creates a row in operator_auth_sessions with
     // the account we set up. Because the pre-FIX10A body was rejected
     // at Zod parse (before session creation), a green count here is
     // a positive proof of the FIX.
+    // Stage 3C-CI-RESET §1.2: mysql2 RowDataPacket typing so the
+    // COUNT(*) column type is checked and no `any` cast is needed.
+    interface CountRow extends RowDataPacket { n: number }
     const c = await createConnection({ uri: dbUrl });
     try {
-      const [rows] = await c.query(
-        `SELECT COUNT(*) AS n FROM operator_sessions os
+      const [rows] = await c.query<CountRow[]>(
+        `SELECT COUNT(*) AS n FROM operator_auth_sessions os
            JOIN local_operator_accounts a ON a.id = os.accountId
          WHERE a.username = ?`,
         [ADMIN_USER],
       );
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const n = Number((rows as any)[0]?.n ?? 0);
+      const n = Number(rows[0]?.n ?? 0);
       // S1 + S2 each created one session.
       expect(n).toBeGreaterThanOrEqual(2);
     } finally {

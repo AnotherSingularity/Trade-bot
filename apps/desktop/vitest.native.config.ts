@@ -13,7 +13,17 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['tests/native/**/*.test.ts'],
+    // Stage 3C-CI-RESET §3.3 — EXPLICIT native certification inventory.
+    // No broad glob. The audit identified that a broad
+    // `tests/native/**/*.test.ts` include silently altered
+    // certification counts every time a new test file appeared and
+    // let auth seam + protection-seed regression run twice under
+    // different configs. This file lists only the native Electron
+    // journey. protectionSeedRegression + auth_seam_login_body run
+    // under vitest.external.config.ts, exactly once each.
+    include: [
+      'tests/native/nativeElectron.integration.test.ts',
+    ],
     environment: 'node',
     globals: true,
     // Playwright + Electron + real server bootstrap dominates the

@@ -1,6 +1,13 @@
 /**
  * Stage 3C-CI-FIX10A §1 — operator-login request body builder.
  *
+ * Stage 3C-CI-RESET §2 note: the OUTPUT type is now compatible with
+ * `OperatorLoginRequest` (defined authoritatively in
+ * packages/shared/src/operatorAuth.ts). The helper still returns a
+ * local readonly view because it enforces field-omission semantics
+ * that Zod's optional/nullable expression cannot capture; the shared
+ * schema is used to validate the result at the HTTP boundary.
+ *
  * The server's login Zod schema (apps/server/src/routes/auth.ts:57-62)
  * declares:
  *

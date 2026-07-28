@@ -3,6 +3,19 @@ import {
   DesktopDataRequestSchema,
   desktopDataEnvelope,
   type DesktopDataRequestKey,
+  // Stage 3C-CI-RESET §2 — one shared operator-auth contract.
+  // The IPC layer re-exports these under legacy names for backward
+  // compatibility with existing importers (renderer + main + tests).
+  OperatorSetupRequestSchema as SharedOperatorSetupRequestSchema,
+  OperatorLoginRequestSchema as SharedOperatorLoginRequestSchema,
+  OperatorChangePasswordRequestSchema as SharedOperatorChangePasswordRequestSchema,
+  OperatorEmptyRequestSchema as SharedOperatorEmptyRequestSchema,
+  AuthOperationResponseSchema as SharedAuthOperationResponseSchema,
+  SanitizedAuthStateSchema as SharedSanitizedAuthStateSchema,
+  OPERATOR_AUTH_PHASES as SHARED_OPERATOR_AUTH_PHASES,
+  type SanitizedAuthState as SharedSanitizedAuthState,
+  type AuthOperationResponse as SharedAuthOperationResponse,
+  type OperatorAuthPhase as SharedOperatorAuthPhase,
 } from '@horizon/shared';
 
 /**
@@ -254,55 +267,35 @@ export type AppVersionResponse = z.infer<typeof AppVersionResponseSchema>;
 // before being sent over the IPC bridge.
 // ---------------------------------------------------------------------------
 
-export const OPERATOR_AUTH_PHASES = [
-  'setup_required',      // no operator account exists
-  'unauthenticated',     // account exists; no active session
-  'authenticated',       // active access token
-  'locked',              // operator invoked lock — must re-enter credential
-  'session_expired',     // access token past absolute TTL
-  'session_revoked',     // family revoked (refresh reuse, revoke-all)
-  'account_locked',      // account status = locked (bad-login or admin)
-  'password_change_required',
-  'bootstrap_unavailable', // main process cannot reach server yet
-] as const;
-export type OperatorAuthPhase = (typeof OPERATOR_AUTH_PHASES)[number];
+// Stage 3C-CI-RESET §2: single source of truth is
+// packages/shared/src/operatorAuth.ts. IPC layer re-exports so
+// existing importers do not require path changes. Any drift now
+// becomes a compile-time error, not a silent field-name typo.
+export const OPERATOR_AUTH_PHASES = SHARED_OPERATOR_AUTH_PHASES;
+export type OperatorAuthPhase = SharedOperatorAuthPhase;
 
-export const SanitizedAuthStateSchema = z.object({
-  phase: z.enum(OPERATOR_AUTH_PHASES),
-  username: z.string().nullable(),
-  passwordChangedAt: z.string().nullable(),
-  accessExpiresAt: z.string().nullable(),
-  absoluteExpiresAt: z.string().nullable(),
-  lastActivityAt: z.string().nullable(),
-  failureReason: z.string().nullable(),
-}).strict();
-export type SanitizedAuthState = z.infer<typeof SanitizedAuthStateSchema>;
+export const SanitizedAuthStateSchema = SharedSanitizedAuthStateSchema;
+export type SanitizedAuthState = SharedSanitizedAuthState;
 
-export const AuthEmptyRequestSchema = z.object({}).strict();
-
-export const AuthSetupRequestSchema = z.object({
-  username: z.string().min(1).max(64),
-  password: z.string().min(1).max(256),
-  passwordConfirmation: z.string().min(1).max(256),
-}).strict();
-
+export const AuthEmptyRequestSchema = SharedOperatorEmptyRequestSchema;
+export const AuthSetupRequestSchema = SharedOperatorSetupRequestSchema;
+// FIX10A: the IPC layer's own login schema only enforces the fields
+// the renderer supplies (username, password). installationId +
+// clientVersion are added by the main process from its own state via
+// buildOperatorLoginBody — the renderer NEVER supplies them. The
+// wire-level shape is validated on the server against the wider
+// SharedOperatorLoginRequestSchema.
 export const AuthLoginRequestSchema = z.object({
   username: z.string().min(1).max(64),
   password: z.string().min(1).max(256),
 }).strict();
+export const AuthChangePasswordRequestSchema = SharedOperatorChangePasswordRequestSchema;
+export const AuthOperationResponseSchema = SharedAuthOperationResponseSchema;
+export type AuthOperationResponse = SharedAuthOperationResponse;
 
-export const AuthChangePasswordRequestSchema = z.object({
-  currentPassword: z.string().min(1).max(256),
-  newPassword: z.string().min(1).max(256),
-  newPasswordConfirmation: z.string().min(1).max(256),
-}).strict();
-
-export const AuthOperationResponseSchema = z.object({
-  ok: z.boolean(),
-  state: SanitizedAuthStateSchema,
-  reason: z.string().nullable(),
-}).strict();
-export type AuthOperationResponse = z.infer<typeof AuthOperationResponseSchema>;
+// Wire-level login schema (main → server). Re-exported for
+// AuthenticatedApiClient's outbound-body validation.
+export { SharedOperatorLoginRequestSchema as OperatorLoginWireRequestSchema };
 
 // ---------------------------------------------------------------------------
 // Stage 3 §5 — desktop-data channel schema.

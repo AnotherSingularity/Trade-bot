@@ -818,32 +818,76 @@ afterAll(async () => {
   diagnosticsTrace?.record('shutdown_started', 'started', {});
   diagnosticsStatus?.setPhase('shutdown_started');
   captureProcessTree(join(WORKFLOW_LOGS_DIR, 'process-tree-before-teardown.txt'));
-  let teardownOk = true;
+  // Stage 3C-CI-RESET §5.1 — typed TeardownResult. cleanup is
+  // successful ONLY when every mandatory step succeeded. The pre-RESET
+  // path caught the outer timeout and set teardownOk=false but
+  // otherwise treated every step as best-effort.
+  let teardownResult: import('./electronHarness').TeardownResult | undefined;
   if (iso) {
     try {
-      // Bounded overall teardown — the per-step timers inside teardown
-      // itself cap Electron close + server kill; this outer race is a
-      // final safety net.
-      await Promise.race([
+      teardownResult = await Promise.race([
         teardown(iso, server, launch),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('native_startup_timeout:teardown')), 55_000)),
+        new Promise<never>((_, reject) => setTimeout(
+          () => reject(new Error('native_startup_timeout:teardown')), 55_000)),
       ]);
     } catch (e) {
-      teardownOk = false;
-      diagnosticsTrace?.record('cleanup_complete', 'failed', { error: sanitizeDiagnosticMessage(e instanceof Error ? e.message : String(e)) });
+      const err = sanitizeDiagnosticMessage(e instanceof Error ? e.message : String(e));
+      diagnosticsTrace?.record('cleanup_complete', 'failed', { error: err });
+      teardownResult = {
+        electronClose: { ok: false, error: `teardown_timeout: ${err}` },
+        serverStop: { ok: false, error: `teardown_timeout: ${err}` },
+        redisCleanup: { ok: false, error: `teardown_timeout: ${err}` },
+        databaseDrop: { ok: false, error: `teardown_timeout: ${err}` },
+        completed: false,
+      };
     }
   }
   captureProcessTree(join(WORKFLOW_LOGS_DIR, 'process-tree-after-teardown.txt'));
-  diagnosticsTrace?.record('process_leak_check_complete', 'completed', {});
-  diagnosticsTrace?.record('cleanup_complete', teardownOk ? 'completed' : 'failed', {});
+
+  // Stage 3C-CI-RESET §5.2 — ACTUALLY invoke checkProcessLeak.
+  // The pre-RESET code called `void checkProcessLeak;` (a no-op
+  // expression that discards the function reference) and then wrote
+  // `processLeakResult: { ok: true, survivors: [] }` into the
+  // evidence bundle regardless. This is fabricated evidence per the
+  // audit §P0.2. RESET actually calls the checker and persists its
+  // real result.
+  let processLeakResult: import('./electronHarness').ProcessLeakResult;
+  try {
+    processLeakResult = checkProcessLeak(server, launch);
+  } catch (e) {
+    // §5.2 fail-closed: enumeration failure is NOT ok=true.
+    processLeakResult = {
+      ok: false,
+      survivors: [{ pid: -1, comm: 'enumeration_failed', role: String(e).slice(0, 120) }],
+    };
+  }
+  try {
+    for (const dir of [WORKFLOW_LOGS_DIR, iso?.logsDir].filter(Boolean) as string[]) {
+      writeFileSync(join(dir, 'process-leak-result.json'), JSON.stringify(processLeakResult, null, 2));
+    }
+  } catch { /* best-effort */ }
+  diagnosticsTrace?.record('process_leak_check_complete',
+    processLeakResult.ok ? 'completed' : 'failed',
+    { survivors: processLeakResult.survivors.length });
+
+  const teardownOk = teardownResult?.completed ?? false;
+  diagnosticsTrace?.record('cleanup_complete', teardownOk ? 'completed' : 'failed',
+    teardownResult
+      ? {
+          electronClose: teardownResult.electronClose.ok,
+          serverStop: teardownResult.serverStop.ok,
+          redisCleanup: teardownResult.redisCleanup.ok,
+          databaseDrop: teardownResult.databaseDrop.ok,
+        }
+      : { reason: 'no_isolation' });
   diagnosticsStatus?.setPhase('cleanup_complete');
-  // Stage 3C-CI-FIX7 §D1: independent flags for each stage.
-  // cleanupComplete flips true when teardown ran (regardless of
-  // whether the run itself succeeded — a failed run should still
-  // show cleanupComplete=true when cleanup itself finished). The
-  // guarded markCompleted() flips `completed:true` only when startup
-  // + assertions + cleanup all succeeded AND no failure recorded.
-  if (teardownOk) diagnosticsStatus?.markCleanupComplete();
+  // §5.3 semantics: cleanupComplete flips true ONLY when the typed
+  // teardown reports completed=true AND the real leak check passed.
+  // The pre-RESET code flipped it true whenever no exception fired,
+  // silently accepting swallowed per-step failures.
+  if (teardownOk && processLeakResult.ok) {
+    diagnosticsStatus?.markCleanupComplete();
+  }
   diagnosticsStatus?.markCompleted();
 }, 60_000);
 
@@ -1423,18 +1467,36 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
     expect(frame).toMatch(/data-state="(api_failure|unavailable|contract_mismatch)"/);
   });
 
-  // §12.43 Contract mismatch blocks rendering. Difficult to induce
-  // without modifying server code; verified structurally: the
-  // renderer's contract_mismatch code path is present in the bundle.
-  it('T43: contract_mismatch is a first-class rendered state (present in the bundle)', async () => {
-    const hasContractMismatch = await launch!.page.evaluate(() => {
-      // The renderer bundle includes the 'Contract mismatch' banner string
-      // in StateFrame; searching the loaded DOM after navigating.
-      return document.body.innerHTML.indexOf('contract_mismatch') >= 0
-        || document.body.innerHTML.indexOf('Contract mismatch') >= 0
-        || /* fallback: state-frame test hooks */ true;
-    });
-    expect(hasContractMismatch).toBe(true);
+  // §12.43 Contract mismatch is a rendered state, verified STRUCTURALLY
+  // against the built renderer bundle.
+  //
+  // Stage 3C-CI-RESET §6.T43: the pre-RESET assertion was
+  //   ... || document.body.innerHTML.indexOf('...') >= 0 || true
+  // whose `|| true` clause made the test structurally incapable of
+  // failing (audit §P0.5). RESET replaces it with a real structural
+  // check against the built renderer bundle: the `contract_mismatch`
+  // string MUST appear in the shipped JavaScript, proving the code
+  // path exists. Inducing an actual contract_mismatch at runtime
+  // requires a controlled server fixture that ships a mis-shaped
+  // response; that induction is scheduled for the follow-up commit
+  // that carries the shared-schema-aware AuthenticatedApiClient
+  // validation. The runtime induction test will replace this
+  // structural check; until then the structural assertion is honest
+  // proof-of-existence, not runtime proof-of-behaviour.
+  it('T43: contract_mismatch code path exists in the shipped renderer bundle (structural)', () => {
+    const { readdirSync, readFileSync } = require('node:fs') as typeof import('node:fs');
+    const rendererDist = require('node:path').resolve(__dirname, '..', '..', 'dist/renderer/assets');
+    const jsFiles = readdirSync(rendererDist).filter((f: string) => f.endsWith('.js'));
+    expect(jsFiles.length, 'no renderer JS bundle found in dist/renderer/assets').toBeGreaterThan(0);
+    let found = false;
+    for (const f of jsFiles) {
+      const src = readFileSync(`${rendererDist}/${f}`, 'utf8');
+      if (src.includes('contract_mismatch') || src.includes('Contract mismatch')) {
+        found = true;
+        break;
+      }
+    }
+    expect(found, 'renderer bundle does not contain the contract_mismatch state').toBe(true);
   });
 
   // §12.44 Renderer has no Node access.
@@ -1571,13 +1633,42 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
       schemaFingerprintResult: 'skipped_external_harness',
       seedSummary,
       seedCoverageComplete: true,
+      // Stage 3C-CI-RESET §P0.1 partial: screenMatrix is DERIVED from
+      // the actual `passedScreens` set the manifest loop populates.
+      // The pre-RESET code mapped NAV_ROUTES with passed:true for
+      // every entry — a success-shaped document written from
+      // expectations, not execution. The full ledger implementation
+      // (§4) that also derives per-scenario state is deferred to a
+      // follow-up commit; this fix at least ensures per-screen
+      // `passed` reflects whether the T-manifest loop marked it.
       screenMatrix: NAV_ROUTES.map((r) => ({
-        key: r.key, hash: r.hash, state: 'exercised', passed: true,
+        key: r.key,
+        hash: r.hash,
+        state: passedScreens.has(r.key) ? 'passed' : 'not_recorded_pending_ledger',
+        passed: passedScreens.has(r.key),
       })),
-      assertionResults: { total: 55, passed: 55, failed: 0, skipped: 0 },
+      // §P0.1 partial: assertionResults derived by the reporter is a
+      // full §4 (execution ledger) responsibility. Marked pending
+      // rather than carrying the stale 55/55 literal.
+      assertionResults: {
+        total: null,
+        passed: null,
+        failed: null,
+        skipped: null,
+        derivation: 'pending_reporter_hook_in_follow_up_commit',
+      } as unknown as EvidenceBundle['assertionResults'],
       rendererSecurityResult: rendererGuardrails,
       shutdownResult: { closed: false, detail: 'shutdown_deferred_to_afterAll' },
-      processLeakResult: { ok: true, survivors: [] },
+      // §P0.2 partial: real leak check runs in afterAll AFTER teardown
+      // and persists process-leak-result.json into the run's logs dir.
+      // T-evidence runs BEFORE afterAll, so at this point the check
+      // has not executed. Marking pending here is more honest than
+      // hardcoding ok:true. The final evidence.json rewrite (§4) will
+      // consolidate this after teardown.
+      processLeakResult: {
+        ok: false,
+        survivors: [{ pid: -1, comm: 'pending_afterall_leak_check', role: 'evidence_written_before_teardown' }],
+      },
       createOrderCounters: counters,
       safeFlags: {
         DRY_RUN: true,

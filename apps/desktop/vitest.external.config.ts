@@ -28,6 +28,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Stage 3C-CI-RESET §3.2 — external declared inventory (each
+    // file appears exactly once across the three vitest configs).
     include: [
       'tests/stage1_schema_fingerprint.test.ts',
       'tests/stage1_mariadb_probe.test.ts',
@@ -36,6 +38,10 @@ export default defineConfig({
       'tests/stage2_end_to_end_integration.test.ts',
       'tests/stage2fix_bootstrap_scope.test.ts',
       'tests/native/protectionSeedRegression.test.ts',
+      // §1.4: the auth seam is a real external preflight — not the
+      // Electron certification journey. It goes here (external), NOT
+      // in vitest.native.config.ts. Discovered exactly once.
+      'tests/native/auth_seam_login_body.integration.test.ts',
     ],
     exclude: ['node_modules/**', 'dist/**'],
     globals: true,

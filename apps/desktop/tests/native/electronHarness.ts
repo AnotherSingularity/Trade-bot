@@ -562,16 +562,55 @@ export function writeSanitizedLog(iso: NativeIsolation, name: string, raw: strin
 }
 
 // ---------------------------------------------------------------------------
-// Teardown (extended: writes sanitized logs + process-leak check result)
+// Teardown (Stage 3C-CI-RESET §5.1 — typed per-step outcome).
+//
+// The pre-RESET teardown swallowed every failure into a log file
+// and returned void; the caller flipped teardownOk=true and could
+// mark cleanup complete even when Electron close, server kill,
+// Redis cleanup, or database drop failed. The audit called this
+// out as a certification-invalidating defect (§P0.3).
+//
+// The RESET contract:
+//   - Every cleanup step returns a discriminated { ok } | { ok:false, error }.
+//   - teardown() returns TeardownResult with per-step outcome +
+//     computed `completed` boolean.
+//   - The caller decides whether to fail the run based on the
+//     typed result. The original test failure is still primary;
+//     cleanup failures are secondary but MUST be surfaced.
+//   - Errors are never rethrown from teardown itself — the caller
+//     drives the certification decision.
 // ---------------------------------------------------------------------------
 
-export async function teardown(iso: NativeIsolation, server?: ServerSpawn, launch?: ElectronLaunch): Promise<void> {
-  const errors: string[] = [];
+export type StepResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+export interface TeardownResult {
+  electronClose: StepResult;
+  serverStop: StepResult;
+  redisCleanup: StepResult;
+  databaseDrop: StepResult;
+  /** True iff every mandatory step succeeded. */
+  completed: boolean;
+}
+
+function stepOk(): StepResult { return { ok: true }; }
+function stepFail(e: unknown): StepResult { return { ok: false, error: String(e).slice(0, 200) }; }
+
+export async function teardown(iso: NativeIsolation, server?: ServerSpawn, launch?: ElectronLaunch): Promise<TeardownResult> {
+  // Steps default to a benign OK if the resource never existed. If it
+  // existed and the operation threw, that step records the error.
+  let electronClose: StepResult = stepOk();
+  let serverStop: StepResult = stepOk();
+  let redisCleanup: StepResult = stepOk();
+  let databaseDrop: StepResult = stepOk();
   if (launch) {
-    try { await launch.app.close(); } catch (e) { errors.push(`electron_close: ${String(e).slice(0, 120)}`); }
+    try { await launch.app.close(); }
+    catch (e) { electronClose = stepFail(`electron_close: ${e}`); }
   }
   if (server) {
-    try { await server.kill(); } catch (e) { errors.push(`server_kill: ${String(e).slice(0, 120)}`); }
+    try { await server.kill(); }
+    catch (e) { serverStop = stepFail(`server_kill: ${e}`); }
   }
   try {
     const r = new IORedis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 0, retryStrategy: () => null });
@@ -583,20 +622,22 @@ export async function teardown(iso: NativeIsolation, server?: ServerSpawn, launc
     if (toDel.length > 0) await r.del(...toDel);
     await r.quit();
   } catch (e) {
-    errors.push(`redis_cleanup: ${String(e).slice(0, 120)}`);
+    redisCleanup = stepFail(`redis_cleanup: ${e}`);
   }
   try {
     await dropScratchDb(iso.dbName);
   } catch (e) {
-    errors.push(`drop_db: ${String(e).slice(0, 120)}`);
+    databaseDrop = stepFail(`drop_db: ${e}`);
   }
-  if (errors.length > 0) {
-    // Log to the run's logs dir but do NOT throw — teardown must
-    // never mask a real test failure.
-    try {
-      writeFileSync(join(iso.logsDir, 'teardown-errors.log'), errors.join('\n'));
-    } catch { /* best-effort */ }
-  }
+  const completed = electronClose.ok && serverStop.ok && redisCleanup.ok && databaseDrop.ok;
+  const result: TeardownResult = { electronClose, serverStop, redisCleanup, databaseDrop, completed };
+  // Persist the typed result adjacent to the run's logs so an audit
+  // has a single JSON to inspect. Never masks the return — the caller
+  // still receives the object.
+  try {
+    writeFileSync(join(iso.logsDir, 'teardown-result.json'), JSON.stringify(result, null, 2));
+  } catch { /* best-effort */ }
+  return result;
 }
 
 export async function ensureDbCreated(iso: NativeIsolation): Promise<void> {
