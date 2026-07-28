@@ -216,9 +216,17 @@ export async function listFingerprints(input: FingerprintListInput | undefined):
       const cursorId = typeof cursor?.id === 'number' ? cursor.id : null;
       const prefix = input?.filter?.productPrefix?.toUpperCase() ?? null;
       // Latest snapshot per product; ordered by snapshot id DESC.
+      // Stage 3C-E.1.10 — column list realigned to the real
+      // fingerprint_snapshots schema (schema.ts:2487). The previous
+      // SELECT asked for `availableAt` and `featureVersions`; the
+      // table stores `dataAvailableAt`, and it has no JSON blob —
+      // `classificationVersion` and `metadataVersion` are separate
+      // varchar columns that are composed into the contract's
+      // `featureVersions` record below.
       const res = await db.execute(sql`
         SELECT fs.id, fs.productId, fs.fingerprintClass, fs.confidence, fs.qualityPenalty, fs.liquidityPenalty,
-               fs.inputHash, fs.observedAt, fs.availableAt, fs.featureVersions
+               fs.inputHash, fs.observedAt, fs.dataAvailableAt,
+               fs.classificationVersion, fs.metadataVersion
         FROM fingerprint_snapshots fs
         ${cursorId ? sql`WHERE fs.id < ${cursorId}` : sql``}
         ${prefix ? sql`${cursorId ? sql`AND` : sql`WHERE`} fs.productId LIKE ${prefix + '%'}` : sql``}
@@ -245,14 +253,9 @@ export async function listFingerprints(input: FingerprintListInput | undefined):
           else if (type === 'conflicting') conflicting.push(key);
           else if (type === 'missing') missing.push(key);
         }
-        let featureVersions: Record<string, string> = {};
-        try {
-          if (typeof r.featureVersions === 'string') {
-            featureVersions = JSON.parse(r.featureVersions);
-          } else if (r.featureVersions && typeof r.featureVersions === 'object') {
-            featureVersions = r.featureVersions as Record<string, string>;
-          }
-        } catch { /* leave empty */ }
+        const featureVersions: Record<string, string> = {};
+        if (r.classificationVersion) featureVersions.classification = String(r.classificationVersion);
+        if (r.metadataVersion) featureVersions.metadata = String(r.metadataVersion);
         return {
           fingerprintId: String(r.id),
           product: String(r.productId),
@@ -267,7 +270,7 @@ export async function listFingerprints(input: FingerprintListInput | undefined):
           featureVersions,
           inputHash: r.inputHash ? String(r.inputHash) : null,
           observedAt: toIsoNullable(r.observedAt as Date | string | null),
-          availableAt: toIsoNullable(r.availableAt as Date | string | null),
+          availableAt: toIsoNullable(r.dataAvailableAt as Date | string | null),
         };
       }));
       const nextCursor = overflow && trimmed.length > 0 ? encodeCursor({ id: trimmed[trimmed.length - 1].id as number }) : null;
