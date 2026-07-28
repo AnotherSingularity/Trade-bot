@@ -182,6 +182,17 @@ export async function spawnServer(iso: NativeIsolation): Promise<ServerSpawn> {
       CORS_ORIGINS: '*',
       HORIZON_BOOTSTRAP_TOKEN: bootstrapToken,
       HORIZON_REDIS_NAMESPACE: iso.redisNamespace,
+      // Stage 3C-E.1.17 — the server-side native-induction router
+      // (apps/server/src/routes/nativeInduction.ts) mounts only when
+      // BOTH env vars below are set. Without them, the T39-T43
+      // induction endpoints return 404 and the behavioural tests
+      // that induce stale/degraded/unavailable/contract-mismatch
+      // states have nothing to talk to. The Electron process
+      // already sets these (electronHarness.ts:328/355); the
+      // server child needs them independently since it reads its
+      // OWN environment via ENV.nodeEnv + process.env.
+      HORIZON_NATIVE_DIAGNOSTICS: 'true',
+      HORIZON_SERVER_EXTERNAL: 'true',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
