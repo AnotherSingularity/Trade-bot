@@ -429,26 +429,41 @@ const FAIL_FAST_STRINGS: ReadonlyArray<{ text: string; code: string }> = [
   { text: 'data-state="account_locked"', code: 'native_screen_session_expired' },
 ];
 
+// Stage 3C-E.1.2/E.1.3 — StateFrame's `data-screen` value is the
+// `label` prop of the outermost StateFrame the screen renders.
+// Overview + ShadowPortfolio use bare labels ("overview", "portfolio")
+// that match `screenAttr` directly; every other screen uses a
+// suffixed query name ("positions.list", "decisions.list", "risk.get",
+// …) — the query identity, not the screen identity. Historical test
+// call sites pass the screen identity (`"positions"`), so this
+// matcher accepts either the exact `screenAttr` OR
+// `screenAttr.<queryName>`. Anchored so `data-screen="positions_stub"`
+// cannot accidentally match `positions`.
+function screenAttrMatcher(screenAttr: string): RegExp {
+  const escaped = screenAttr.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+  return new RegExp(`data-screen="${escaped}(?:\\.[a-zA-Z_]+)?"`);
+}
+
+/**
+ * Build a regex that captures the `data-state` value of the StateFrame
+ * whose `data-screen` matches `screenAttr` (bare or dot-suffixed).
+ * Handles both attribute orderings.
+ */
+function screenStateMatcher(screenAttr: string): RegExp {
+  const escaped = screenAttr.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+  const anchored = `${escaped}(?:\\.[a-zA-Z_]+)?`;
+  return new RegExp(
+    `data-screen="${anchored}"[^>]*data-state="([^"]+)"|data-state="([^"]+)"[^>]*data-screen="${anchored}"`,
+  );
+}
+
 async function navigateAndWaitFor(hashRoute: string, screenAttr: string, timeoutMs = 25_000): Promise<{ frame: string; leftLoading: boolean }> {
   if (!launch) throw new Error('launch missing');
   await launch.page.evaluate((h) => { window.location.hash = h; }, hashRoute);
   const deadline = Date.now() + timeoutMs;
   let leftLoading = false;
   let lastFrame = '';
-  // Stage 3C-E.1.2 — StateFrame's `data-screen` value is the
-  // `label` prop of the outermost StateFrame the screen renders.
-  // Overview + ShadowPortfolio use bare labels ("overview",
-  // "portfolio") that match `screenAttr` directly; every other
-  // screen uses a suffixed query name ("positions.list",
-  // "decisions.list", "risk.get", …) — the query identity, not the
-  // screen identity. Historical NAV_ROUTES entries pass the screen
-  // identity (`"positions"`), so this matcher accepts either the
-  // exact `screenAttr` OR `screenAttr.<queryName>`. That preserves
-  // both conventions without changing renderer labels or
-  // manufacturing a matching data-screen. The regex is anchored so
-  // `data-screen="positions_stub"` cannot accidentally match `positions`.
-  const escaped = screenAttr.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-  const screenMatcher = new RegExp(`data-screen="${escaped}(?:\\.[a-zA-Z_]+)?"`);
+  const screenMatcher = screenAttrMatcher(screenAttr);
   while (Date.now() < deadline) {
     lastFrame = await launch.page.content();
     // Fail-fast: AuthGate blockers or preload bridge absence should
@@ -1327,7 +1342,8 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
     certIt(`NAV:${route.key}`, 'navigates + leaves loading + carries LIVE ORDER SUBMISSION DISABLED', async () => {
       const { leftLoading, frame } = await navigateAndWaitFor(route.hash, route.screenAttr);
       expect(leftLoading, `${route.key} did not leave loading`).toBe(true);
-      expect(frame).toContain(`data-screen="${route.screenAttr}"`);
+      // Stage 3C-E.1.3 — mirror the suffix tolerance the navigator uses.
+      expect(frame, `${route.key} did not render data-screen attribute`).toMatch(screenAttrMatcher(route.screenAttr));
       expect(frame).toContain('LIVE ORDER SUBMISSION DISABLED');
       recordPass(route.key);
     });
@@ -1409,7 +1425,7 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
   // literal against a screen that returned zero rows.
   certIt('SIG:costs_attribution', 'renders honest empty state (no seeded attribution by design)', async () => {
     const { frame } = await navigateAndWaitFor('#/ops/costs-attribution', 'costs');
-    expect(frame).toContain('data-screen="costs"');
+    expect(frame).toMatch(screenAttrMatcher('costs'));
     expect(frame).toContain('data-state="empty"');
     expect(frame).toContain('LIVE ORDER SUBMISSION DISABLED');
     // Structurally verify NO fabricated attribution literal leaked in.
@@ -1476,8 +1492,8 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
   for (const entry of NINETEEN_SCREEN_MANIFEST) {
     certIt(`MANIFEST:${entry.screenKey}`, `expected=${entry.expectedState}; signatures=[${entry.expectedSignatures.length}]`, async () => {
       const { leftLoading, frame } = await navigateAndWaitFor(entry.hash, entry.screenAttr);
-      // Extract observed state.
-      const stateMatch = frame.match(new RegExp(`data-screen="${entry.screenAttr}"[^>]*data-state="([^"]+)"|data-state="([^"]+)"[^>]*data-screen="${entry.screenAttr}"`));
+      // Stage 3C-E.1.3 — same suffix tolerance as the navigator.
+      const stateMatch = frame.match(screenStateMatcher(entry.screenAttr));
       const observedState = stateMatch ? (stateMatch[1] ?? stateMatch[2] ?? null) : null;
       const missingSignatures = entry.expectedSignatures.filter((s) => !frame.includes(s));
       const passed = leftLoading && observedState === entry.expectedState && missingSignatures.length === 0;
@@ -1550,7 +1566,7 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
   // §12.25 Decision-time vs outcome-time evidence separated.
   certIt('T25', 'Decision Journal — evidence-time separation is a schema-level guarantee', async () => {
     const { frame } = await navigateAndWaitFor('#/decision-journal', 'decisions');
-    expect(frame).toContain('data-screen="decisions"');
+    expect(frame).toMatch(screenAttrMatcher('decisions'));
   });
 
   // §12.26 Champion + observer universes distinct.
@@ -1612,9 +1628,10 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
   // validateReconstructedResults; persists costs-screen-evidence.json.
   certIt('T34', 'Costs — real DOM inspection proves honest empty state', async () => {
     const { frame } = await navigateAndWaitFor('#/ops/costs-attribution', 'costs');
-    // Extract data-state + reason from the rendered attribute.
-    const stateMatch = frame.match(/data-screen="costs_attribution"[^>]*data-state="([^"]+)"/);
-    const observedState = stateMatch ? stateMatch[1] : 'unknown';
+    // Stage 3C-E.1.3 — costs StateFrame emits `data-screen="costs.get"`;
+    // the pre-E.1.3 literal `costs_attribution` never matched.
+    const stateMatch = frame.match(screenStateMatcher('costs'));
+    const observedState = stateMatch ? (stateMatch[1] ?? stateMatch[2] ?? 'unknown') : 'unknown';
     const reasonMatch = frame.match(/data-reason="([^"]+)"/) || frame.match(/reasonCode["'\s:=]+["']([^"']+)["']/);
     const observedReason = reasonMatch ? reasonMatch[1] : null;
     // Count attribution rows (each row carries data-testid starting
@@ -1821,7 +1838,10 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
       const state = await readInductionState(inductionClient);
       if (state.kind !== 'active' || state.mode !== 'stale_response') throw new Error('t39_state_not_active');
       const { frame } = await navigateAndWaitFor('#/ops/reconciliation', 'reconciliation');
-      const observedState = (frame.match(/data-screen="reconciliation"[^>]*data-state="([^"]+)"/) || [])[1] ?? 'unknown';
+      // Stage 3C-E.1.3 — reconciliation StateFrame emits
+      // data-screen="reconciliation.list"; accept the dot-suffixed form.
+      const reconMatch = frame.match(screenStateMatcher('reconciliation'));
+      const observedState = reconMatch ? (reconMatch[1] ?? reconMatch[2] ?? 'unknown') : 'unknown';
       const observedReason = (frame.match(/data-reason="([^"]+)"/) || [])[1] ?? null;
       const forbidden: string[] = [];
       if (observedState === 'degraded') forbidden.push('degraded');
@@ -1847,7 +1867,8 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
       await launch!.page.evaluate(() => { window.location.hash = '#/ops/reconciliation'; });
       await new Promise((r) => setTimeout(r, 1_000));
       const recoveryFrame = await launch!.page.content();
-      const recovered = !/data-screen="reconciliation"[^>]*data-state="stale"/.test(recoveryFrame);
+      // Stage 3C-E.1.3 — accept the dot-suffixed form.
+      const recovered = !/data-screen="reconciliation(?:\.[a-zA-Z_]+)?"[^>]*data-state="stale"/.test(recoveryFrame);
       reconstructedResults = { ...reconstructedResults, staleResult: { ...reconstructedResults.staleResult, recoveryVerified: recovered } };
     }
     try { writeFileSync(join(iso!.logsDir, 'stale-evidence.json'), JSON.stringify(reconstructedResults.staleResult, null, 2)); } catch { /* best-effort */ }
@@ -1894,7 +1915,11 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
       const state = await readInductionState(inductionClient);
       if (state.kind !== 'active' || state.mode !== 'unavailable_response') throw new Error('t41_state_not_active');
       const { frame } = await navigateAndWaitFor('#/research/universe', 'universe');
-      const observedState = (frame.match(/data-screen="research_universe"[^>]*data-state="([^"]+)"/) || [])[1] ?? 'unknown';
+      // Stage 3C-E.1.3 — ResearchUniverse StateFrame emits
+      // data-screen="universe.list"; the pre-E.1.3 literal
+      // `research_universe` never matched.
+      const uMatch = frame.match(screenStateMatcher('universe'));
+      const observedState = uMatch ? (uMatch[1] ?? uMatch[2] ?? 'unknown') : 'unknown';
       const observedReason = (frame.match(/data-reason="([^"]+)"/) || [])[1] ?? null;
       const forbidden: string[] = [];
       if (observedState === 'stale') forbidden.push('stale');
@@ -2038,15 +2063,17 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
       payloadLeaked = typedCode != null && /contract_mismatch_induced|"shape":/.test(typedCode);
       // Navigate to a screen consuming this endpoint to observe UI state.
       const nav = await navigateAndWaitFor('#/ops/reconciliation', 'reconciliation');
-      const m = nav.frame.match(/data-screen="reconciliation"[^>]*data-state="([^"]+)"/);
-      observedState = m ? m[1] : 'unknown';
+      // Stage 3C-E.1.3 — accept dot-suffixed data-screen ("reconciliation.list").
+      const m = nav.frame.match(screenStateMatcher('reconciliation'));
+      observedState = m ? (m[1] ?? m[2] ?? 'unknown') : 'unknown';
     } finally {
       if (contractInduction) { try { await clearInduction(inductionClient, contractInduction); } catch { /* best-effort */ } }
       // Verify recovery: state returns to non-contract_mismatch.
       await launch!.page.evaluate(() => { window.location.hash = '#/ops/reconciliation'; });
       await new Promise((r) => setTimeout(r, 1_000));
       const recoveryFrame = await launch!.page.content();
-      recovered = !/data-screen="reconciliation"[^>]*data-state="contract_mismatch"/.test(recoveryFrame);
+      // Stage 3C-E.1.3 — accept dot-suffixed data-screen.
+      recovered = !/data-screen="reconciliation(?:\.[a-zA-Z_]+)?"[^>]*data-state="contract_mismatch"/.test(recoveryFrame);
     }
     reconstructedResults = {
       ...reconstructedResults,

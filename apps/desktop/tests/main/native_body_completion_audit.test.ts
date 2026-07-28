@@ -47,7 +47,13 @@ interface BodyExpectation {
 
 const EXPECTATIONS: Readonly<Record<string, BodyExpectation>> = {
   T34: {
-    requiredIncludes: ['data-screen="costs_attribution"', 'costsHonestyResult:', 'forbiddenLabelsSeen'],
+    // Stage 3C-E.1.3 — T34 previously extracted state via
+    // `data-screen="costs_attribution"[^>]*data-state="..."`, but the
+    // CostsAttribution StateFrame emits `data-screen="costs.get"`.
+    // The audit now requires a call to the shared `screenStateMatcher('costs')`
+    // helper (or its equivalent regex) so future refactors do not
+    // silently reintroduce a literal that never matches.
+    requiredIncludes: ["screenStateMatcher('costs')", 'costsHonestyResult:', 'forbiddenLabelsSeen'],
     forbiddenIncludes: ['result_type: "default"'],
     evidenceFilename: 'costs-screen-evidence.json',
     resultField: 'costsHonestyResult',

@@ -317,7 +317,7 @@ describe('Stage 3C-CI-FIX10 §5.5 — Costs honest empty state (three-site recon
     // `certIt('SIG:costs_attribution', ...)`. The assertion is on the
     // certIt call and its data-screen literal in the body.
     expect(testSrc).toContain("certIt('SIG:costs_attribution', 'renders honest empty state (no seeded attribution by design)'");
-    expect(testSrc).toMatch(/data-screen="costs"[\s\S]*?data-state="empty"/);
+    expect(testSrc).toMatch(/data-screen="costs(?:\.[a-zA-Z_]+)?"[\s\S]*?data-state="empty"|data-state="empty"[\s\S]*?data-screen="costs(?:\.[a-zA-Z_]+)?"|screenAttrMatcher\('costs'\)|screenStateMatcher\('costs'\)/);
   });
 
   it('seed does not attempt a dead forecast_vs_realized_attributions insert', () => {
