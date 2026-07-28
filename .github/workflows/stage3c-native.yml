@@ -157,6 +157,58 @@ jobs:
           HORIZON_REDIS_URL: redis://127.0.0.1:6379
         run: npm run test:external
 
+      # Stage 3C-E.1 §C — record the effective identity IMMEDIATELY
+      # before the native step so any subsequent failure has direct
+      # evidence of who Electron ran as, where its writable dirs
+      # were, and what the ownership of the Electron binary + native
+      # log directory was. Fails hard if the effective UID is 0 —
+      # the canonical CI native contract is non-root and any drift
+      # that promotes root must not be silently accepted. See the
+      # `id -u == 0` gate.
+      - name: Execution identity preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_LOG_DIR="apps/desktop/tests/native/logs/${GITHUB_RUN_ID}"
+          mkdir -p "$RUN_LOG_DIR"
+          PREFLIGHT="$RUN_LOG_DIR/identity-preflight.txt"
+          {
+            echo "===== stage3c-e1 identity preflight ====="
+            echo "generatedAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "runId=${GITHUB_RUN_ID}"
+            echo "commit=${GITHUB_SHA}"
+            echo "runnerOs=${RUNNER_OS}"
+            echo
+            echo "----- id / whoami -----"
+            id
+            echo "id -u => $(id -u)"
+            echo "id -g => $(id -g)"
+            echo "whoami => $(whoami)"
+            echo
+            echo "----- HOME / XDG -----"
+            printf 'HOME=%s\n' "${HOME:-<unset>}"
+            printf 'XDG_RUNTIME_DIR=%s\n' "${XDG_RUNTIME_DIR:-<unset>}"
+            printf 'XDG_CACHE_HOME=%s\n' "${XDG_CACHE_HOME:-<unset>}"
+            printf 'pwd=%s\n' "$(pwd)"
+            echo
+            echo "----- Electron binary ownership -----"
+            if [ -f node_modules/.bin/electron ]; then
+              stat -c '%A %U:%G %n' node_modules/.bin/electron || true
+            else
+              echo "<node_modules/.bin/electron missing>"
+            fi
+            echo
+            echo "----- native run directory ownership -----"
+            stat -c '%A %U:%G %n' "$RUN_LOG_DIR" || true
+          } | tee "$PREFLIGHT"
+          # Fail if we somehow landed as root. GitHub-hosted
+          # ubuntu-latest runs as `runner` (uid 1001); if this fires,
+          # the runner selection or job config has drifted.
+          if [ "$(id -u)" = "0" ]; then
+            echo "stage3c_e1_root_detected: effective UID is 0; canonical native contract requires non-root" >&2
+            exit 1
+          fi
+
       - name: Run Stage 3C native Electron integration test
         working-directory: apps/desktop
         run: npm run test:native
@@ -201,6 +253,9 @@ jobs:
             apps/desktop/tests/native/logs/**/failure.png
             apps/desktop/tests/native/logs/**/failure-dom.html
             apps/desktop/tests/native/logs/**/current-url.txt
+            apps/desktop/tests/native/logs/**/identity-preflight.txt
+            apps/desktop/tests/native/logs/**/authseam-readiness-diagnostic.json
+            apps/desktop/tests/native/logs/**/native-launch-policy.json
           retention-days: 30
           if-no-files-found: error
 

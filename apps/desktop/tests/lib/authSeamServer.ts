@@ -54,11 +54,16 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { createServer as createNetServer } from 'node:net';
-import { readdirSync, readFileSync, mkdirSync, appendFileSync } from 'node:fs';
+import { mkdirSync, appendFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createConnection } from 'mysql2/promise';
+import mysql from 'mysql2/promise';
 import IORedis from 'ioredis';
+import { drizzle } from 'drizzle-orm/mysql2';
+import { migrate } from 'drizzle-orm/mysql2/migrator';
+import { sql } from 'drizzle-orm';
+import type { z } from 'zod';
 import { SystemReadinessResponseSchema } from '@horizon/shared';
+type SystemReadinessResponse = z.infer<typeof SystemReadinessResponseSchema>;
 import { createScratchDb, dropScratchDb, makeScratchDbName, scratchDbUrl } from './scratchDb';
 
 // ---------------------------------------------------------------------------
@@ -68,14 +73,19 @@ import { createScratchDb, dropScratchDb, makeScratchDbName, scratchDbUrl } from 
 /**
  * A single readiness sample. The prober classifies every response
  * before returning; consumers never re-classify a raw fetch result.
+ *
+ * Stage 3C-E.1 §A: `not_ready` and `ready` retain the FULL parsed
+ * response so the timeout diagnostic writer can dump the components
+ * map with actionable per-component detail (which one flipped ready
+ * to false), and consumers can inspect it directly.
  */
 export type AuthSeamReadinessObservation =
   | { readonly kind: 'transport_error'; readonly error: string }
   | { readonly kind: 'http'; readonly status: number; readonly sanitizedBody: string }
   | { readonly kind: 'invalid_json'; readonly error: string; readonly sanitizedBody: string }
   | { readonly kind: 'contract_mismatch'; readonly issuePath: string; readonly issueMessage: string }
-  | { readonly kind: 'not_ready'; readonly known: boolean }
-  | { readonly kind: 'ready' };
+  | { readonly kind: 'not_ready'; readonly known: boolean; readonly parsed: SystemReadinessResponse }
+  | { readonly kind: 'ready'; readonly parsed: SystemReadinessResponse };
 
 export interface AuthSeamChildExit {
   readonly exitCode: number | null;
@@ -234,7 +244,9 @@ async function probeOnce(
         issueMessage: (issue?.message ?? 'unknown').slice(0, 120),
       };
     }
-    return zr.data.ready === true ? { kind: 'ready' } : { kind: 'not_ready', known: zr.data.known === true };
+    return zr.data.ready === true
+      ? { kind: 'ready', parsed: zr.data }
+      : { kind: 'not_ready', known: zr.data.known === true, parsed: zr.data };
   } finally {
     clearTimeout(t);
   }
@@ -353,20 +365,70 @@ async function pickFreePort(): Promise<number> {
   });
 }
 
+/**
+ * Stage 3C-E.1 §A — apply migrations via drizzle-orm's migrator so the
+ * `__drizzle_migrations` tracking table is populated (row per applied
+ * migration). The server's `/api/system/readiness` handler in
+ * apps/server/src/routes/desktop.ts:251-282 requires:
+ *   (a) `__drizzle_migrations` exists in the current schema
+ *   (b) row count >= 1 for `migration` component ok
+ *   (c) row count >= 21 for `fingerprint` component ok
+ *
+ * The pre-E.1 helper executed raw .sql statements only — it never
+ * created or populated `__drizzle_migrations`. That kept the readiness
+ * gate stuck on `ready:false` forever with `migration.ok=false` and
+ * `fingerprint.ok=false`, producing the observed
+ * `authseam_readiness_timeout:last=not_ready(known=true)` after 60 s.
+ *
+ * Using `drizzle-orm/mysql2/migrator` mirrors what
+ * `apps/server/src/db/migrate.ts` does at real server boot, so the
+ * scratch DB reaches the exact schema state the readiness handler
+ * expects — 21 tracked migrations for the 21 SQL files.
+ */
 async function applyMigrations(dbUrl: string, migrationsDir: string): Promise<void> {
-  const c = await createConnection({ uri: dbUrl });
+  const pool = mysql.createPool({ uri: dbUrl, connectionLimit: 2, multipleStatements: false });
   try {
-    const files = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
-    for (const f of files) {
-      const sql = readFileSync(join(migrationsDir, f), 'utf-8')
-        .replace(/-->\s*statement-breakpoint/g, '')
-        .split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
-      for (const stmt of sql.split(';').map((s) => s.trim()).filter((s) => s.length > 0)) {
-        await c.query(stmt);
-      }
-    }
+    const db = drizzle(pool);
+    await migrate(db, { migrationsFolder: migrationsDir });
   } finally {
-    await c.end();
+    await pool.end();
+  }
+}
+
+/**
+ * Stage 3C-E.1 §A — seed the minimal `bot_config` row required for the
+ * server's `checkReconciliation` gate to report ok=true against a
+ * freshly-migrated scratch DB.
+ *
+ * The readiness handler at apps/server/src/routes/desktop.ts:295-305
+ * computes:
+ *   ok = reconciliationStatus !== 'failed' && reconciliationStatus !== 'pending'
+ * On a fresh schema, `bot_config` is empty and the code path defaults
+ * `reconciliationStatus` to `'pending'` → ok=false → readiness never
+ * reaches ready:true.
+ *
+ * We insert exactly one row with `reconciliationStatus='ok'`. Every
+ * other column takes the schema default. No trading state is seeded —
+ * `unresolvedActions=0`, `unknownOrderLocks=0`, `nonterminalIntentCount=0`
+ * all remain because the corresponding tables are empty.
+ *
+ * This is a test-only helper. It never runs in production; the desktop
+ * supervisor establishes the same state through the real reconciliation
+ * cycle at server boot.
+ */
+async function seedAuthSeamMinimum(dbUrl: string): Promise<void> {
+  const pool = mysql.createPool({ uri: dbUrl, connectionLimit: 2 });
+  try {
+    const db = drizzle(pool);
+    // Idempotent: if bot_config already has a row (defensive against
+    // future re-entrancy in the harness), do not add a duplicate.
+    await db.execute(sql`
+      INSERT INTO bot_config (isRunning, isPaused, consecutiveLosses, reconciliationStatus, reconciliationDetail)
+      SELECT FALSE, FALSE, 0, 'ok', 'stage3c_e1_authseam_seed'
+      WHERE NOT EXISTS (SELECT 1 FROM bot_config)
+    `);
+  } finally {
+    await pool.end();
   }
 }
 
@@ -410,13 +472,14 @@ export async function startAuthSeamServer(opts: AuthSeamServerBootOptions): Prom
     stderrTail,
   };
 
-  // --- 1. MariaDB scratch DB + migrations
+  // --- 1. MariaDB scratch DB + migrations + minimum seed
   const dbName = makeScratchDbName('authseam');
   handle.dbName = dbName;
   await createScratchDb(dbName);
   const dbUrl = scratchDbUrl(dbName);
   handle.dbUrl = dbUrl;
   await applyMigrations(dbUrl, opts.migrationsDir);
+  await seedAuthSeamMinimum(dbUrl);
 
   // --- 2. Redis namespace + free port + bootstrap token
   handle.redisNamespace = `authseam_${process.pid}_${randomBytes(3).toString('hex')}`;
@@ -485,6 +548,143 @@ export async function startAuthSeamServer(opts: AuthSeamServerBootOptions): Prom
   );
   handle.readinessOutcome = outcome;
   return handle;
+}
+
+// ---------------------------------------------------------------------------
+// Stage 3C-E.1 §A — readiness-timeout diagnostic writer.
+//
+// When a readiness timeout occurs, the caller (integration test's
+// beforeAll) should immediately dump every diagnostic that could
+// explain WHICH readiness component prevented ready:true from being
+// observed. The dumped fields never include credentials — DB URL
+// passwords are stripped, Redis URL is trimmed to host:port, bootstrap
+// token is omitted entirely.
+// ---------------------------------------------------------------------------
+
+export interface AuthSeamReadinessDiagnostic {
+  readonly runId: string;
+  readonly elapsedMs: number;
+  readonly lastHttpStatus: number | null;
+  readonly lastReadinessResponse: SystemReadinessResponse | null;
+  readonly components: Record<string, { ok: boolean; detail?: string }> | null;
+  readonly serverPid: number | null;
+  readonly serverExited: boolean;
+  readonly serverExitCode: number | null;
+  readonly serverSignal: string | null;
+  readonly stdoutTail: string;
+  readonly stderrTail: string;
+  readonly databaseTarget: string;
+  readonly redisTarget: string;
+  readonly failureCode: string;
+  readonly writtenAt: string;
+}
+
+/**
+ * Strip credentials from a DB URL for diagnostic output. Never emits
+ * the password segment even if the caller passed a URL that contains
+ * one.
+ */
+export function sanitizeDbUrl(dbUrl: string | null): string {
+  if (!dbUrl) return '<unset>';
+  try {
+    const u = new URL(dbUrl);
+    // Strip user + password; retain host + port + database.
+    const host = u.host || u.hostname;
+    const db = u.pathname.replace(/^\//, '') || '<no_db>';
+    return `mysql://<REDACTED>@${host}/${db}`;
+  } catch {
+    return '<unparseable>';
+  }
+}
+
+export function sanitizeRedisUrl(redisUrl: string | null): string {
+  if (!redisUrl) return '<unset>';
+  try {
+    const u = new URL(redisUrl);
+    const host = u.host || u.hostname;
+    return `redis://<REDACTED>@${host}${u.pathname || ''}`;
+  } catch {
+    return '<unparseable>';
+  }
+}
+
+/**
+ * Build the diagnostic payload from a completed (or timed-out)
+ * handle. Never throws; missing pieces come back as `null`. `runId`
+ * is provided by the caller so the artifact file name aligns with
+ * the workflow's run identifier.
+ */
+export function buildReadinessDiagnostic(
+  handle: AuthSeamServerHandle,
+  runId: string,
+): AuthSeamReadinessDiagnostic {
+  const outcome = handle.readinessOutcome;
+  let elapsedMs = 0;
+  let failureCode = 'authseam_no_outcome';
+  let lastObs: AuthSeamReadinessObservation | null = null;
+  if (outcome) {
+    failureCode = authSeamOutcomeToShortReason(outcome);
+    if (outcome.kind === 'readiness_timeout') {
+      elapsedMs = outcome.elapsedMs;
+      lastObs = outcome.lastObservation;
+    } else if (outcome.kind === 'server_exited') {
+      lastObs = outcome.lastObservation;
+    } else if (outcome.kind === 'ready') {
+      elapsedMs = outcome.elapsedMs;
+    }
+  }
+  const parsed: SystemReadinessResponse | null =
+    lastObs?.kind === 'not_ready' || lastObs?.kind === 'ready' ? lastObs.parsed : null;
+  const lastHttpStatus: number | null =
+    lastObs?.kind === 'http' ? lastObs.status
+    : lastObs?.kind === 'not_ready' || lastObs?.kind === 'ready' ? 200
+    : null;
+  // The components map is passthrough-shaped in the schema; extract it
+  // as a plain object if present. Cast via `unknown` because the
+  // schema declares `components` via passthrough and the compiler
+  // does not narrow that shape.
+  const componentsRaw = (parsed as unknown as { components?: unknown } | null)?.components;
+  const components =
+    componentsRaw && typeof componentsRaw === 'object' && !Array.isArray(componentsRaw)
+      ? (componentsRaw as Record<string, { ok: boolean; detail?: string }>)
+      : null;
+  const exit = handle.exit;
+  return {
+    runId,
+    elapsedMs,
+    lastHttpStatus,
+    lastReadinessResponse: parsed,
+    components,
+    serverPid: handle.pid,
+    serverExited: exit != null,
+    serverExitCode: exit?.exitCode ?? null,
+    serverSignal: exit?.signal ?? null,
+    stdoutTail: handle.stdoutTail().slice(-4_096),
+    stderrTail: handle.stderrTail().slice(-4_096),
+    databaseTarget: sanitizeDbUrl(handle.dbUrl),
+    redisTarget: sanitizeRedisUrl(handle.redisUrl),
+    failureCode,
+    writtenAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Persist the diagnostic to `<logsBaseDir>/<runId>/authseam-readiness-diagnostic.json`.
+ * Idempotent (overwrites on repeated invocations). Never throws.
+ */
+export function writeReadinessDiagnostic(
+  diag: AuthSeamReadinessDiagnostic,
+  logsBaseDir: string,
+): string | null {
+  try {
+    const dir = join(logsBaseDir, diag.runId);
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, 'authseam-readiness-diagnostic.json');
+    writeFileSync(path, JSON.stringify(diag, null, 2), 'utf8');
+    return path;
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -34,6 +34,7 @@ import IORedis from 'ioredis';
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright';
 import { createScratchDb, dropScratchDb, makeScratchDbName, scratchDbUrl } from '../lib/scratchDb';
 import { StartupTrace, withNativeTimeout } from './nativeDiagnostics';
+import { resolveNativeLaunchPolicy } from '../../src/main/nativeLaunchPolicy';
 
 // ---------------------------------------------------------------------------
 // Fixed inputs
@@ -272,28 +273,56 @@ export async function launchElectron(iso: NativeIsolation, server: ServerSpawn, 
   mkdirSync(reportDir, { recursive: true });
   const localTrace = trace ?? new StartupTrace(iso.logsDir);
 
+  // Stage 3C-E.1 §D — resolve the canonical native launch policy.
+  // Default: NO sandbox-disabling switches, NO sandbox-disabling env.
+  // The pure policy in src/main/nativeLaunchPolicy.ts is the ONLY
+  // gate; a stray env var in a packaged installer or a typo in the
+  // opt-in cannot silently activate the fallback. When the fallback
+  // IS active, `policy.sandboxDisabled=true` is recorded to the
+  // launch record so downstream evidence marks the run non-certifiable.
+  const policy = resolveNativeLaunchPolicy({
+    isPackaged: false,
+    nodeEnv: 'test',
+    noSandboxOptIn: process.env.HORIZON_NATIVE_ALLOW_NO_SANDBOX,
+  });
+  // Persist policy decision into evidence directory so the artifact
+  // upload captures WHY the harness chose the sandbox stance it did.
+  try {
+    writeFileSync(
+      join(iso.logsDir, 'native-launch-policy.json'),
+      JSON.stringify({
+        sandboxDisabled: policy.sandboxDisabled,
+        reason: policy.reason,
+        extraArgs: policy.extraArgs,
+        // Env keys only (never values); values here are 'true'/'1'
+        // anyway but tests should verify the audit trail lists keys.
+        extraEnvKeys: Object.keys(policy.extraEnv).sort(),
+        writtenAt: new Date().toISOString(),
+      }, null, 2),
+      'utf8',
+    );
+  } catch { /* best-effort — evidence writer failures never abort */ }
+  const canonicalArgs = [
+    DESKTOP_MAIN_ENTRY,
+    '--disable-gpu',
+    '--in-process-gpu',
+    `--user-data-dir=${userDataDir}`,
+    ...policy.extraArgs,
+  ];
   const app = await withNativeTimeout(
     'electron_launch',
     60_000,
     electron.launch({
       executablePath: ELECTRON_BIN,
-      args: [
-        DESKTOP_MAIN_ENTRY,
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--in-process-gpu',
-        `--user-data-dir=${userDataDir}`,
-      ],
+      args: canonicalArgs,
       env: {
         ...process.env,
         DISPLAY: process.env.DISPLAY ?? ':99',
         // Stage 3C-CI-FIX8 §3: NODE_ENV=test is REQUIRED for the strict
-        // native-diagnostics gate + the sandbox test-only opt-in AND
-        // the preload diagnostic IPC channel. HORIZON_ENVIRONMENT
-        // stays 'development' so the service adapter factory picks
-        // the unpackaged path (production forbids stubs).
+        // native-diagnostics gate AND the preload diagnostic IPC
+        // channel. HORIZON_ENVIRONMENT stays 'development' so the
+        // service adapter factory picks the unpackaged path
+        // (production forbids stubs).
         NODE_ENV: 'test',
         HORIZON_ENVIRONMENT: 'development',
         HORIZON_SERVER_EXTERNAL: 'true',
@@ -318,11 +347,6 @@ export async function launchElectron(iso: NativeIsolation, server: ServerSpawn, 
         // the canonical renderer path — no override needed. Kept as
         // an escape hatch for developers who point at a stale renderer.
         HORIZON_RENDERER_URL: `file://${join(DESKTOP_DIST, 'renderer/index.html')}`,
-        HORIZON_ELECTRON_NO_SANDBOX: 'true',
-        // Electron/Chromium refuse to run as root without --no-sandbox
-        // in child processes; the env-level flag propagates to every
-        // subprocess (renderer, GPU, network, utility).
-        ELECTRON_DISABLE_SANDBOX: '1',
         // Stage 3C-CI-FIX4 §A4: Chromium diagnostics.
         ELECTRON_ENABLE_LOGGING: '1',
         ELECTRON_ENABLE_STACK_DUMPING: '1',
@@ -335,6 +359,12 @@ export async function launchElectron(iso: NativeIsolation, server: ServerSpawn, 
         // preload.log was empty in FIX6 for that exact reason. This
         // sink is filled from inside preload before any bridge work.
         HORIZON_NATIVE_PRELOAD_LOG_PATH: join(iso.logsDir, 'preload.log'),
+        // Stage 3C-E.1 §D: only the policy-approved sandbox-disable
+        // env is merged. In the canonical case this spread is empty
+        // (Object.keys(policy.extraEnv) === []); in fallback mode it
+        // adds exactly HORIZON_ELECTRON_NO_SANDBOX and
+        // ELECTRON_DISABLE_SANDBOX. The record above proves which.
+        ...policy.extraEnv,
       },
       timeout: 55_000,
     }),

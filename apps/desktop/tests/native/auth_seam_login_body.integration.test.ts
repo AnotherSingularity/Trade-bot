@@ -34,8 +34,10 @@ import { DesktopAuthManager } from '../../src/main/desktopAuthManager';
 import type { AuthTokenStorage } from '../../src/main/secureStorage';
 import {
   authSeamOutcomeToShortReason,
+  buildReadinessDiagnostic,
   startAuthSeamServer,
   stopAuthSeamServer,
+  writeReadinessDiagnostic,
   type AuthSeamServerHandle,
 } from '../lib/authSeamServer';
 
@@ -126,12 +128,16 @@ beforeAll(async () => {
     });
     const outcome = serverHandle.readinessOutcome;
     if (outcome == null || outcome.kind !== 'ready') {
-      // Compose the exact classification tag PLUS a bounded slice
-      // of the child's stderr so a CI failure has evidence
-      // pointing at the actual server-side cause.
+      // Stage 3C-E.1 §A — dump the full readiness diagnostic before
+      // throwing so the workflow's artifact upload captures every
+      // component result, exit state, and last parsed response. Path
+      // is deterministic per run so CI can find it without globbing.
+      const runId = process.env.GITHUB_RUN_ID ?? `local-${process.pid}`;
+      const diag = buildReadinessDiagnostic(serverHandle, runId);
+      writeReadinessDiagnostic(diag, LOGS_BASE_DIR);
       const tag = outcome ? authSeamOutcomeToShortReason(outcome) : 'authseam_no_outcome';
       const tail = serverHandle.stderrTail().slice(-1_024);
-      throw new Error(`${tag}\n---stderr(last 1KB)---\n${tail}`);
+      throw new Error(`${tag}\n---diagnostic=${runId}---\n---stderr(last 1KB)---\n${tail}`);
     }
     serverBaseUrl = serverHandle.baseUrl ?? undefined;
     bootstrapToken = serverHandle.bootstrapToken ?? undefined;
