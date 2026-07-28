@@ -34,7 +34,13 @@ export interface UseAuthResult {
   };
 }
 
-export function useAuth(pollMs = 5_000): UseAuthResult {
+// Stage 3C-E.1.13 — pollMs reduced from 5s to 1s so the DOM
+// reflects state changes made via the raw `window.horizon.auth`
+// bridge (e.g. from behavioral T36 which calls `.lock()` directly
+// without going through useAuth's wrapper). IPC round-trips to
+// `getState` are cheap; a 1-second cadence keeps the operator-
+// visible auth state fresh without measurable overhead.
+export function useAuth(pollMs = 1_000): UseAuthResult {
   const [state, setState] = useState<SanitizedAuthState>(BOOTSTRAP_UNAVAILABLE);
   const [loading, setLoading] = useState(true);
 
