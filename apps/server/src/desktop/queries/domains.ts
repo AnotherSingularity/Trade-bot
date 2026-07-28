@@ -862,16 +862,22 @@ export async function listIncidents(input: IncidentListInput | undefined): Promi
         return unavailable('invalid_cursor', { sourceVersion: 'incidents.v1' });
       }
       const cursorId = typeof cursor?.id === 'number' ? cursor.id : null;
-      // Unified read: desktop_incidents is the canonical desktop-observed
-      // incident source. context_incidents, validation_incidents, and
-      // soak_incidents each have their own scope; we surface them in
-      // Stage 3B as subsystem-tagged reads from desktop_incidents only.
+      // Stage 3C-E.1.7 — Column list realigned to the actual
+      // desktop_incidents schema (schema.ts:6237). The previous
+      // SELECT referenced `subsystem`, `title`, `state`, `openedAt`,
+      // `updatedAt`, and `underlyingResolved` — none of which exist
+      // in the table — and the `.catch(() => null)` swallowed the
+      // ER_BAD_FIELD_ERROR, so every request silently returned
+      // `no_incidents_yet` even when rows were present. The `.catch`
+      // is removed so a future column drift surfaces as
+      // `incidents_query_failed` instead of a fabricated empty.
       const res = await db.execute(sql`
-        SELECT id, severity, subsystem, title, state, acknowledgedAt, openedAt, updatedAt, underlyingResolved
+        SELECT id, severity, incidentType, reasonCode, details,
+               currentState, acknowledgedAt, startedAt, resolvedAt, createdAt
         FROM desktop_incidents
         ${cursorId ? sql`WHERE id < ${cursorId}` : sql``}
         ORDER BY id DESC LIMIT ${limit + 1}
-      `).catch(() => null);
+      `);
       const rows = extractRows(res);
       const overflow = rows.length > limit;
       const trimmed = rows.slice(0, limit);
@@ -880,14 +886,39 @@ export async function listIncidents(input: IncidentListInput | undefined): Promi
       }
       const items: IncidentRow[] = trimmed.map((r) => ({
         incidentId: String(r.id),
-        severity: r.severity === 'critical' ? 'critical' as const : r.severity === 'error' ? 'error' as const : r.severity === 'warning' ? 'warning' as const : 'info' as const,
-        subsystem: String(r.subsystem ?? 'unknown'),
-        title: String(r.title ?? 'incident'),
-        state: r.state === 'resolved' ? 'resolved' as const : r.state === 'acknowledged' ? 'acknowledged' as const : r.state === 'open' ? 'open' as const : 'unknown' as const,
+        // The desktop_incidents severity enum in migration 0021 is
+        // {informational, warning, critical, fatal}. Map to the
+        // contract's {info, warning, error, critical}.
+        severity: r.severity === 'critical' || r.severity === 'fatal'
+          ? 'critical' as const
+          : r.severity === 'warning'
+            ? 'warning' as const
+            : r.severity === 'error'
+              ? 'error' as const
+              : 'info' as const,
+        // Contract's `subsystem` is derived from the schema's
+        // `incidentType` (schema stores the incident source, which is
+        // its subsystem by construction).
+        subsystem: String(r.incidentType ?? 'unknown'),
+        // Contract's `title` is a human-readable label — derive from
+        // `details` (rich text) when present, otherwise fall back to
+        // the machine `reasonCode`.
+        title: r.details != null && String(r.details).length > 0
+          ? String(r.details).slice(0, 200)
+          : String(r.reasonCode ?? 'incident'),
+        state: r.currentState === 'resolved' ? 'resolved' as const
+          : r.currentState === 'acknowledged' ? 'acknowledged' as const
+            : r.currentState === 'open' ? 'open' as const
+              : 'unknown' as const,
         acknowledged: r.acknowledgedAt != null,
-        openedAt: (toIsoNullable(r.openedAt as Date | string | null) ?? (new Date(0).toISOString() as import('@horizon/shared').IsoTimestamp)) as import('@horizon/shared').IsoTimestamp,
-        lastUpdateAt: toIsoNullable(r.updatedAt as Date | string | null),
-        underlyingResolved: r.underlyingResolved === 1 || r.underlyingResolved === true,
+        openedAt: (toIsoNullable(r.startedAt as Date | string | null) ?? (new Date(0).toISOString() as import('@horizon/shared').IsoTimestamp)) as import('@horizon/shared').IsoTimestamp,
+        // Schema has no dedicated `updatedAt` — fall back to the
+        // most recent transition timestamp among ack/resolve/create.
+        lastUpdateAt: toIsoNullable(
+          (r.acknowledgedAt ?? r.resolvedAt ?? r.createdAt) as Date | string | null,
+        ),
+        // Schema tracks `resolvedAt` (timestamp), not a boolean flag.
+        underlyingResolved: r.resolvedAt != null,
       }));
       // Client-side filter application (already bounded).
       let filtered = items;
