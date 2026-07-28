@@ -101,11 +101,23 @@ export async function getOverview(opts: OverviewOptions = {}): Promise<OverviewE
         },
       };
 
+      // Stage 3C-E.1.9 — `unknown` is a probe-deferred placeholder
+      // (see `snapshotServices` — redis, scanner_worker, and
+      // reconciliation_worker return `unknown` with detail
+      // `probe_deferred*` because a real probe hasn't been wired
+      // yet). Treating that placeholder as a degradation trigger
+      // makes overview.get PERMANENTLY unable to report `healthy`,
+      // regardless of underlying data — the deterministic seed
+      // cannot ever satisfy the manifest's expectedState=`healthy`.
+      // Real degradation still surfaces: `degraded`/`failed` remain
+      // in the trigger set, and the per-service `unknown` state
+      // stays visible in the payload so the renderer can still
+      // display "probe deferred" honestly to the operator.
       const anyDegraded =
         payload.schemaFingerprint.fingerprintMatch !== 'match' ||
         payload.reconciliationHealth.state !== 'ok' ||
         payload.scannerReadiness.state !== 'ready' ||
-        services.some((s) => s.state === 'degraded' || s.state === 'failed' || s.state === 'unknown');
+        services.some((s) => s.state === 'degraded' || s.state === 'failed');
 
       const generatedAt = nowIso();
       return anyDegraded
