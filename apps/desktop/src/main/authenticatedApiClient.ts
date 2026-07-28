@@ -92,9 +92,9 @@ export interface AuthenticatedApiClientInput {
   requestTimeoutMs?: number;
 }
 
-export interface ApiResponse<T = unknown> {
+export interface ApiResponse {
   status: number;
-  body: T;
+  body: unknown;
 }
 
 export class ApiCallError extends Error {
@@ -116,16 +116,6 @@ export class AuthenticatedApiClient {
     this.baseUrl = input.serverBaseUrl.replace(/\/$/, '');
     this.f = input.fetchImpl ?? fetch;
     this.requestTimeoutMs = input.requestTimeoutMs ?? 8_000;
-  }
-
-  async request<T = unknown>(
-    key: ApiRouteKey,
-    body?: unknown,
-    extraHeaders?: Record<string, string>,
-  ): Promise<ApiResponse<T>> {
-    const route = API_ROUTES[key];
-    if (!route) throw new Error(`route not allowlisted: ${key}`);
-    return this.execute<T>(route, body, extraHeaders, /* isRetry */ false);
   }
 
   /**
@@ -194,9 +184,9 @@ export class AuthenticatedApiClient {
     // pipeline still throws ApiCallError on 401 refresh exhaustion;
     // we normalise that into DesktopApiHttpError below.
     const legacyRoute: RouteSpec = { method: routeAny.method, path: routeAny.path, scope: routeAny.scope };
-    let httpResponse: ApiResponse<unknown>;
+    let httpResponse: ApiResponse;
     try {
-      httpResponse = await this.execute<unknown>(legacyRoute, validatedBody, extraHeaders, false);
+      httpResponse = await this.execute(legacyRoute, validatedBody, extraHeaders, false);
     } catch (e) {
       if (e instanceof ApiCallError) {
         // 401-after-refresh or bootstrap-token-missing paths land here.
@@ -252,12 +242,12 @@ export class AuthenticatedApiClient {
     return (DESKTOP_API_ROUTES[key] as { request?: unknown }).request !== undefined;
   }
 
-  private async execute<T>(
+  private async execute(
     route: RouteSpec,
     body: unknown,
     extraHeaders: Record<string, string> | undefined,
     isRetry: boolean,
-  ): Promise<ApiResponse<T>> {
+  ): Promise<ApiResponse> {
     const headers: Record<string, string> = {
       accept: 'application/json',
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
@@ -286,18 +276,21 @@ export class AuthenticatedApiClient {
       clearTimeout(timer);
     }
     const text = await res.text();
-    const parsed = text ? safeParse(text) : null;
+    // Stage 3C-CI-RESET Part 2 §1 (Checkpoint A.1): body is
+    // `unknown` — no `as T` cast. Callers of requestValidated get
+    // a schema-narrowed value; there is no other public consumer.
+    const parsedBody: unknown = text ? safeParse(text) : null;
     if (res.status === 401 && route.scope === 'operator') {
       if (!isRetry) {
         const refresh = await this.input.onRefreshNeeded();
         if (refresh.ok) {
-          return this.execute<T>(route, body, extraHeaders, /* isRetry */ true);
+          return this.execute(route, body, extraHeaders, /* isRetry */ true);
         }
         throw new ApiCallError('unauthenticated_after_refresh', 401, { reason: refresh.reason });
       }
-      throw new ApiCallError('unauthenticated_after_retry', 401, parsed);
+      throw new ApiCallError('unauthenticated_after_retry', 401, parsedBody);
     }
-    return { status: res.status, body: parsed as T };
+    return { status: res.status, body: parsedBody };
   }
 }
 

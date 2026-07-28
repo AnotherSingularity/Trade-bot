@@ -60,58 +60,104 @@ export interface DesktopApiRouteDefinition {
 // ---------------------------------------------------------------------------
 
 /**
- * Bootstrap-scope: server readiness gate. Every field is optional
- * because the server surfaces different levels of detail as
- * subsystems come online.
+ * Bootstrap-scope: server readiness gate.
+ * Server responds with `{known, ready, components: {...}, safeFlags,
+ * version, timestamp}` (apps/server/src/routes/desktop.ts:196-203).
+ * `passthrough` permits the components sub-tree to evolve without
+ * churn here — the desktop cares about `ready` and the safety flags.
  */
 export const SystemReadinessResponseSchema = z.object({
+  known: z.literal(true),
   ready: z.boolean(),
-  services: z.record(z.string(), z.string()).optional(),
-  schemaVersion: z.string().optional(),
-  message: z.string().optional(),
+  version: z.string().optional(),
+  timestamp: z.string().optional(),
+  safeFlags: z.object({
+    DRY_RUN: z.boolean(),
+    ORDER_SUBMISSION_ENABLED: z.boolean(),
+  }).passthrough().optional(),
 }).passthrough();
 
 /**
- * Bootstrap-scope: authoritative CreateOrder counters. The renderer
- * safety gauge relies on these values being zero.
+ * Bootstrap-scope: authoritative CreateOrder counters. Server responds
+ * with the `{known, source, values: {...}}` envelope
+ * (apps/server/src/routes/desktop.ts:36-47).
  */
 export const CreateOrderCountersServerResponseSchema = z.object({
-  functionInvocations: z.number().int().nonnegative(),
-  attemptCount: z.number().int().nonnegative(),
-  networkCount: z.number().int().nonnegative(),
+  known: z.boolean(),
+  source: z.string(),
+  values: z.object({
+    functionInvocations: z.number().int().nonnegative(),
+    attemptCount: z.number().int().nonnegative(),
+    networkCount: z.number().int().nonnegative(),
+  }).strict(),
 }).strict();
 
 /**
- * Bootstrap-scope: scanner readiness.
+ * Bootstrap-scope: scanner readiness. Server responds with either the
+ * happy-path envelope or a `{known:false, state:'unknown', reason, detail}`
+ * error envelope (apps/server/src/routes/desktop.ts:49-76). Both are
+ * accepted; downstream code branches on `known`.
  */
-export const ScannerReadinessServerResponseSchema = z.object({
-  state: z.enum(['ready', 'blocked', 'unknown']),
-  blockingReasons: z.array(z.string()),
+export const ScannerReadinessServerResponseSchema = z.union([
+  z.object({
+    known: z.literal(true),
+    state: z.enum(['ready', 'blocked']),
+    blockingReasons: z.array(z.string()),
+    reconciliation: z.unknown().optional(),
+    computedAt: z.string().optional(),
+  }).passthrough(),
+  z.object({
+    known: z.literal(false),
+    state: z.enum(['unknown', 'blocked']),
+    reason: z.string().optional(),
+    detail: z.string().optional(),
+  }).passthrough(),
+]);
+
+/**
+ * Bootstrap-scope: reconciliation status envelope. Server responds
+ * with `{known, ...snapshot}` or `{known:false, reason, detail}`
+ * (apps/server/src/routes/desktop.ts:78-89).
+ */
+export const ReconciliationStatusServerResponseSchema = z.union([
+  z.object({
+    known: z.literal(true),
+    ok: z.boolean().optional(),
+    lastRunAt: z.string().nullable().optional(),
+  }).passthrough(),
+  z.object({
+    known: z.literal(false),
+    reason: z.string().optional(),
+    detail: z.string().optional(),
+  }).passthrough(),
+]);
+
+/**
+ * Operator-scope: observer policy versions. Server responds with the
+ * `{known, source, values: {...string map}}` envelope
+ * (apps/server/src/routes/desktop.ts:105-118).
+ */
+export const ObserverPolicyVersionsServerResponseSchema = z.object({
+  known: z.boolean(),
+  source: z.string(),
+  values: z.record(z.string(), z.string()),
 }).strict();
 
 /**
- * Bootstrap-scope: reconciliation status envelope. Kept permissive
- * (passthrough) because the reconciliation payload spans many
- * observer results; the schema-aware validator asserts SHAPE, not
- * every subfield.
- */
-export const ReconciliationStatusServerResponseSchema = z.object({
-  lastRunAt: z.string().nullable(),
-  status: z.string(),
-}).passthrough();
-
-/**
- * Operator-scope: observer policy versions. Map of observer name →
- * currently-active policy version string.
- */
-export const ObserverPolicyVersionsServerResponseSchema = z.record(z.string(), z.string());
-
-/**
- * Operator-scope: champion configuration snapshot.
+ * Operator-scope: champion configuration. Server responds with the
+ * `{known, source, values: {...}}` envelope
+ * (apps/server/src/routes/desktop.ts:120-131).
  */
 export const ChampionConfigurationServerResponseSchema = z.object({
-  version: z.string(),
-}).passthrough();
+  known: z.boolean(),
+  source: z.string(),
+  values: z.object({
+    championVersion: z.string(),
+    strategyVersion: z.string().optional(),
+    dryRun: z.boolean().optional(),
+    orderSubmissionEnabled: z.boolean().optional(),
+  }).passthrough(),
+}).strict();
 
 /**
  * Operator-scope: sanitized current session summary. Never carries

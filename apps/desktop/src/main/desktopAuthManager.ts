@@ -20,13 +20,29 @@ import type {
   AuthOperationResponse,
 } from '../shared/ipcContract';
 import type { AuthenticatedApiClient } from './authenticatedApiClient';
-import { ApiCallError } from './authenticatedApiClient';
+import {
+  ApiCallError,
+  DesktopApiContractMismatchError,
+  DesktopApiHttpError,
+  DesktopApiInvalidJsonError,
+  DesktopApiTransportError,
+} from './authenticatedApiClient';
 import type { AuthTokenStorage } from './secureStorage';
 // Stage 3C-CI-FIX10A §1: canonical login body construction. The
 // helper omits optional fields when absent so `installationId: null`
 // can never reach the wire. See operatorLoginBody.ts for the exact
 // contract and the FIX10A native-run root cause.
 import { buildOperatorLoginBody } from './operatorLoginBody';
+// Stage 3C-CI-RESET Part 2 §1 (Checkpoint A.1): shared schemas the
+// manager reparses to narrow the `unknown` requestValidated returns.
+// The schemas already ran under requestValidated; reparse is
+// idempotent and never accepts a shape the client would reject.
+import {
+  OperatorAuthStateServerResponseSchema,
+  OperatorSetupServerResponseSchema,
+  OperatorLoginServerResponseSchema,
+  OperatorRefreshServerResponseSchema,
+} from '@horizon/shared';
 
 interface ServerTokenPair {
   accessToken: string;
@@ -102,16 +118,17 @@ export class DesktopAuthManager {
    */
   async initialize(): Promise<SanitizedAuthState> {
     try {
-      const stateRes = await this.api.request<{ setupCompleted: boolean }>('authState');
-      if (stateRes.status !== 200) {
-        this.snap = { ...this.snap, phase: 'bootstrap_unavailable', failureReason: `state_status_${stateRes.status}` };
-        return this.sanitize();
-      }
-      if (!stateRes.body?.setupCompleted) {
+      const raw = await this.api.requestValidated('authState');
+      const stateBody = OperatorAuthStateServerResponseSchema.parse(raw);
+      if (!stateBody.setupCompleted) {
         this.snap = { ...this.snap, phase: 'setup_required' };
         return this.sanitize();
       }
     } catch (e) {
+      if (e instanceof DesktopApiHttpError) {
+        this.snap = { ...this.snap, phase: 'bootstrap_unavailable', failureReason: `state_status_${e.status}` };
+        return this.sanitize();
+      }
       this.snap = { ...this.snap, phase: 'bootstrap_unavailable', failureReason: describeError(e) };
       return this.sanitize();
     }
@@ -145,10 +162,9 @@ export class DesktopAuthManager {
     // launch path). Cheap re-check when we're not authenticated.
     if (this.snap.phase === 'bootstrap_unavailable' || this.snap.phase === 'setup_required') {
       try {
-        const res = await this.api.request<{ setupCompleted: boolean }>('authState');
-        if (res.status === 200) {
-          this.snap.phase = res.body?.setupCompleted ? 'unauthenticated' : 'setup_required';
-        }
+        const raw = await this.api.requestValidated('authState');
+        const body = OperatorAuthStateServerResponseSchema.parse(raw);
+        this.snap.phase = body.setupCompleted ? 'unauthenticated' : 'setup_required';
       } catch { /* keep prior phase */ }
     }
     return this.sanitize();
@@ -156,16 +172,18 @@ export class DesktopAuthManager {
 
   async setup(input: { username: string; password: string; passwordConfirmation: string }): Promise<AuthOperationResponse> {
     try {
-      const res = await this.api.request<{ account?: ServerAccount; error?: string; detail?: string }>('authSetup', input);
-      if (res.status === 201 && res.body?.account) {
+      const raw = await this.api.requestValidated('authSetup', input);
+      const body = OperatorSetupServerResponseSchema.parse(raw);
+      if (body.account) {
         this.snap.phase = 'unauthenticated';
         this.snap.failureReason = null;
         return this.opResponse(true, null);
       }
-      this.snap.failureReason = res.body?.error ?? 'setup_failed';
+      // Should be unreachable — schema requires `account`. Defensive.
+      this.snap.failureReason = 'setup_failed';
       return this.opResponse(false, this.snap.failureReason);
     } catch (e) {
-      return this.opResponse(false, describeError(e));
+      return this.opResponse(false, apiErrorToReason(e, 'setup_failed'));
     }
   }
 
@@ -174,41 +192,35 @@ export class DesktopAuthManager {
       // Stage 3C-CI-FIX10A §1: normalize the body via the pure helper.
       // Absent optional fields are OMITTED from the serialized JSON;
       // in particular `installationId: null` can never reach the wire.
-      // The server's Zod schema (installationId?: number|string) rejects
-      // `null`, so a `null` in the pre-FIX10A body produced HTTP 400
-      // `invalid_body` before credential verification — the FIX10 run's
-      // exact failure signature.
       const body = buildOperatorLoginBody({
         username: input.username,
         password: input.password,
         installationId: this.installationId,
         clientVersion: this.clientVersion,
       });
-      const res = await this.api.request<{
-        account?: ServerAccount;
-        tokens?: ServerTokenPair;
-        error?: string;
-        reason?: string;
-      }>('authLogin', body);
-      if (res.status !== 200 || !res.body?.account || !res.body?.tokens) {
-        const reason = res.body?.reason ?? res.body?.error ?? `status_${res.status}`;
-        if (reason === 'locked' || res.status === 423) {
-          this.snap.phase = 'account_locked';
-        } else if (res.status === 429) {
-          this.snap.phase = 'account_locked';
-        }
-        this.snap.failureReason = String(reason);
-        return this.opResponse(false, String(reason));
-      }
-      this.snap.account = res.body.account;
-      this.snap.pair = res.body.tokens;
+      const raw = await this.api.requestValidated('authLogin', body);
+      const parsed = OperatorLoginServerResponseSchema.parse(raw);
+      this.snap.account = parsed.account;
+      this.snap.pair = parsed.tokens;
       this.snap.lastActivityAt = this.now().toISOString();
       this.snap.phase = 'authenticated';
       this.snap.failureReason = null;
-      await this.tokenStorage.saveRefreshToken(res.body.tokens.refreshToken);
+      await this.tokenStorage.saveRefreshToken(parsed.tokens.refreshToken);
       return this.opResponse(true, null);
     } catch (e) {
-      return this.opResponse(false, describeError(e));
+      // Stage 3C-CI-RESET Part 2 §1 (Checkpoint A.1): typed error
+      // classification. DesktopApiHttpError carries the sanitized
+      // reason + status; we map 423/429/`locked` to account_locked
+      // phase and stash the reason.
+      if (e instanceof DesktopApiHttpError) {
+        const reason = (e.reason === 'unspecified' ? `status_${e.status}` : e.reason);
+        if (reason === 'locked' || e.status === 423 || e.status === 429) {
+          this.snap.phase = 'account_locked';
+        }
+        this.snap.failureReason = reason;
+        return this.opResponse(false, reason);
+      }
+      return this.opResponse(false, apiErrorToReason(e, 'login_failed'));
     }
   }
 
@@ -219,7 +231,7 @@ export class DesktopAuthManager {
       return this.opResponse(true, null);
     }
     try {
-      await this.api.request('authLogout');
+      await this.api.requestValidated('authLogout', {});
     } catch { /* best-effort — clear local state even if server call failed */ }
     this.snap.account = null;
     this.snap.pair = null;
@@ -232,7 +244,7 @@ export class DesktopAuthManager {
   async lock(): Promise<AuthOperationResponse> {
     if (!this.snap.pair) return this.opResponse(true, null);
     try {
-      await this.api.request('authLock');
+      await this.api.requestValidated('authLock', {});
     } catch { /* still transition locally */ }
     this.snap.account = null;
     this.snap.pair = null;
@@ -255,10 +267,7 @@ export class DesktopAuthManager {
   }): Promise<AuthOperationResponse> {
     if (!this.snap.pair) return this.opResponse(false, 'unauthenticated');
     try {
-      const res = await this.api.request<{ ok?: boolean; reason?: string; detail?: string }>('authChangePassword', input);
-      if (res.status !== 200) {
-        return this.opResponse(false, res.body?.reason ?? `status_${res.status}`);
-      }
+      await this.api.requestValidated('authChangePassword', input);
       // Server revoked every session on success. Re-login required.
       this.snap.account = null;
       this.snap.pair = null;
@@ -267,14 +276,14 @@ export class DesktopAuthManager {
       await this.tokenStorage.clearRefreshToken();
       return this.opResponse(true, null);
     } catch (e) {
-      return this.opResponse(false, describeError(e));
+      return this.opResponse(false, apiErrorToReason(e, 'change_password_failed'));
     }
   }
 
   async revokeAll(): Promise<AuthOperationResponse> {
     if (!this.snap.pair) return this.opResponse(true, null);
     try {
-      await this.api.request('authRevokeAll');
+      await this.api.requestValidated('authRevokeAll', {});
     } catch { /* proceed to clear local state */ }
     this.snap.account = null;
     this.snap.pair = null;
@@ -303,33 +312,35 @@ export class DesktopAuthManager {
 
   private async performRefresh(refreshToken: string): Promise<{ ok: true; newAccessToken: string } | { ok: false; reason: string }> {
     try {
-      const res = await this.api.request<{ tokens?: ServerTokenPair; reason?: string; error?: string }>('authRefresh', { refreshToken });
-      if (res.status !== 200 || !res.body?.tokens) {
-        const reason = res.body?.reason ?? res.body?.error ?? `status_${res.status}`;
-        if (reason === 'already_rotated_family_revoked') {
-          this.snap.pair = null;
-          this.snap.account = null;
-          this.snap.phase = 'session_revoked';
-          this.snap.failureReason = 'refresh_reuse_detected';
-        } else if (reason === 'absolute_expired' || reason === 'refresh_expired') {
-          this.snap.pair = null;
-          this.snap.account = null;
-          this.snap.phase = 'session_expired';
-          this.snap.failureReason = reason;
-        }
-        return { ok: false, reason: String(reason) };
-      }
-      this.snap.pair = res.body.tokens;
+      const raw = await this.api.requestValidated('authRefresh', { refreshToken });
+      const parsed = OperatorRefreshServerResponseSchema.parse(raw);
+      this.snap.pair = parsed.tokens;
       this.snap.lastActivityAt = this.now().toISOString();
-      await this.tokenStorage.saveRefreshToken(res.body.tokens.refreshToken);
-      return { ok: true, newAccessToken: res.body.tokens.accessToken };
+      await this.tokenStorage.saveRefreshToken(parsed.tokens.refreshToken);
+      return { ok: true, newAccessToken: parsed.tokens.accessToken };
     } catch (e) {
-      if (e instanceof ApiCallError && e.status === 401) {
+      // Semantic-preserving mapping of the pre-RESET behavior:
+      //   - `already_rotated_family_revoked` → session_revoked
+      //   - `absolute_expired` / `refresh_expired` → session_expired
+      //   - 401 ApiCallError → session_expired
+      //   - anything else → return the reason without transitioning
+      const reason = apiErrorToReason(e, 'refresh_failed');
+      if (reason === 'already_rotated_family_revoked') {
+        this.snap.pair = null;
+        this.snap.account = null;
+        this.snap.phase = 'session_revoked';
+        this.snap.failureReason = 'refresh_reuse_detected';
+      } else if (reason === 'absolute_expired' || reason === 'refresh_expired') {
+        this.snap.pair = null;
+        this.snap.account = null;
+        this.snap.phase = 'session_expired';
+        this.snap.failureReason = reason;
+      } else if (e instanceof ApiCallError && e.status === 401) {
         this.snap.pair = null;
         this.snap.account = null;
         this.snap.phase = 'session_expired';
       }
-      return { ok: false, reason: describeError(e) };
+      return { ok: false, reason };
     }
   }
 
@@ -356,4 +367,35 @@ function describeError(e: unknown): string {
   if (e instanceof ApiCallError) return `api_${e.status}`;
   if (e instanceof Error) return e.message.slice(0, 120);
   return String(e).slice(0, 120);
+}
+
+/**
+ * Stage 3C-CI-RESET Part 2 §1 (Checkpoint A.1): typed-error →
+ * failure-reason projection. Maps DesktopApiHttpError /
+ * DesktopApiContractMismatchError / DesktopApiInvalidJsonError /
+ * DesktopApiTransportError to short reason strings the manager can
+ * embed in AuthOperationResponse.reason. Falls back to the legacy
+ * ApiCallError / Error path via describeError.
+ */
+function apiErrorToReason(e: unknown, fallback: string): string {
+  if (e instanceof DesktopApiHttpError) {
+    const reason = e.reason === 'unspecified' ? `status_${e.status}` : e.reason;
+    return reason.slice(0, 120);
+  }
+  if (e instanceof DesktopApiContractMismatchError) {
+    return `contract_${e.kind}:${e.route}:${e.issuePath}`.slice(0, 120);
+  }
+  if (e instanceof DesktopApiInvalidJsonError) {
+    return `invalid_json:${e.route}`.slice(0, 120);
+  }
+  if (e instanceof DesktopApiTransportError) {
+    return `transport:${e.route}`.slice(0, 120);
+  }
+  if (e instanceof ApiCallError) return `api_${e.status}`;
+  if (e instanceof Error) {
+    const m = e.message.slice(0, 120);
+    return m.length > 0 ? m : fallback;
+  }
+  const s = String(e).slice(0, 120);
+  return s.length > 0 ? s : fallback;
 }
