@@ -16,6 +16,7 @@ import { withLease, RECONCILE_LEASE_KEY } from './jobs/lease';
 import { desktopOperatorRouter, desktopRouter, systemReadinessRouter } from './routes/desktop';
 import { operatorAuthRouter } from './routes/auth';
 import { nativeInductionRouter, shouldMountNativeInduction } from './routes/nativeInduction';
+import { nativeDiagnosticsRouter, shouldMountNativeDiagnostics } from './routes/nativeDiagnostics';
 import { configureBootstrapToken } from './auth/bootstrap';
 
 /**
@@ -128,6 +129,12 @@ async function main() {
     app.use('/api/native-induction', nativeInductionRouter());
     // eslint-disable-next-line no-console
     console.log('[native-induction] mounted /api/native-induction (test-only)');
+  }
+  // Stage 3C-CI-RESET Part 2 Checkpoint D.1 §D.14/§D.16.
+  if (shouldMountNativeDiagnostics()) {
+    app.use('/api/native-diagnostics', nativeDiagnosticsRouter());
+    // eslint-disable-next-line no-console
+    console.log('[native-diagnostics] mounted /api/native-diagnostics (test-only)');
   }
 
   // ── tRPC

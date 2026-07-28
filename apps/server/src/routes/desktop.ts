@@ -28,6 +28,7 @@ import * as schema from '../db/schema';
 import { ENV } from '../env';
 import { httpCounters } from '../lib/fetchBarrier';
 import { requireBootstrapAuthorization } from '../middleware/bootstrapAuth';
+import { applyNativeInduction } from '../lib/nativeInductionInterception';
 import { requireOperatorSession } from '../middleware/operatorSession';
 
 export function desktopRouter(): Router {
@@ -47,6 +48,11 @@ export function desktopRouter(): Router {
   });
 
   router.get('/scanner-readiness', requireBootstrapAuthorization, async (_req, res) => {
+    // D.1 §D.3 — induction interception BEFORE normal handling.
+    // Only mutates when the strict policy + nonce + route allowlist
+    // approved an activation. Inactive → falls through to real logic.
+    const induced = applyNativeInduction('scannerReadiness');
+    if (induced != null) { res.json(induced.body); return; }
     try {
       const rec = await queryReconciliationSnapshot();
       const counters = httpCounters();
@@ -76,6 +82,8 @@ export function desktopRouter(): Router {
   });
 
   router.get('/reconciliation/status', requireBootstrapAuthorization, async (_req, res) => {
+    const induced = applyNativeInduction('reconciliationStatus');
+    if (induced != null) { res.json(induced.body); return; }
     try {
       const rec = await queryReconciliationSnapshot();
       res.json({ known: true, ...rec });
@@ -103,6 +111,8 @@ export function desktopOperatorRouter(): Router {
   const router = Router();
 
   router.get('/observer-policy-versions', requireOperatorSession, (_req, res) => {
+    const induced = applyNativeInduction('observerPolicyVersions');
+    if (induced != null) { res.json(induced.body); return; }
     res.json({
       known: true,
       source: 'compiled_in',
