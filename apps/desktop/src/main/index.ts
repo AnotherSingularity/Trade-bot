@@ -25,7 +25,7 @@ import { ConsoleSink, Logger } from './logging';
 import { resolveDesktopEnvironment, resolveSandboxPolicy, validateDesktopEnvironment } from './localEnvironment';
 import { resolveDesktopRuntimeLayout, sanitizePreloadPath } from './runtimeLayout';
 import { InMemorySecretsAdapter, KeytarSecretsAdapter, type SecretsAdapter, collectCredentialStatuses } from './secrets';
-import { mintBootstrapToken } from './bootstrapToken';
+import { resolveBootstrapTokenAuthority } from './bootstrapToken';
 import { createAuthTokenStorage } from './secureStorage';
 import { AuthenticatedApiClient } from './authenticatedApiClient';
 import { DesktopAuthManager } from './desktopAuthManager';
@@ -220,8 +220,26 @@ async function boot(): Promise<void> {
     composeProject: process.env.HORIZON_COMPOSE_PROJECT ?? 'horizon-trade',
   });
 
-  // Stage 2 §2: mint a fresh bootstrap token for this server lifecycle.
-  const bootstrap = mintBootstrapToken();
+  // Stage 3C-CI-FIX9 §1: unified bootstrap-token authority.
+  //   - Production / desktop-owned server: mint a fresh 256-bit token
+  //     (as always). The desktop is the sole authority.
+  //   - Strict unpackaged native-test mode (packaged=false + NODE_ENV=test
+  //     + HORIZON_NATIVE_DIAGNOSTICS=true + HORIZON_SERVER_EXTERNAL=true):
+  //     IMPORT the token the harness already gave the external server.
+  //     This is the ONLY environment in which the desktop accepts an
+  //     env-supplied bootstrap token.
+  //   - Any other config combination falls through to `mintBootstrapToken`
+  //     with no way to reach the import branch.
+  const bootstrap = resolveBootstrapTokenAuthority({
+    isPackaged: app.isPackaged,
+    nodeEnv: process.env.NODE_ENV,
+    nativeDiagnostics: process.env.HORIZON_NATIVE_DIAGNOSTICS,
+    serverExternal: process.env.HORIZON_SERVER_EXTERNAL,
+    envBootstrapToken: process.env.HORIZON_BOOTSTRAP_TOKEN,
+  });
+  // Non-sensitive diagnostic field — proves via the log which branch
+  // was taken. Never logs the token value itself.
+  logger.info('bootstrap_token_authority_resolved', { source: bootstrap.source });
 
   const useKeytar = process.env.HORIZON_USE_KEYTAR === 'true' || isPackaged;
   const secrets: SecretsAdapter = useKeytar ? new KeytarSecretsAdapter() : new InMemorySecretsAdapter();

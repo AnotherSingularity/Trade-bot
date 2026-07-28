@@ -168,6 +168,112 @@ async function tryCapturePageArtefacts(logsDir: string): Promise<void> {
   } catch { /* best-effort */ }
 }
 
+// Stage 3C-CI-FIX9 §2.1: bounded poll for a non-loading auth phase.
+// The expected post-setup state is `unauthenticated`. Fails fast on
+// AuthGate blockers so a broken bootstrap-token authority is named
+// attributively.
+async function awaitAuthStateReady(page: import('playwright').Page): Promise<void> {
+  const start = Date.now();
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    let state: { phase?: string; failureReason?: string } | null = null;
+    try {
+      state = await page.evaluate(async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const h = (globalThis as any).horizon;
+        if (!h?.auth?.getState) return null;
+        return await h.auth.getState();
+      });
+    } catch {
+      // page.evaluate rejects during navigation; retry until outer timeout.
+    }
+    if (!state) {
+      // No bridge; the outer timeout will fire if this persists.
+      await new Promise((r) => setTimeout(r, 200));
+      continue;
+    }
+    const phase = String(state.phase ?? '');
+    // Expected post-setup state.
+    if (phase === 'unauthenticated' || phase === 'setup_required') {
+      diagnosticsTrace?.record('authentication_started', 'completed', { phase, waitedMs: Date.now() - start });
+      return;
+    }
+    if (phase === 'bootstrap_unavailable') {
+      // FIX8 failure signature: 401 from bootstrap-scoped call.
+      throw new Error(`native_auth_bootstrap_unauthorized:${String(state.failureReason ?? '').slice(0, 120)}`);
+    }
+    if (phase === 'account_locked' || phase === 'session_revoked' || phase === 'session_expired') {
+      throw new Error(`native_auth_state_unexpected:${phase}`);
+    }
+    if (phase === 'authenticated') {
+      // Unexpected — the deterministic operator fixture just created a
+      // clean scratch DB; a fresh session should not already exist.
+      throw new Error('native_auth_state_unexpected:already_authenticated');
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+// Stage 3C-CI-FIX9 §2.2: perform login via the real preload bridge.
+// Never a Playwright-side auth mock.
+async function performAuthenticatedLogin(page: import('playwright').Page): Promise<void> {
+  diagnosticsTrace?.record('authentication_complete', 'started', { subphase: 'login' });
+  const result = await page.evaluate(async ({ u, p }) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const h = (globalThis as any).horizon;
+    if (!h?.auth?.login) return { ok: false, err: 'no_bridge' };
+    try {
+      const resp = await h.auth.login({ username: u, password: p });
+      const state = await h.auth.getState();
+      return { ok: true, resp, state };
+    } catch (e) {
+      return { ok: false, err: String(e).slice(0, 120) };
+    }
+  }, { u: ADMIN_USER, p: ADMIN_PASSWORD });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const r = result as any;
+  if (!r.ok) throw new Error(`native_auth_login_rejected:${String(r.err).slice(0, 120)}`);
+  if (r.resp?.ok !== true) throw new Error(`native_auth_login_rejected:${String(r.resp?.error ?? 'unknown').slice(0, 120)}`);
+  const readbackPhase = String(r.state?.phase ?? '');
+  if (readbackPhase !== 'authenticated') {
+    throw new Error(`native_auth_login_state_mismatch:${readbackPhase}`);
+  }
+}
+
+// Stage 3C-CI-FIX9 §3.2: shared guard for every screen assertion.
+// A short bounded read of the auth state — fails fast when the app
+// shell is blocked by AuthGate instead of starting a 25s screen poll.
+async function assertAuthenticatedNativeSession(screenKey: string): Promise<void> {
+  if (!launch) throw new Error(`native_screen_precondition_no_launch:${screenKey}`);
+  let phase: string | null = null;
+  try {
+    const s = await launch.page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const h = (globalThis as any).horizon;
+      if (!h?.auth?.getState) return null;
+      return await h.auth.getState();
+    });
+    phase = s ? String((s as { phase?: string }).phase ?? '') : null;
+  } catch { phase = null; }
+  if (phase !== 'authenticated') {
+    throw new Error(`native_screen_blocked_by_auth:${screenKey}:phase=${phase ?? 'null'}`);
+  }
+}
+
+// Stage 3C-CI-FIX9 §3.3: fail-fast screen navigator.
+// Retains the 25s upper bound for genuine data-loading waits, but
+// bails immediately when the page carries any AuthGate blocker
+// string. A broken preload state or an unauthenticated shell can
+// no longer consume the full 25s per screen × 19 screens.
+const FAIL_FAST_STRINGS: ReadonlyArray<{ text: string; code: string }> = [
+  { text: 'state_status_401', code: 'native_screen_blocked_by_auth' },
+  { text: 'Waiting for server', code: 'native_screen_blocked_by_auth' },
+  { text: 'preload_bridge_missing', code: 'native_screen_preload_missing' },
+  { text: 'data-state="session_expired"', code: 'native_screen_session_expired' },
+  { text: 'data-state="session_revoked"', code: 'native_screen_session_expired' },
+  { text: 'data-state="account_locked"', code: 'native_screen_session_expired' },
+];
+
 async function navigateAndWaitFor(hashRoute: string, screenAttr: string, timeoutMs = 25_000): Promise<{ frame: string; leftLoading: boolean }> {
   if (!launch) throw new Error('launch missing');
   await launch.page.evaluate((h) => { window.location.hash = h; }, hashRoute);
@@ -176,11 +282,15 @@ async function navigateAndWaitFor(hashRoute: string, screenAttr: string, timeout
   let lastFrame = '';
   while (Date.now() < deadline) {
     lastFrame = await launch.page.content();
+    // Fail-fast: AuthGate blockers or preload bridge absence should
+    // never wait 25 s. Named classification instead of an opaque timeout.
+    for (const { text, code } of FAIL_FAST_STRINGS) {
+      if (lastFrame.includes(text)) {
+        throw new Error(`${code}:${screenAttr}:matched=${text}`);
+      }
+    }
     // Screen mounted (StateFrame emits data-screen attr).
     if (lastFrame.includes(`data-screen="${screenAttr}"`)) {
-      // Loading state is emitted as data-state="loading"; consider
-      // "left loading" once any non-loading data-state is observed
-      // for this screen.
       if (/data-state="(healthy|empty|stale|degraded|unavailable|api_failure|contract_mismatch|unauthorized|session_expired)"/.test(lastFrame)) {
         leftLoading = true;
         break;
@@ -348,9 +458,39 @@ beforeAll(async () => {
     diagnosticsTrace!.record('renderer_ready', 'completed', {});
     diagnosticsStatus!.setPhase('renderer_ready');
 
-    // Stage 3C-CI-FIX5 §4: startup complete, NOT full-run complete.
-    // `completed:true` only flips in afterAll after every native
-    // assertion + shutdown + leak verification + evidence emission.
+    // Stage 3C-CI-FIX9 §2.1: AUTH STATE READY.
+    // Poll window.horizon.auth.getState() until the sanitized state
+    // reports `unauthenticated` (the expected post-setup state).
+    // Fail immediately with a specific classification on
+    // bootstrap_unavailable / 401 / bridge_missing / lock states —
+    // these all indicate the desktop→server authentication chain is
+    // broken and no screen assertion could ever succeed.
+    diagnosticsTrace!.record('authentication_started', 'started', { subphase: 'auth_state' });
+    diagnosticsStatus!.setPhase('authentication_started');
+    await withNativeTimeout(
+      'auth_state',
+      30_000,
+      awaitAuthStateReady(launch!.page),
+      { trace: diagnosticsTrace },
+    );
+
+    // Stage 3C-CI-FIX9 §2.2: LOGIN inside bounded startup.
+    // Uses the real bridge — never a Playwright-side auth mock.
+    // Requires phase==='authenticated' after both the login response
+    // AND an independent getState() reads back the sanitized state.
+    await withNativeTimeout(
+      'auth_login',
+      30_000,
+      performAuthenticatedLogin(launch!.page),
+      { trace: diagnosticsTrace },
+    );
+    diagnosticsTrace!.record('authentication_complete', 'completed', {});
+    diagnosticsStatus!.setPhase('authentication_complete');
+
+    // Stage 3C-CI-FIX9 §2.3: startup is complete ONLY after the
+    // authenticated shell is ready. The FIX8 run set startupComplete
+    // after renderer_ready — that was too early because AuthGate
+    // remained blocked by the bootstrap-token mismatch.
     diagnosticsStatus!.markStartupComplete();
   });
 
@@ -769,22 +909,23 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
     expect(startupTrace).toContain('operator_provisioned');
   });
 
-  // §12.14 Operator login succeeds via the desktop auth manager.
-  it('T14: operator login via desktop auth manager — phase transitions to authenticated', async () => {
-    // The renderer surfaces the current auth phase via window.horizon.auth.getState().
-    // Trigger login through the same IPC channel the AuthGate uses.
-    const login = await launch!.page.evaluate(async ({ u, p }) => {
+  // §12.14 Operator login succeeded via the desktop auth manager.
+  // Stage 3C-CI-FIX9 §2.4: T14 is now a VERIFICATION of the
+  // authenticated state established during beforeAll — not a
+  // first-time login. beforeAll's `performAuthenticatedLogin` did
+  // the work; this test asserts state consistency.
+  it('T14: authenticated state established during beforeAll is visible', async () => {
+    const phase = await launch!.page.evaluate(async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const h = (window as any).horizon.auth;
-      try {
-        await h.login({ username: u, password: p });
-        return { ok: true, phase: (await h.getState()).phase as string };
-      } catch (e) {
-        return { ok: false, err: String(e).slice(0, 240) };
-      }
-    }, { u: ADMIN_USER, p: ADMIN_PASSWORD });
-    expect(login.ok).toBe(true);
-    expect(login.phase).toBe('authenticated');
+      return (await h.getState()).phase as string;
+    });
+    expect(phase).toBe('authenticated');
+    // AuthGate blocker strings must be ABSENT — proves the shell
+    // rendered past AuthGate.
+    const frame = await launch!.page.content();
+    expect(frame).not.toContain('state_status_401');
+    expect(frame).not.toContain('Waiting for server');
   });
 
   // §12.15 Renderer receives no raw credentials.
@@ -805,6 +946,11 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
 
   // §12.16 Overview renders authoritative readiness.
   it('T16: Overview renders authoritative readiness signals from the running server', async () => {
+    // Stage 3C-CI-FIX9 §3.2: precondition guard — a fast bounded
+    // auth check that fails immediately with a specific
+    // `native_screen_blocked_by_auth:<screen>` code if the
+    // application shell was somehow lost between beforeAll and here.
+    await assertAuthenticatedNativeSession('overview');
     const { leftLoading, frame } = await navigateAndWaitFor('#/overview', 'overview');
     expect(leftLoading).toBe(true);
     // Overview always carries the LIVE ORDER SUBMISSION DISABLED banner.

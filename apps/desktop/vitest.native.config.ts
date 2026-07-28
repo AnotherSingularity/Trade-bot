@@ -27,5 +27,12 @@ export default defineConfig({
     // Serial: the native suite owns MariaDB + Redis + a spawned
     // server and cannot safely run in parallel with itself.
     fileParallelism: false,
+    // Stage 3C-CI-FIX9 §3.1: fail fast after the first substantive
+    // native failure so the suite does not spend minutes repeating
+    // 25s screen-navigation waits behind an unauthenticated AuthGate
+    // (the FIX8 run's exact failure mode). afterAll still runs so
+    // Electron close + server kill + scratch DB drop + Redis
+    // namespace clear + process-leak check still fire.
+    bail: 1,
   },
 });

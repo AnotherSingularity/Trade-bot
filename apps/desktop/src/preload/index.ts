@@ -48,12 +48,6 @@ function emitPreloadMarker(marker: string, detail?: string): void {
   } catch { /* best-effort */ }
 }
 
-// Emitted BEFORE electron is required — carries no detail. Reaches the
-// main-process listener via IPC once ipcRenderer is bound (see below);
-// this call is a no-op until then. The main log will show the marker
-// arriving right after `preload_electron_import_failed` guard passes.
-emitPreloadMarker('HORIZON_NATIVE_PRELOAD_MODULE_ENTERED');
-
 // Top-level diagnostic boundary — any error during preload
 // initialisation surfaces with a specific classification code AND
 // re-throws so main receives an observable failure.
@@ -85,6 +79,17 @@ try {
 } catch (e) {
   preloadFail('preload_electron_import_failed', e);
 }
+
+// Stage 3C-CI-FIX9 §7: MODULE_ENTERED must be emitted AFTER ipcRenderer
+// is bound so it actually reaches main via the fixed diagnostic channel.
+// Emitting before the electron import (as FIX8 did) meant the marker
+// only reached the fallback console sink and never appeared in preload.log
+// via the IPC path. Order is now guaranteed:
+//   1. MODULE_ENTERED  (immediately after electron import)
+//   2. BRIDGE_EXPOSING
+//   3. BRIDGE_EXPOSED
+//   4. INITIALIZED
+emitPreloadMarker('HORIZON_NATIVE_PRELOAD_MODULE_ENTERED');
 
 import {
   IPC_ALLOWLIST,
