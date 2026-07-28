@@ -1270,9 +1270,15 @@ export async function getReports(): Promise<ReportsEnvelope> {
         generationImplemented: false as const,
         reasonCode: 'report_generation_stage4_pending',
       };
-      return history.length === 0
-        ? empty(payload, 'no_report_history_yet', { sourceVersion: 'reports.v1' })
-        : healthy(payload, { sourceVersion: 'reports.v1' });
+      // Stage 3C-E.1.12 — the reports payload is `healthy` whenever
+      // the fixed-literal catalog is served; the export-jobs history
+      // is a supplementary list, not the primary shape. An empty
+      // history is not "no data" — it is "no report has been
+      // generated yet in Stage 4-pending mode". Downgrading to
+      // `empty` was preventing MANIFEST:reports from ever passing
+      // because the deterministic seed intentionally does not create
+      // report jobs.
+      return healthy(payload, { sourceVersion: 'reports.v1' });
     });
   } catch (err) {
     return unavailable('reports_query_failed', { sourceVersion: 'reports.v1', diagnostics: { detail: String(err).slice(0, 200) } });
