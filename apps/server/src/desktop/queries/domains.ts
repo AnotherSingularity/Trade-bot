@@ -697,10 +697,22 @@ export async function getValidation(input: ValidationExperimentListInput | undef
 export async function getCosts(): Promise<CostsEnvelope> {
   try {
     return await withTimeout(async () => {
+      // Stage 3C-E.1.6 — Column list realigned to the actual
+      // forecast_vs_realized_attributions schema (migration 0008).
+      // The previous query referenced columns that never existed
+      // (positionId, forecastFees, forecastSpread, effectiveSpread,
+      // forecastImpact, simulatedImpact, forecastLatencyCost,
+      // totalForecastError, netOutcome), which caused an
+      // ER_BAD_FIELD_ERROR and produced a spurious
+      // `costs_query_failed` for every caller — including the empty
+      // deterministic seed, where the correct honest state is `empty`.
       const res = await db.execute(sql`
-        SELECT id, positionId, attributionVersion, forecastFees, realizedFees, forecastSpread,
-               effectiveSpread, forecastImpact, simulatedImpact, forecastLatencyCost,
-               totalForecastError, netOutcome, createdAt
+        SELECT id, roundTripId, attributionVersion,
+               forecastCommission, realizedCommission,
+               forecastEntryCost, forecastExitCost,
+               forecastSlippage,
+               absoluteForecastError, realizedNetPnl,
+               createdAt
         FROM forecast_vs_realized_attributions
         ORDER BY id DESC
         LIMIT 50
@@ -711,22 +723,25 @@ export async function getCosts(): Promise<CostsEnvelope> {
       }
       const entries = rows.map((r) => ({
         attributionId: String(r.id),
-        positionId: r.positionId != null ? String(r.positionId) : null,
+        // The current schema tracks round-trip identity, not a
+        // separate position identity — the contract's positionId is
+        // honestly null until a later migration adds the column.
+        positionId: null,
         attributionVersion: r.attributionVersion ? String(r.attributionVersion) : null,
-        entryForecast: null,
-        exitForecast: null,
-        forecastFees: toDecimalStringNullable(r.forecastFees),
-        realizedFees: toDecimalStringNullable(r.realizedFees),
-        forecastSpread: toDecimalStringNullable(r.forecastSpread),
-        effectiveSpread: toDecimalStringNullable(r.effectiveSpread),
-        forecastImpact: toDecimalStringNullable(r.forecastImpact),
-        simulatedImpact: toDecimalStringNullable(r.simulatedImpact),
-        forecastLatencyCost: toDecimalStringNullable(r.forecastLatencyCost),
+        entryForecast: toDecimalStringNullable(r.forecastEntryCost),
+        exitForecast: toDecimalStringNullable(r.forecastExitCost),
+        forecastFees: toDecimalStringNullable(r.forecastCommission),
+        realizedFees: toDecimalStringNullable(r.realizedCommission),
+        forecastSpread: toDecimalStringNullable(r.forecastSlippage),
+        effectiveSpread: null,
+        forecastImpact: null,
+        simulatedImpact: null,
+        forecastLatencyCost: null,
         realizedLatencyEvidence: null,
         stopExecutionAssumptions: null,
         exitPath: null,
-        totalForecastError: toDecimalStringNullable(r.totalForecastError),
-        netOutcome: toDecimalStringNullable(r.netOutcome),
+        totalForecastError: toDecimalStringNullable(r.absoluteForecastError),
+        netOutcome: toDecimalStringNullable(r.realizedNetPnl),
         recordedAt: toIsoNullable(r.createdAt as Date | string | null),
       }));
       return healthy({ attributionVersion: entries[0]?.attributionVersion ?? null, entries } as CostsPayload, {
