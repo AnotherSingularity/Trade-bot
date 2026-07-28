@@ -54,12 +54,12 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { createServer as createNetServer } from 'node:net';
-import { mkdirSync, appendFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, appendFileSync, writeFileSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import mysql from 'mysql2/promise';
 import IORedis from 'ioredis';
 import { drizzle } from 'drizzle-orm/mysql2';
-import { migrate } from 'drizzle-orm/mysql2/migrator';
 import { sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { SystemReadinessResponseSchema } from '@horizon/shared';
@@ -366,9 +366,11 @@ async function pickFreePort(): Promise<number> {
 }
 
 /**
- * Stage 3C-E.1 §A — apply migrations via drizzle-orm's migrator so the
- * `__drizzle_migrations` tracking table is populated (row per applied
- * migration). The server's `/api/system/readiness` handler in
+ * Stage 3C-E.1 §A — apply migrations to the scratch database AND
+ * populate the `__drizzle_migrations` tracking table exactly like
+ * drizzle-orm's own mysql2 migrator would.
+ *
+ * The server's `/api/system/readiness` handler in
  * apps/server/src/routes/desktop.ts:251-282 requires:
  *   (a) `__drizzle_migrations` exists in the current schema
  *   (b) row count >= 1 for `migration` component ok
@@ -380,18 +382,100 @@ async function pickFreePort(): Promise<number> {
  * `fingerprint.ok=false`, producing the observed
  * `authseam_readiness_timeout:last=not_ready(known=true)` after 60 s.
  *
- * Using `drizzle-orm/mysql2/migrator` mirrors what
- * `apps/server/src/db/migrate.ts` does at real server boot, so the
- * scratch DB reaches the exact schema state the readiness handler
- * expects — 21 tracked migrations for the 21 SQL files.
+ * Why not `drizzle-orm/mysql2/migrator`? Its `migrate()` reads each
+ * migration file, splits it by the `--> statement-breakpoint` marker,
+ * and sends each chunk to mysql2's prepared-query path. Migration
+ * 0021 (stage2_operator_authentication) predates the breakpoint
+ * convention and contains 5 top-level `CREATE TABLE` statements with
+ * no breakpoint markers. Drizzle's migrator therefore sends the whole
+ * file as ONE query; mysql2's `execute()` rejects the second CREATE
+ * with `ER_PARSE_ERROR` (errno 1064) even when the pool is created
+ * with `multipleStatements: true` — the prepared-statement path does
+ * not honour that option.
+ *
+ * Migrations 0000–0021 are frozen (byte-identical to RESET_BASE and
+ * enforced by the migration-integrity suite), so we cannot add the
+ * markers. This helper implements the same behaviour drizzle's
+ * migrator would with breakpoint-annotated files, but goes through
+ * mysql2's `query()` path — which DOES honour `multipleStatements`
+ * — so a multi-statement chunk is split by the driver. The tracking
+ * table is created and populated so a per-file row exists at the
+ * timestamp declared by `meta/_journal.json`, matching drizzle's
+ * `folderMillis`/`hash` shape exactly.
  */
+
+interface DrizzleJournalEntry {
+  readonly idx: number;
+  readonly when: number;
+  readonly tag: string;
+  readonly breakpoints: boolean;
+}
+
+interface DrizzleJournal {
+  readonly entries: readonly DrizzleJournalEntry[];
+}
+
+function splitMigrationStatements(sqlContent: string): readonly string[] {
+  // Prefer the drizzle breakpoint marker when present — the split it
+  // produces is unambiguous (comments do not embed `;`).
+  if (sqlContent.includes('--> statement-breakpoint')) {
+    return sqlContent
+      .split(/-->\s*statement-breakpoint/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  // Fallback for migrations authored before the marker convention
+  // (currently only 0021). Strip line comments first so a semicolon
+  // inside a comment cannot artificially cut a statement, then split
+  // by `;`. None of the frozen 0000-0021 migrations contain
+  // semicolons inside quoted strings so this is safe for the current
+  // migration set — a regression test pins that invariant.
+  const stripped = sqlContent
+    .split('\n')
+    .filter((line) => !/^\s*--/.test(line))
+    .join('\n');
+  return stripped
+    .split(';')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 async function applyMigrations(dbUrl: string, migrationsDir: string): Promise<void> {
-  const pool = mysql.createPool({ uri: dbUrl, connectionLimit: 2, multipleStatements: false });
+  const journalPath = join(migrationsDir, 'meta', '_journal.json');
+  const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as DrizzleJournal;
+  // Deterministic order — drizzle sorts by `when`, ties broken by `idx`.
+  const entries = [...journal.entries].sort((a, b) =>
+    a.when === b.when ? a.idx - b.idx : a.when - b.when,
+  );
+  // Direct connection (not pool) with multipleStatements so
+  // connection.query() accepts multi-CREATE chunks. Prepared
+  // statements are never used on this connection.
+  const c = await mysql.createConnection({ uri: dbUrl, multipleStatements: true });
   try {
-    const db = drizzle(pool);
-    await migrate(db, { migrationsFolder: migrationsDir });
+    // Match the shape drizzle-orm creates so the server's
+    // `SELECT COUNT(*) FROM __drizzle_migrations` reports the
+    // expected count and the fingerprint check sees applied>=21.
+    await c.query(
+      'CREATE TABLE IF NOT EXISTS `__drizzle_migrations` (' +
+        '`id` SERIAL PRIMARY KEY, ' +
+        '`hash` TEXT NOT NULL, ' +
+        '`created_at` BIGINT)',
+    );
+    for (const entry of entries) {
+      const filePath = join(migrationsDir, `${entry.tag}.sql`);
+      const sqlContent = readFileSync(filePath, 'utf8');
+      const hash = createHash('sha256').update(sqlContent).digest('hex');
+      for (const stmt of splitMigrationStatements(sqlContent)) {
+        await c.query(stmt);
+      }
+      // `folderMillis` in drizzle's own migrator is `entry.when`.
+      await c.query(
+        'INSERT INTO `__drizzle_migrations` (`hash`, `created_at`) VALUES (?, ?)',
+        [hash, entry.when],
+      );
+    }
   } finally {
-    await pool.end();
+    await c.end();
   }
 }
 
