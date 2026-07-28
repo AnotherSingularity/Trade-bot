@@ -24,6 +24,8 @@ import { handleIpcCall, type IpcHostContext } from './ipc';
 import { ConsoleSink, Logger } from './logging';
 import { resolveDesktopEnvironment, resolveSandboxPolicy, validateDesktopEnvironment } from './localEnvironment';
 import { resolveDesktopRuntimeLayout, sanitizePreloadPath } from './runtimeLayout';
+import { resolveRendererUrl } from './rendererUrlPolicy';
+import { resolveExternalServerMode } from './externalServerPolicy';
 import { InMemorySecretsAdapter, KeytarSecretsAdapter, type SecretsAdapter, collectCredentialStatuses } from './secrets';
 import { resolveBootstrapTokenAuthority } from './bootstrapToken';
 import { createAuthTokenStorage } from './secureStorage';
@@ -109,7 +111,30 @@ async function createMainWindow(): Promise<BrowserWindow> {
     renderer: sanitizePreloadPath(layout.rendererEntry),
   });
 
-  const rendererIndexUrl = process.env.HORIZON_RENDERER_URL ?? layout.rendererUrl;
+  // Stage 3C-CI-RESET Part 2 Checkpoint E.6 — the ONLY sanctioned way
+  // to decide what URL Electron feeds to `win.loadURL(...)`. Packaged
+  // builds structurally cannot honour a HORIZON_RENDERER_URL override —
+  // a stray env var in a released installer must never cause the
+  // privileged preload to load an arbitrary remote origin. Rejection
+  // aborts window creation BEFORE any BrowserWindow exists.
+  const rendererDecision = resolveRendererUrl({
+    isPackaged: app.isPackaged,
+    layoutRendererUrl: layout.rendererUrl,
+    overrideEnv: process.env.HORIZON_RENDERER_URL,
+  });
+  if (!rendererDecision.allowed) {
+    logger.error('renderer_url_policy_rejected', {
+      reason: rendererDecision.reason,
+      detail: rendererDecision.detail,
+      isPackaged: app.isPackaged,
+    });
+    throw new Error(`renderer_url_policy_rejected:${rendererDecision.reason}`);
+  }
+  logger.info('renderer_url_policy_resolved', {
+    source: rendererDecision.source,
+    isPackaged: app.isPackaged,
+  });
+  const rendererIndexUrl = rendererDecision.url;
   const config = buildSafeWindowConfig({
     width: 1440,
     height: 900,
@@ -294,13 +319,30 @@ async function boot(): Promise<void> {
   // Stage 2 §2: pass the bootstrap token to the out-of-process server
   // via its env. (managed_docker: token must be supplied through compose
   // env — deferred to managed_docker_runtime_verification.)
-  // Stage 3C — test-only escape hatch: if the harness has already
-  // started the server out-of-band (HORIZON_SERVER_EXTERNAL=true), use
-  // the external adapter so the supervisor does not try to spawn a
-  // competing instance on the same port. Rejected in packaged builds
-  // (defence-in-depth; the env var still cannot be present in a
-  // released installer).
-  const serverExternallyManaged = process.env.HORIZON_SERVER_EXTERNAL === 'true' && !isPackaged;
+  // Stage 3C-CI-RESET Part 2 Checkpoint E.6 — test-only external-server
+  // opt-in decided by a pure policy. The policy structurally rejects the
+  // override in packaged mode and any non-canonical env value, so the
+  // supervisor can never be silently disabled by a typo or a stray env
+  // var in a released installer. Any 'rejected' verdict aborts startup
+  // before the supervisor is constructed.
+  const externalServerDecision = resolveExternalServerMode({
+    isPackaged,
+    serverExternalEnv: process.env.HORIZON_SERVER_EXTERNAL,
+  });
+  if (externalServerDecision.mode === 'rejected') {
+    logger.error('external_server_policy_rejected', {
+      reason: externalServerDecision.reason,
+      detail: externalServerDecision.detail,
+      isPackaged,
+    });
+    throw new Error(`external_server_policy_rejected:${externalServerDecision.reason}`);
+  }
+  logger.info('external_server_policy_resolved', {
+    mode: externalServerDecision.mode,
+    reason: externalServerDecision.reason,
+    isPackaged,
+  });
+  const serverExternallyManaged = externalServerDecision.mode === 'external';
   const serverAdapter = serverExternallyManaged
     ? createServerAdapterExternal(rt, fingerprintPath)
     : (env.databaseMode === 'managed_docker'
