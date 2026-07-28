@@ -4,3 +4,5 @@ export * from './money';
 export * from './desktopContracts';
 // Stage 3C-CI-RESET §2: one shared operator-auth HTTP contract.
 export * from './operatorAuth';
+// Stage 3C-CI-RESET Part 2 §1: schema-aware desktop API route registry.
+export * from './desktopApiRoutes';

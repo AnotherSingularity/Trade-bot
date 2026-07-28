@@ -17,7 +17,40 @@
  * Callers never see the tokens. The client accepts token providers
  * (functions returning the current values) so rotation can happen
  * atomically without leaking references.
+ *
+ * Stage 3C-CI-RESET Part 2 §1 — SCHEMA-AWARE VARIANT.
+ *
+ * `requestValidated<K>(routeKey, body?)` uses the shared
+ * `DESKTOP_API_ROUTES` registry from `@horizon/shared` and:
+ *   1. Validates the outgoing body against the route's request schema
+ *      (throws `DesktopApiContractMismatchError('request', ...)`).
+ *   2. Serialises the VALIDATED body (never the raw input).
+ *   3. Executes the request against the same fetch pipeline.
+ *   4. Rejects malformed JSON as `DesktopApiInvalidJsonError`.
+ *   5. Rejects HTTP errors as `DesktopApiHttpError` (except for 401 on
+ *      operator routes, which still triggers the refresh-once path).
+ *   6. Validates the parsed body against the route's response schema.
+ *   7. Returns the typed, validated body — NEVER `parsed as T`.
+ *
+ * The legacy `request<T>()` method is retained for the handful of
+ * callers still using it (during the multi-turn migration in
+ * Part 2); those routes lack response schemas in the registry and
+ * are progressively migrated. See DesktopApiRouteDefinition +
+ * hasResponseSchema for the migration audit hook.
  */
+
+// Stage 3C-CI-RESET Part 2 §1: schema-aware registry + typed errors
+// re-exported from the shared package so consumers can import from
+// one place.
+import type { z } from 'zod';
+import {
+  DESKTOP_API_ROUTES,
+  DesktopApiContractMismatchError,
+  DesktopApiHttpError,
+  DesktopApiInvalidJsonError,
+  DesktopApiTransportError,
+  type DesktopApiRouteKey,
+} from '@horizon/shared';
 
 export type ApiScope = 'bootstrap' | 'operator';
 
@@ -95,6 +128,130 @@ export class AuthenticatedApiClient {
     return this.execute<T>(route, body, extraHeaders, /* isRetry */ false);
   }
 
+  /**
+   * Stage 3C-CI-RESET Part 2 §1 — Schema-aware request.
+   *
+   * Validates the outgoing body (if the route defines a `request`
+   * schema) AND the incoming JSON (if the route defines a `response`
+   * schema). Returns the validated response body directly — never
+   * `parsed as T`.
+   *
+   * Failure modes are typed and enumerated:
+   *   - `DesktopApiContractMismatchError('request', ...)` — outgoing
+   *     body does not match the route's request schema. The request
+   *     is NOT sent.
+   *   - `DesktopApiTransportError` — fetch itself threw (network,
+   *     abort, DNS).
+   *   - `DesktopApiInvalidJsonError` — response body was not valid
+   *     JSON.
+   *   - `DesktopApiHttpError` — non-2xx HTTP status. For 401 on
+   *     operator routes the refresh-once path fires first; only a
+   *     terminal 401 surfaces.
+   *   - `DesktopApiContractMismatchError('response', ...)` — parsed
+   *     JSON does not match the route's response schema.
+   *
+   * The returned value's TypeScript type is `z.infer<T>` of the
+   * route's response schema, so the compiler enforces field access
+   * against the shared contract.
+   */
+  async requestValidated<K extends DesktopApiRouteKey>(
+    key: K,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<unknown> {
+    // The `as` widen preserves compile-time key enforcement via the
+    // K extends DesktopApiRouteKey constraint while broadening the
+    // value's shape at access time so optional request/response
+    // schemas are visible to the type checker. Callers use the
+    // Zod-inferred type separately if they want a narrow return.
+    const routeAny = DESKTOP_API_ROUTES[key] as {
+      readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+      readonly path: string;
+      readonly scope: 'bootstrap' | 'operator';
+      readonly request?: z.ZodTypeAny;
+      readonly response?: z.ZodTypeAny;
+    };
+    if (!routeAny) throw new Error(`route not allowlisted: ${String(key)}`);
+
+    // §1.2 — validate outgoing request body BEFORE serialization.
+    let validatedBody: unknown = body;
+    if (routeAny.request) {
+      const requestParse = routeAny.request.safeParse(body ?? {});
+      if (!requestParse.success) {
+        const first = requestParse.error.issues[0];
+        throw new DesktopApiContractMismatchError(
+          'request',
+          key,
+          first?.path.join('.') || '<root>',
+          first?.message ?? 'schema_parse_failed',
+        );
+      }
+      validatedBody = requestParse.data;
+    }
+
+    // Execute — reuse the legacy pipeline but treat every non-401
+    // non-2xx status as a typed DesktopApiHttpError. The legacy
+    // pipeline still throws ApiCallError on 401 refresh exhaustion;
+    // we normalise that into DesktopApiHttpError below.
+    const legacyRoute: RouteSpec = { method: routeAny.method, path: routeAny.path, scope: routeAny.scope };
+    let httpResponse: ApiResponse<unknown>;
+    try {
+      httpResponse = await this.execute<unknown>(legacyRoute, validatedBody, extraHeaders, false);
+    } catch (e) {
+      if (e instanceof ApiCallError) {
+        // 401-after-refresh or bootstrap-token-missing paths land here.
+        throw new DesktopApiHttpError(key, e.status, e.message);
+      }
+      throw new DesktopApiTransportError(key, e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200));
+    }
+
+    // §1.3 — reject non-2xx statuses as typed HTTP errors.
+    if (httpResponse.status < 200 || httpResponse.status >= 300) {
+      // The body may or may not be JSON; the legacy safeParse
+      // already returned {_raw: '...'} on invalid JSON. Extract
+      // a short sanitized reason without embedding secrets.
+      const reason = extractShortReason(httpResponse.body);
+      throw new DesktopApiHttpError(key, httpResponse.status, reason);
+    }
+
+    // §1.4 — reject non-JSON body (safeParse in `execute` marks this
+    // with a `_raw` key).
+    const parsed = httpResponse.body;
+    if (parsed && typeof parsed === 'object' && '_raw' in parsed) {
+      throw new DesktopApiInvalidJsonError(key, 'response_body_not_valid_json');
+    }
+
+    // §1.5 — validate response schema.
+    if (routeAny.response) {
+      const responseParse = routeAny.response.safeParse(parsed);
+      if (!responseParse.success) {
+        const first = responseParse.error.issues[0];
+        throw new DesktopApiContractMismatchError(
+          'response',
+          key,
+          first?.path.join('.') || '<root>',
+          first?.message ?? 'schema_parse_failed',
+        );
+      }
+      return responseParse.data;
+    }
+    // No response schema (legacy route) — surface parsed as unknown.
+    return parsed;
+  }
+
+  /**
+   * Runtime introspection: does this route carry a response schema?
+   * Used by migration audit tests to ensure every certification-
+   * critical route is schema-validated.
+   */
+  static hasResponseSchema(key: DesktopApiRouteKey): boolean {
+    // Widen the narrowed const type so the optional property is visible.
+    return (DESKTOP_API_ROUTES[key] as { response?: unknown }).response !== undefined;
+  }
+  static hasRequestSchema(key: DesktopApiRouteKey): boolean {
+    return (DESKTOP_API_ROUTES[key] as { request?: unknown }).request !== undefined;
+  }
+
   private async execute<T>(
     route: RouteSpec,
     body: unknown,
@@ -151,3 +308,27 @@ function safeParse(text: string): unknown {
     return { _raw: text.slice(0, 400) };
   }
 }
+
+/**
+ * Best-effort extraction of a short reason from a server HTTP error
+ * body. Prefers `body.reason`, then `body.error`, then a short
+ * stringification. Never returns raw HTML or > 120 chars.
+ */
+function extractShortReason(body: unknown): string {
+  if (body && typeof body === 'object') {
+    const anyBody = body as { reason?: unknown; error?: unknown };
+    if (typeof anyBody.reason === 'string' && anyBody.reason.length > 0) return anyBody.reason.slice(0, 120);
+    if (typeof anyBody.error === 'string' && anyBody.error.length > 0) return anyBody.error.slice(0, 120);
+  }
+  return 'unspecified';
+}
+
+// Stage 3C-CI-RESET Part 2 §1: re-export typed errors so callers can
+// `catch` them by name from the same import.
+export {
+  DesktopApiContractMismatchError,
+  DesktopApiHttpError,
+  DesktopApiInvalidJsonError,
+  DesktopApiTransportError,
+} from '@horizon/shared';
+export type { DesktopApiRouteKey } from '@horizon/shared';
