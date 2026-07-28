@@ -583,19 +583,24 @@ export async function seedNativeFixture(dbUrl: string): Promise<SeedSummary> {
     }
 
     // -----------------------------------------------------------
-    // Costs (forecast vs realized) — Stage 3B schema
+    // Costs (forecast vs realized) — Stage 3B schema.
+    //
+    // Stage 3C-CI-FIX10 §4: NO INSERT BY DESIGN.
+    //
+    // Reason: forecast_vs_realized_attributions requires costForecastId
+    // → execution_cost_forecasts → candidates → scanner-run chain. That
+    // deep FK graph is NOT seeded — synthesising it would require
+    // inventing a scanner run that never happened, which is fabricated
+    // data. The pre-FIX10 seed attempted a partial insert that omitted
+    // costForecastId; safeInsert silently swallowed the constraint
+    // failure and the seed was a no-op that just printed a "0 got"
+    // warning in the coverage report.
+    //
+    // The Costs screen (NINETEEN_SCREEN_MANIFEST[costs_attribution])
+    // is declared expectedState='empty' and renders that state from
+    // a real zero-row query response — auditable per Stage 3C-ENV-FIX §2.
     // -----------------------------------------------------------
-    if (await tableExists(c, 'forecast_vs_realized_attributions')) {
-      await safeInsert(c,
-        `INSERT INTO forecast_vs_realized_attributions (id, roundTripId, decisionChainId,
-           forecastEntryCost, realizedEntryCost, forecastExitCost, realizedExitCost,
-           forecastTotalCost, realizedTotalCost, forecastSlippage)
-         VALUES (7901, ?, ?,
-           '5.00000000', '5.10000000', '3.00000000', '3.30000000',
-           '8.00000000', '8.40000000', '0.10000000')`,
-        [SEED_IDS.roundTripWin, SEED_IDS.decisionChainAccepted],
-      );
-    }
+    // (intentionally no insert)
 
     // -----------------------------------------------------------
     // Protection (Stage 3C schema) — mandatory, NO silent path.
@@ -770,7 +775,13 @@ export const RECOMMENDED_SEED_ROWS: ReadonlyArray<{ screen: string; column: keyo
   { screen: 'Fingerprints', column: 'fingerprint_snapshots', minRows: 1, note: 'phase2A_fingerprint_composer_versioning' },
   { screen: 'Regimes', column: 'global_regime_snapshots', minRows: 1, note: 'phase2B_observer_run_fk' },
   { screen: 'Validation Lab', column: 'research_experiments', minRows: 1, note: 'phase2F_dataset_version_fk' },
-  { screen: 'Costs', column: 'forecast_vs_realized_attributions', minRows: 1, note: 'phase3B_round_trip_fk' },
+  // Stage 3C-CI-FIX10 §4: Costs is INTENTIONALLY absent from both
+  // required and recommended coverage tables. The screen is declared
+  // expectedState='empty' in NINETEEN_SCREEN_MANIFEST because the
+  // forecast_vs_realized_attributions FK chain (costForecastId →
+  // execution_cost_forecasts → candidates → scanner run) cannot be
+  // satisfied without fabricating a scanner run that never happened.
+  // Empty is the honest state; a coverage warning would be misleading.
   { screen: 'Protection (instances)', column: 'protection_instances', minRows: 1, note: 'phase3C_policy_capability_fk' },
   { screen: 'Incidents', column: 'desktop_incidents', minRows: 2, note: 'phase3A_installation_fk' },
 ]);

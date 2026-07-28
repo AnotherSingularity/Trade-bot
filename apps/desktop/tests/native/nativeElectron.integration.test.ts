@@ -35,6 +35,14 @@ import {
   NativeRunStatus, StartupTrace, sanitizeDiagnosticMessage, sanitizeProcessTreeText,
   withNativeTimeout, writeFailureClassification,
 } from './nativeDiagnostics';
+// Stage 3C-CI-FIX10 §1 — canonical typed auth contract.
+// Same schema-derived types used at every layer: server → main auth
+// manager → IPC handler → preload → renderer. The native harness
+// consumes the SAME types so a shape drift becomes a compile-time
+// error rather than a runtime `native_auth_login_rejected:unknown`.
+import type {
+  AuthOperationResponse, SanitizedAuthState,
+} from '../../src/shared/ipcContract';
 
 const NAV_ROUTES: ReadonlyArray<{ key: string; hash: string; screenAttr: string; banner?: string }> = [
   { key: 'overview',             hash: '#/overview',                screenAttr: 'overview' },
@@ -214,29 +222,84 @@ async function awaitAuthStateReady(page: import('playwright').Page): Promise<voi
   }
 }
 
-// Stage 3C-CI-FIX9 §2.2: perform login via the real preload bridge.
-// Never a Playwright-side auth mock.
+// Stage 3C-CI-FIX10 §1-§2 — canonical typed login probe result.
+// Two disjoint shapes, no `any`, no guessed field names. The renderer
+// probe returns EITHER a bridge-level failure (probe never reached
+// window.horizon.auth.login) OR the actual AuthOperationResponse the
+// preload bridge unwrapped from the IPC envelope, PLUS the sanitized
+// state read back independently via a second bridge call. FIX9 read
+// `.error` (a field that does not exist on AuthOperationResponse);
+// the correct field is `.reason`. See packages/shared IPC contract
+// and desktopAuthManager.ts:161 (login) for the authoritative shape.
+type NativeLoginProbeBridgeFailure = { kind: 'bridge_failure'; err: string };
+type NativeLoginProbeResolved = {
+  kind: 'resolved';
+  resp: AuthOperationResponse;
+  state: SanitizedAuthState;
+};
+type NativeLoginProbeResult = NativeLoginProbeBridgeFailure | NativeLoginProbeResolved;
+
+// Stage 3C-CI-FIX9 §2.2 (retained intent) + FIX10 §1-§2 (contract fix):
+// perform login via the real preload bridge. Never a Playwright-side
+// auth mock. Never bypasses the desktop auth manager. Never injects an
+// authenticated state — the login response AND an independent
+// getState() readback must BOTH report authenticated.
 async function performAuthenticatedLogin(page: import('playwright').Page): Promise<void> {
   diagnosticsTrace?.record('authentication_complete', 'started', { subphase: 'login' });
-  const result = await page.evaluate(async ({ u, p }) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const h = (globalThis as any).horizon;
-    if (!h?.auth?.login) return { ok: false, err: 'no_bridge' };
+  const probe = await page.evaluate(async ({ u, p }): Promise<NativeLoginProbeResult> => {
+    // Bridge extract typed to the exact preload contract slice we
+    // need — no `any`. `contextBridge.exposeInMainWorld('horizon', ...)`
+    // populates this on the main world; we cast to the narrow shape,
+    // not to any, so a future preload rename becomes a compile error.
+    interface AuthBridgeSlice {
+      login(input: { username: string; password: string }): Promise<AuthOperationResponse>;
+      getState(): Promise<SanitizedAuthState>;
+    }
+    interface HarnessGlobal { horizon?: { auth?: Partial<AuthBridgeSlice> } }
+    const h = (globalThis as unknown as HarnessGlobal).horizon;
+    const authLogin = h?.auth?.login;
+    const authGetState = h?.auth?.getState;
+    if (typeof authLogin !== 'function' || typeof authGetState !== 'function') {
+      return { kind: 'bridge_failure', err: 'no_bridge' };
+    }
     try {
-      const resp = await h.auth.login({ username: u, password: p });
-      const state = await h.auth.getState();
-      return { ok: true, resp, state };
+      const resp = await authLogin({ username: u, password: p });
+      const state = await authGetState();
+      return { kind: 'resolved', resp, state };
     } catch (e) {
-      return { ok: false, err: String(e).slice(0, 120) };
+      // The preload `invoke<T>` helper throws when the outer IPC
+      // envelope reports transport failure. We surface that as a
+      // bridge failure so it is attributable, not classified as a
+      // login rejection.
+      return { kind: 'bridge_failure', err: String(e).slice(0, 120) };
     }
   }, { u: ADMIN_USER, p: ADMIN_PASSWORD });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const r = result as any;
-  if (!r.ok) throw new Error(`native_auth_login_rejected:${String(r.err).slice(0, 120)}`);
-  if (r.resp?.ok !== true) throw new Error(`native_auth_login_rejected:${String(r.resp?.error ?? 'unknown').slice(0, 120)}`);
-  const readbackPhase = String(r.state?.phase ?? '');
-  if (readbackPhase !== 'authenticated') {
-    throw new Error(`native_auth_login_state_mismatch:${readbackPhase}`);
+
+  if (probe.kind === 'bridge_failure') {
+    throw new Error(`native_auth_login_rejected:${probe.err.slice(0, 120)}`);
+  }
+  const { resp, state } = probe;
+  // Canonical AuthOperationResponse — the failure field is `reason`,
+  // NEVER `error`. The reason is populated by desktopAuthManager.login
+  // from the server response body's `reason` (falling back to `error`
+  // or `status_<N>` when the server payload is malformed). Values
+  // enumerated in the manager: password_mismatch, not_found, locked,
+  // disabled, recovery_required, rate_limited, invalid_body,
+  // status_<N>, api_<status>.
+  if (resp.ok !== true) {
+    const reason = (resp.reason ?? 'unspecified').slice(0, 120);
+    const phase = state.phase;
+    const stateReason = (state.failureReason ?? 'none').slice(0, 120);
+    throw new Error(`native_auth_login_rejected:${reason}:phase=${phase}:state_failure_reason=${stateReason}`);
+  }
+  // ok === true. The manager is required to have transitioned the
+  // sanitized phase to 'authenticated' before the response was
+  // serialised. If the readback disagrees, that is an independent
+  // check on the state manager — a mismatch means state and response
+  // diverged in one round-trip and MUST fail the run.
+  if (state.phase !== 'authenticated') {
+    const respReason = (resp.reason ?? 'none').slice(0, 120);
+    throw new Error(`native_auth_login_state_mismatch:${state.phase}:resp_reason=${respReason}`);
   }
 }
 
@@ -810,7 +873,12 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
   });
 
   // §12.2 Real Electron main entry is used.
-  it('T2: real Electron main entry loaded (apps/desktop/dist/main/index.js)', async () => {
+  // FIX10 §3: canonical entry is dist/main/index.cjs (esbuild CJS
+  // bundle produced by apps/desktop/build/bundle-main.mjs). The
+  // pre-FIX8 dist/main/index.js path no longer exists — the bundler,
+  // package.json main, electron-builder extraMetadata, and
+  // resolveDesktopRuntimeLayout all point at the .cjs entry.
+  it('T2: real Electron main entry loaded (apps/desktop/dist/main/index.cjs)', async () => {
     expect(launch?.app).toBeDefined();
     // Playwright ensured `firstWindow()` resolved, which requires
     // the main entry to have registered a BrowserWindow.
@@ -1044,9 +1112,22 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
     expect(frame).toContain('PROSPECTIVE EVIDENCE PENDING');
   });
 
-  it('T-sig[costs_attribution]: shows seeded BTC-USD attribution', async () => {
+  // FIX10 §4: honest empty state.
+  // NINETEEN_SCREEN_MANIFEST declares costs_attribution as
+  // expectedState='empty' by design — the forecast_vs_realized_attributions
+  // row requires a costForecastId → execution_cost_forecasts →
+  // candidates → scanner-run chain that is intentionally NOT seeded
+  // (would require inventing a scanner run that never happened, i.e.
+  // fabricated data). The screen renders `data-state="empty"` from
+  // a real zero-row query response. Never assert a seeded BTC-USD
+  // literal against a screen that returned zero rows.
+  it('T-sig[costs_attribution]: renders honest empty state (no seeded attribution by design)', async () => {
     const { frame } = await navigateAndWaitFor('#/ops/costs-attribution', 'costs');
-    expect(frame).toMatch(/BTC-USD|native_attr_1|forecast|attribution/i);
+    expect(frame).toContain('data-screen="costs"');
+    expect(frame).toContain('data-state="empty"');
+    expect(frame).toContain('LIVE ORDER SUBMISSION DISABLED');
+    // Structurally verify NO fabricated attribution literal leaked in.
+    expect(frame).not.toMatch(/native_attr_1/i);
   });
 
   it('T-sig[protection]: shows seeded protection instance or unknown-capability marker', async () => {
