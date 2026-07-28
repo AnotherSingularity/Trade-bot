@@ -105,16 +105,31 @@ export function useDesktopData<K extends DesktopDataRequestKey>(
     const myReq = ++activeReqRef.current;
     setLoadingCount((c) => c + 1);
     try {
-      const res = await api(key, input);
-      if (myReq !== activeReqRef.current) return; // superseded
-      if (res.ok) {
-        setEnvelope(res.envelope);
-        setError(null);
-        setState(envelopeStatusToScreenState(res.envelope));
-      } else {
+      try {
+        const res = await api(key, input);
+        if (myReq !== activeReqRef.current) return; // superseded
+        if (res.ok) {
+          setEnvelope(res.envelope);
+          setError(null);
+          setState(envelopeStatusToScreenState(res.envelope));
+        } else {
+          setEnvelope(null);
+          setError(res.error);
+          setState(errorCodeToScreenState(res.error.code));
+        }
+      } catch (thrown) {
+        // Stage 3C-E.1.15 — the preload rejects on auth-loss codes so
+        // direct callers (behavioral tests) can distinguish a gate
+        // from a business error. Inside the hook the auth-loss effect
+        // has already superseded this request and set the correct
+        // screen state; a superseded request is a no-op. Surface any
+        // other throw as api_failure with a sanitized code.
+        if (myReq !== activeReqRef.current) return;
+        const message = thrown instanceof Error ? thrown.message : String(thrown);
+        const code = message.split(':', 1)[0] || 'bridge_error';
         setEnvelope(null);
-        setError(res.error);
-        setState(errorCodeToScreenState(res.error.code));
+        setError({ code, detail: message.slice(0, 200) });
+        setState(errorCodeToScreenState(code));
       }
     } finally {
       setLoadingCount((c) => Math.max(0, c - 1));
