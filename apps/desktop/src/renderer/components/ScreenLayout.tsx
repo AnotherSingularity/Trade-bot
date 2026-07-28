@@ -27,9 +27,9 @@ export function ScreenLayout(props: ScreenLayoutProps) {
   );
 }
 
-export function KVCard(props: { label: string; value: string | number | null; status?: string }) {
+export function KVCard(props: { label: string; value: string | number | null; status?: string; field?: string }) {
   return (
-    <div className="card">
+    <div className="card" data-field={props.field}>
       <div className="k">{props.label}</div>
       <div className="v">
         {props.value ?? '—'}{' '}

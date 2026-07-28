@@ -23,10 +23,10 @@ export function SafetyScreen() {
 
             <h2>CreateOrder barrier</h2>
             <div className="grid grid-4">
-              <KVCard label="Barrier active" value={String(s.createOrderBarrierActive)} status="healthy" />
-              <KVCard label="Counter source" value={s.createOrderCounters.source} />
-              <KVCard label="Counters known" value={String(s.createOrderCounters.known)} status={s.createOrderCounters.known ? 'healthy' : 'unknown'} />
-              <KVCard label="Reason" value={s.createOrderCounters.reasonCode ?? '—'} />
+              <KVCard field="createOrderBarrier" label="Barrier active" value={String(s.createOrderBarrierActive)} status="healthy" />
+              <KVCard field="createOrderCounters.source" label="Counter source" value={s.createOrderCounters.source} />
+              <KVCard field="createOrderCounters.known" label="Counters known" value={String(s.createOrderCounters.known)} status={s.createOrderCounters.known ? 'healthy' : 'unknown'} />
+              <KVCard field="createOrderCounters.reasonCode" label="Reason" value={s.createOrderCounters.reasonCode ?? '—'} />
             </div>
             <div className="grid grid-3">
               <KVCard label="Function invocations" value={s.createOrderCounters.functionInvocations ?? 'unknown'} status={s.createOrderCounters.functionInvocations === 0 ? 'healthy' : 'danger'} />
@@ -53,12 +53,12 @@ export function SafetyScreen() {
 
             <h2>Prohibited postures (contractually locked)</h2>
             <div className="grid grid-3">
-              <KVCard label="Observer enforcement" value={s.observerEnforcementActive ? 'ACTIVE' : 'disabled'} status={s.observerEnforcementActive ? 'danger' : 'disabled'} />
-              <KVCard label="Promotion" value={s.promotionEnabled ? 'ENABLED' : 'disabled'} status={s.promotionEnabled ? 'danger' : 'disabled'} />
-              <KVCard label="Kelly" value={s.kellyEnabled ? 'ENABLED' : 'disabled'} status={s.kellyEnabled ? 'danger' : 'disabled'} />
-              <KVCard label="Live capital authorized" value={s.liveCapitalAuthorized ? 'AUTHORIZED' : 'prohibited'} status={s.liveCapitalAuthorized ? 'danger' : 'disabled'} />
-              <KVCard label="Simulation mode" value={s.simulationMode} status="observer-only" />
-              <KVCard label="Provider mode" value={s.providerMode} status="observer-only" />
+              <KVCard field="observerEnforcementActive" label="Observer enforcement" value={s.observerEnforcementActive ? 'ACTIVE' : 'disabled'} status={s.observerEnforcementActive ? 'danger' : 'disabled'} />
+              <KVCard field="promotionEnabled" label="Promotion" value={s.promotionEnabled ? 'ENABLED' : 'disabled'} status={s.promotionEnabled ? 'danger' : 'disabled'} />
+              <KVCard field="kellyEnabled" label="Kelly" value={s.kellyEnabled ? 'ENABLED' : 'disabled'} status={s.kellyEnabled ? 'danger' : 'disabled'} />
+              <KVCard field="liveCapitalAuthorized" label="Live capital authorized" value={s.liveCapitalAuthorized ? 'AUTHORIZED' : 'prohibited'} status={s.liveCapitalAuthorized ? 'danger' : 'disabled'} />
+              <KVCard field="simulationMode" label="Simulation mode" value={s.simulationMode} status="observer-only" />
+              <KVCard field="providerMode" label="Provider mode" value={s.providerMode} status="observer-only" />
             </div>
           </>
         )}
