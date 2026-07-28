@@ -435,6 +435,20 @@ async function navigateAndWaitFor(hashRoute: string, screenAttr: string, timeout
   const deadline = Date.now() + timeoutMs;
   let leftLoading = false;
   let lastFrame = '';
+  // Stage 3C-E.1.2 — StateFrame's `data-screen` value is the
+  // `label` prop of the outermost StateFrame the screen renders.
+  // Overview + ShadowPortfolio use bare labels ("overview",
+  // "portfolio") that match `screenAttr` directly; every other
+  // screen uses a suffixed query name ("positions.list",
+  // "decisions.list", "risk.get", …) — the query identity, not the
+  // screen identity. Historical NAV_ROUTES entries pass the screen
+  // identity (`"positions"`), so this matcher accepts either the
+  // exact `screenAttr` OR `screenAttr.<queryName>`. That preserves
+  // both conventions without changing renderer labels or
+  // manufacturing a matching data-screen. The regex is anchored so
+  // `data-screen="positions_stub"` cannot accidentally match `positions`.
+  const escaped = screenAttr.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+  const screenMatcher = new RegExp(`data-screen="${escaped}(?:\\.[a-zA-Z_]+)?"`);
   while (Date.now() < deadline) {
     lastFrame = await launch.page.content();
     // Fail-fast: AuthGate blockers or preload bridge absence should
@@ -445,7 +459,7 @@ async function navigateAndWaitFor(hashRoute: string, screenAttr: string, timeout
       }
     }
     // Screen mounted (StateFrame emits data-screen attr).
-    if (lastFrame.includes(`data-screen="${screenAttr}"`)) {
+    if (screenMatcher.test(lastFrame)) {
       if (/data-state="(healthy|empty|stale|degraded|unavailable|api_failure|contract_mismatch|unauthorized|session_expired)"/.test(lastFrame)) {
         leftLoading = true;
         break;
@@ -1061,7 +1075,19 @@ afterAll(async () => {
           os: `${process.platform}-${process.arch}`,
           nodeVersion: process.version,
           workflowRunId: process.env.GITHUB_RUN_ID ?? null,
-          electronPid: launch?.app?.process?.().pid ?? null,
+          // Stage 3C-E.1.2 — Playwright's ElectronApplication.process()
+          // reaches into a private `_object` handle. When the underlying
+          // Electron app was torn down (crash mid-test, afterAll after a
+          // failure), that handle is undefined and Playwright throws
+          // `TypeError: Cannot read properties of undefined (reading '_object')`
+          // even through optional chaining because the throw happens
+          // INSIDE `.process()`. Wrap in try/catch so evidence
+          // collection cannot mask an earlier test failure with a
+          // teardown TypeError.
+          electronPid: (() => {
+            try { return launch?.app?.process?.().pid ?? null; }
+            catch { return null; }
+          })(),
           serverPid: server?.proc?.pid ?? null,
           dbName: iso.dbName,
           redisNamespace: iso.redisNamespace,
