@@ -31,6 +31,7 @@ import { resolveBootstrapTokenAuthority } from './bootstrapToken';
 import { createAuthTokenStorage } from './secureStorage';
 import { AuthenticatedApiClient } from './authenticatedApiClient';
 import { DesktopAuthManager } from './desktopAuthManager';
+import { DesktopDataClient } from './desktopDataClient';
 import {
   createAdapterRuntime,
   createDesktopShellAdapter,
@@ -465,6 +466,19 @@ async function boot(): Promise<void> {
       return { ok: true, auditEventId: 0, restartRequired: ['server'], failureReason: null };
     },
     authManager,
+    // Stage 3C-E.1.4 — wire the DesktopDataClient into the IPC
+    // context so `desktop.*` renderer queries succeed. Without this,
+    // ipc.ts:303 returns `desktop_data_client_unavailable` for EVERY
+    // desktop.* call and every renderer StateFrame flips to
+    // data-state="api_failure". Native run 30397333295 confirmed
+    // this by rendering the Shadow Portfolio screen with
+    // `data-state="api_failure"` + reason
+    // `desktop_data_client_unavailable`.
+    desktopDataClient: new DesktopDataClient({
+      serverBaseUrl,
+      getAccessToken: () => authManager.currentAccessToken(),
+      onRefreshNeeded: () => authManager.refreshCallback(),
+    }),
     // Stage 2 §17: authentication is required by default. The env
     // override may DISABLE it only in explicit development/test runs.
     authenticationRequired: process.env.HORIZON_AUTH_REQUIRED === 'false' && !isPackaged ? false : true,
