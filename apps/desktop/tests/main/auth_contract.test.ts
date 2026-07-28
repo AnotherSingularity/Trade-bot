@@ -297,11 +297,14 @@ describe('Stage 3C-CI-FIX10 §5.4 — T2 canonical entry name', () => {
   const src = readFileSync(NATIVE_TEST, 'utf8');
 
   it('T2 assertion names dist/main/index.cjs (canonical FIX8+ layout)', () => {
-    expect(src).toContain('T2: real Electron main entry loaded (apps/desktop/dist/main/index.cjs)');
+    // Stage 3C-CI-RESET Part 2 Checkpoint C: `it(...)` was replaced
+    // by `certIt('T2', ...)`. The assertion is now on the certIt call.
+    expect(src).toContain("certIt('T2', 'real Electron main entry loaded (dist/main/index.cjs)'");
   });
 
   it('T2 assertion does NOT reference the pre-FIX8 dist/main/index.js path', () => {
     expect(src).not.toContain('T2: real Electron main entry loaded (apps/desktop/dist/main/index.js)');
+    expect(src).not.toContain("certIt('T2', 'real Electron main entry loaded (dist/main/index.js)'");
   });
 });
 
@@ -310,7 +313,10 @@ describe('Stage 3C-CI-FIX10 §5.5 — Costs honest empty state (three-site recon
   const seedSrc = readFileSync(NATIVE_SEED, 'utf8');
 
   it('T-sig[costs_attribution] asserts empty state, not a fabricated attribution', () => {
-    expect(testSrc).toContain("T-sig[costs_attribution]: renders honest empty state");
+    // Stage 3C-CI-RESET Part 2 Checkpoint C: `it(...)` was replaced by
+    // `certIt('SIG:costs_attribution', ...)`. The assertion is on the
+    // certIt call and its data-screen literal in the body.
+    expect(testSrc).toContain("certIt('SIG:costs_attribution', 'renders honest empty state (no seeded attribution by design)'");
     expect(testSrc).toMatch(/data-screen="costs"[\s\S]*?data-state="empty"/);
   });
 

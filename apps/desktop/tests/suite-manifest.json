@@ -41,6 +41,10 @@
     "portable": [
       "tests/main/auth_contract.test.ts",
       "tests/main/auth_seam_readiness_classification.test.ts",
+      "tests/main/native_certification_manifest.test.ts",
+      "tests/main/native_evidence_v2.test.ts",
+      "tests/main/native_execution_ledger.test.ts",
+      "tests/main/native_run_status_v2.test.ts",
       "tests/main/bootstrap_authority.test.ts",
       "tests/main/build_manifest.test.ts",
       "tests/main/ci_test_isolation.test.ts",
