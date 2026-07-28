@@ -22,6 +22,11 @@ import type {
 import type { AuthenticatedApiClient } from './authenticatedApiClient';
 import { ApiCallError } from './authenticatedApiClient';
 import type { AuthTokenStorage } from './secureStorage';
+// Stage 3C-CI-FIX10A §1: canonical login body construction. The
+// helper omits optional fields when absent so `installationId: null`
+// can never reach the wire. See operatorLoginBody.ts for the exact
+// contract and the FIX10A native-run root cause.
+import { buildOperatorLoginBody } from './operatorLoginBody';
 
 interface ServerTokenPair {
   accessToken: string;
@@ -71,7 +76,13 @@ export class DesktopAuthManager {
   };
   private readonly api: AuthenticatedApiClient;
   private readonly tokenStorage: AuthTokenStorage;
-  private readonly installationId: number | null;
+  // Stage 3C-CI-FIX10A §1: internal representation is `number | undefined`
+  // — an absent optional value can no longer be accidentally serialised
+  // as `null`. The input contract retains the wider `number | null |
+  // undefined` for caller compatibility (some callers thread the value
+  // through from database rows that natively carry `null`); the
+  // constructor normalises at the boundary.
+  private readonly installationId: number | undefined;
   private readonly clientVersion: string;
   private readonly now: () => Date;
   private refreshInFlight: Promise<{ ok: true; newAccessToken: string } | { ok: false; reason: string }> | null = null;
@@ -79,7 +90,7 @@ export class DesktopAuthManager {
   constructor(input: DesktopAuthManagerInput) {
     this.api = input.api;
     this.tokenStorage = input.tokenStorage;
-    this.installationId = input.installationId ?? null;
+    this.installationId = typeof input.installationId === 'number' ? input.installationId : undefined;
     this.clientVersion = input.clientVersion ?? 'stage2-desktop';
     this.now = input.clock ?? (() => new Date());
   }
@@ -160,17 +171,25 @@ export class DesktopAuthManager {
 
   async login(input: { username: string; password: string }): Promise<AuthOperationResponse> {
     try {
-      const res = await this.api.request<{
-        account?: ServerAccount;
-        tokens?: ServerTokenPair;
-        error?: string;
-        reason?: string;
-      }>('authLogin', {
+      // Stage 3C-CI-FIX10A §1: normalize the body via the pure helper.
+      // Absent optional fields are OMITTED from the serialized JSON;
+      // in particular `installationId: null` can never reach the wire.
+      // The server's Zod schema (installationId?: number|string) rejects
+      // `null`, so a `null` in the pre-FIX10A body produced HTTP 400
+      // `invalid_body` before credential verification — the FIX10 run's
+      // exact failure signature.
+      const body = buildOperatorLoginBody({
         username: input.username,
         password: input.password,
         installationId: this.installationId,
         clientVersion: this.clientVersion,
       });
+      const res = await this.api.request<{
+        account?: ServerAccount;
+        tokens?: ServerTokenPair;
+        error?: string;
+        reason?: string;
+      }>('authLogin', body);
       if (res.status !== 200 || !res.body?.account || !res.body?.tokens) {
         const reason = res.body?.reason ?? res.body?.error ?? `status_${res.status}`;
         if (reason === 'locked' || res.status === 423) {

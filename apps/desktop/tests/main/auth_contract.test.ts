@@ -21,6 +21,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import * as ts from 'typescript';
 import {
   AuthLoginRequestSchema, AuthOperationResponseSchema, IPC_ALLOWLIST,
   IPC_CHANNELS, OPERATOR_AUTH_PHASES, SanitizedAuthStateSchema,
@@ -104,51 +105,191 @@ describe('Stage 3C-CI-FIX10 §5.2 — IPC_ALLOWLIST auth wiring', () => {
   });
 });
 
-describe('Stage 3C-CI-FIX10 §5.3 — native harness classification (source-level)', () => {
-  const src = readFileSync(NATIVE_TEST, 'utf8');
+// -----------------------------------------------------------------------
+// Stage 3C-CI-FIX10A §5 — structural (AST-based) auth harness verifier.
+//
+// The pre-FIX10A tests located the end of `performAuthenticatedLogin`
+// via `src.indexOf('\n}\n', fnStart)`. That formatting-dependent
+// search returned -1 in the FIX10 CI run because the function ended
+// with a differently-indented closing brace, so the body slice
+// returned the ENTIRE remaining file and the `as any` assertion
+// picked up matches in unrelated functions — a false positive
+// FAILURE, not a real defect in performAuthenticatedLogin.
+//
+// FIX10A replaces the whole section with a TypeScript compiler API
+// walk. The AST is authoritative: it finds the function declaration,
+// walks ONLY that function's body, and detects `AsExpression` and
+// (deprecated) `TypeAssertionExpression` nodes whose asserted type is
+// `AnyKeyword`. Formatting is irrelevant.
+// -----------------------------------------------------------------------
 
-  it('performAuthenticatedLogin reads resp.reason (canonical failure field)', () => {
-    // Sanity: the function exists and mentions the canonical field.
-    expect(src).toContain('function performAuthenticatedLogin');
-    expect(src).toContain('resp.reason');
+interface LoginFunctionParse {
+  fn: ts.FunctionDeclaration;
+  body: ts.Block;
+  bodyText: string;
+}
+
+function parseNativeSource(): ts.SourceFile {
+  return ts.createSourceFile(
+    NATIVE_TEST,
+    readFileSync(NATIVE_TEST, 'utf8'),
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ true,
+    ts.ScriptKind.TS,
+  );
+}
+
+function findLoginFunction(source: ts.SourceFile): LoginFunctionParse {
+  const found: ts.FunctionDeclaration[] = [];
+  source.forEachChild((n) => {
+    if (ts.isFunctionDeclaration(n) && n.name?.escapedText === 'performAuthenticatedLogin') {
+      found.push(n);
+    }
+  });
+  if (found.length !== 1) {
+    throw new Error(`expected exactly one performAuthenticatedLogin declaration; found ${found.length}`);
+  }
+  const fn = found[0];
+  if (!fn.body) throw new Error('performAuthenticatedLogin has no body');
+  return { fn, body: fn.body, bodyText: fn.body.getFullText(source) };
+}
+
+function collectDescendants(root: ts.Node): ts.Node[] {
+  const out: ts.Node[] = [];
+  const walk = (n: ts.Node): void => {
+    out.push(n);
+    n.forEachChild(walk);
+  };
+  root.forEachChild(walk);
+  return out;
+}
+
+function isAnyKeywordType(node: ts.TypeNode): boolean {
+  return node.kind === ts.SyntaxKind.AnyKeyword;
+}
+
+describe('Stage 3C-CI-FIX10A §5.3 — native harness classification (AST-based)', () => {
+  // Parse once; every test reuses the same tree.
+  const source = parseNativeSource();
+  const login = findLoginFunction(source);
+
+  it('exactly one performAuthenticatedLogin declaration exists', () => {
+    const decls: ts.FunctionDeclaration[] = [];
+    source.forEachChild((n) => {
+      if (ts.isFunctionDeclaration(n) && n.name?.escapedText === 'performAuthenticatedLogin') decls.push(n);
+    });
+    expect(decls.length).toBe(1);
   });
 
-  it('performAuthenticatedLogin does NOT read resp.error (pre-FIX10 defect)', () => {
-    // Search for the exact pre-FIX10 pattern that produced `unknown`.
-    // Allow the string `error` to appear elsewhere (e.g. bridge_failure
-    // classification), but not on the AuthOperationResponse payload.
-    expect(src).not.toContain('resp?.error');
-    expect(src).not.toContain('r.resp?.error');
-    expect(src).not.toContain('.resp.error');
+  it('the function body was successfully parsed as a Block', () => {
+    expect(login.body.kind).toBe(ts.SyntaxKind.Block);
+    expect(login.bodyText.length).toBeGreaterThan(0);
   });
 
-  it('performAuthenticatedLogin surfaces the sanitized state phase on rejection', () => {
-    expect(src).toMatch(/native_auth_login_rejected:\$\{[^}]+\}:phase=/);
-    expect(src).toMatch(/state_failure_reason=/);
+  it('contains no `as any` (AsExpression / TypeAssertion → AnyKeyword) — pre-FIX10 defect regression guard', () => {
+    const offenders: string[] = [];
+    for (const node of collectDescendants(login.body)) {
+      if (ts.isAsExpression(node) && isAnyKeywordType(node.type)) {
+        offenders.push(`AsExpression at pos=${node.pos}: ${node.getText(source).slice(0, 80)}`);
+      }
+      // The deprecated `<any>x` prefix-cast form. `ts.isTypeAssertionExpression`
+      // is not consistently exported across TS versions; check SyntaxKind
+      // directly and narrow via the well-typed TypeAssertion interface.
+      if (node.kind === ts.SyntaxKind.TypeAssertionExpression) {
+        const ta = node as ts.TypeAssertion;
+        if (isAnyKeywordType(ta.type)) {
+          offenders.push(`TypeAssertion at pos=${node.pos}: ${node.getText(source).slice(0, 80)}`);
+        }
+      }
+    }
+    expect(offenders, `unexpected \`as any\` casts:\n${offenders.join('\n')}`).toEqual([]);
   });
 
-  it('performAuthenticatedLogin has no `as any` cast (typed contract)', () => {
-    // The pre-FIX10 code used `const r = result as any;` — the typed
-    // NativeLoginProbeResult discriminated union replaces it.
-    const fnStart = src.indexOf('function performAuthenticatedLogin');
-    const fnEnd = src.indexOf('\n}\n', fnStart);
-    expect(fnStart).toBeGreaterThan(0);
-    expect(fnEnd).toBeGreaterThan(fnStart);
-    const body = src.slice(fnStart, fnEnd);
-    expect(body).not.toContain('as any');
-    expect(body).toContain('NativeLoginProbeResult');
+  it('reads the canonical failure field (resp.reason), not the pre-FIX10 defect (resp.error)', () => {
+    // Walk PropertyAccessExpression nodes whose expression is `resp`.
+    // Collect the accessed property names.
+    const respPropertyNames = new Set<string>();
+    for (const node of collectDescendants(login.body)) {
+      if (ts.isPropertyAccessExpression(node)) {
+        if (ts.isIdentifier(node.expression) && node.expression.escapedText === 'resp') {
+          respPropertyNames.add(String(node.name.escapedText));
+        }
+      }
+    }
+    // Positive: resp.ok and resp.reason are the canonical reads.
+    expect(respPropertyNames.has('reason')).toBe(true);
+    expect(respPropertyNames.has('ok')).toBe(true);
+    // Negative regression guard — the pre-FIX10 defect.
+    expect(respPropertyNames.has('error')).toBe(false);
   });
 
-  it('probe never logs passwords or tokens', () => {
-    const fnStart = src.indexOf('function performAuthenticatedLogin');
-    const fnEnd = src.indexOf('\n}\n', fnStart);
-    const body = src.slice(fnStart, fnEnd);
-    // No error-message construction should embed the password
-    // variable directly. The probe accepts u,p and passes them into
-    // h.auth.login only; error strings only interpolate reason/phase.
-    expect(body).not.toMatch(/console\.log\([^)]*password/i);
-    expect(body).not.toMatch(/console\.log\([^)]*token/i);
-    expect(body).not.toMatch(/console\.log\([^)]*\$\{p\}/);
+  it('independently verifies the authenticated readback (reads state.phase and compares to "authenticated")', () => {
+    const statePropertyNames = new Set<string>();
+    for (const node of collectDescendants(login.body)) {
+      if (ts.isPropertyAccessExpression(node)) {
+        if (ts.isIdentifier(node.expression) && node.expression.escapedText === 'state') {
+          statePropertyNames.add(String(node.name.escapedText));
+        }
+      }
+    }
+    expect(statePropertyNames.has('phase')).toBe(true);
+    // At least one string literal must equal 'authenticated'.
+    const stringLiterals: string[] = [];
+    for (const node of collectDescendants(login.body)) {
+      if (ts.isStringLiteral(node)) stringLiterals.push(node.text);
+    }
+    expect(stringLiterals).toContain('authenticated');
+  });
+
+  it('typed via NativeLoginProbeResult (uses the canonical typed contract)', () => {
+    // The function body should reference the typed alias in at least
+    // one type position or expression.
+    const typeRefNames = new Set<string>();
+    for (const node of collectDescendants(login.body)) {
+      if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) {
+        typeRefNames.add(String(node.typeName.escapedText));
+      }
+    }
+    expect(typeRefNames.has('NativeLoginProbeResult')).toBe(true);
+  });
+
+  it('rejection message surfaces the sanitized state phase (AST + template literal walk)', () => {
+    // Collect template literal contents and verify at least one
+    // contains the required attribution tokens.
+    const templates: string[] = [];
+    for (const node of collectDescendants(login.body)) {
+      if (ts.isTemplateExpression(node)) templates.push(node.getText(source));
+      if (ts.isNoSubstitutionTemplateLiteral(node)) templates.push(node.text);
+    }
+    const joined = templates.join('\n');
+    expect(joined).toMatch(/native_auth_login_rejected:/);
+    expect(joined).toMatch(/phase=/);
+    expect(joined).toMatch(/state_failure_reason=/);
+  });
+
+  it('never logs passwords or tokens (AST walk of console.* + logger.* CallExpressions)', () => {
+    // Find CallExpression nodes whose callee is console.<anything> or
+    // logger.<anything>, then inspect their arguments for the password
+    // variable name (`p` — bound in the destructured evaluate param).
+    const suspicious: string[] = [];
+    for (const node of collectDescendants(login.body)) {
+      if (!ts.isCallExpression(node)) continue;
+      const callee = node.expression;
+      let calleeRoot: string | null = null;
+      if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)) {
+        calleeRoot = String(callee.expression.escapedText);
+      }
+      if (calleeRoot === 'console' || calleeRoot === 'logger') {
+        for (const arg of node.arguments) {
+          const t = arg.getText(source);
+          // The evaluate param names are u (username) and p (password).
+          if (/\bp\b/.test(t) || /password/i.test(t) || /token/i.test(t)) {
+            suspicious.push(`${callee.getText(source)}(${t.slice(0, 100)})`);
+          }
+        }
+      }
+    }
+    expect(suspicious, `suspicious credential-logging calls:\n${suspicious.join('\n')}`).toEqual([]);
   });
 });
 
