@@ -42,9 +42,20 @@ function StatusBanner({ text }: { text: string }) {
   );
 }
 
-function AuthShell({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
+// Stage 3C-E.1.14 — every auth-gate shell carries a top-level
+// `data-state` attribute so behavioral tests (T36 lock, T37
+// revoke-all, T38 re-login, session-expired paths) can detect
+// that the app tree has switched off the authenticated screens.
+// Business screens use StateFrame's `data-state`; auth gates
+// (which replace the entire tree) now surface the equivalent
+// marker at the shell root. Every state chosen mirrors the
+// closest useDesktopData ScreenState value the operator would
+// have observed if StateFrame had rendered instead.
+function AuthShell({ title, subtitle, children, dataState }: {
+  title: string; subtitle?: string; children: ReactNode; dataState: string;
+}) {
   return (
-    <div style={{
+    <div data-state={dataState} data-auth-shell="true" style={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       minHeight: '100vh', backgroundColor: '#0f1216', color: '#e6e6e6',
     }}>
@@ -148,7 +159,7 @@ function SetupScreen({ actions }: { actions: ReturnType<typeof useAuth>['actions
     if (!r.ok) setReason(r.reason);
   };
   return (
-    <AuthShell title="First-run setup" subtitle="Create the local operator account. This account is stored only on this machine.">
+    <AuthShell title="First-run setup" subtitle="Create the local operator account. This account is stored only on this machine." dataState="unauthorized">
       {reason && <StatusBanner text={reasonLabel(reason) ?? reason} />}
       <Field label="Username" type="text" value={username} onChange={setUsername} autoFocus />
       <Field label="Password (min 14 characters)" type="password" value={pw} onChange={setPw} />
@@ -172,7 +183,7 @@ function LoginScreen({ actions, failureReason }: { actions: ReturnType<typeof us
     if (!r.ok) setReason(r.reason);
   };
   return (
-    <AuthShell title="Sign in">
+    <AuthShell title="Sign in" dataState="unauthorized">
       {reason && <StatusBanner text={reasonLabel(reason) ?? reason} />}
       <Field label="Username" type="text" value={username} onChange={setUsername} autoFocus />
       <Field label="Password" type="password" value={pw} onChange={setPw} />
@@ -195,7 +206,7 @@ function LockedScreen({ state, actions }: { state: SanitizedAuthState; actions: 
     if (!r.ok) setReason(r.reason);
   };
   return (
-    <AuthShell title="Locked" subtitle={state.username ? `Signed in as ${state.username}` : undefined}>
+    <AuthShell title="Locked" subtitle={state.username ? `Signed in as ${state.username}` : undefined} dataState="unauthorized">
       <StatusBanner text="Session locked — enter your password to resume." />
       {reason && reason !== state.failureReason && <StatusBanner text={reasonLabel(reason) ?? reason} />}
       <Field label="Password" type="password" value={pw} onChange={setPw} autoFocus />
@@ -207,7 +218,7 @@ function LockedScreen({ state, actions }: { state: SanitizedAuthState; actions: 
 
 function SessionExpiredScreen({ actions }: { actions: ReturnType<typeof useAuth>['actions'] }) {
   return (
-    <AuthShell title="Session expired" subtitle="Your session has passed its lifetime and cannot be renewed.">
+    <AuthShell title="Session expired" subtitle="Your session has passed its lifetime and cannot be renewed." dataState="session_expired">
       <StatusBanner text="Please sign in again." />
       <PrimaryButton onClick={() => void actions.logout()}>Return to sign-in</PrimaryButton>
     </AuthShell>
@@ -216,7 +227,7 @@ function SessionExpiredScreen({ actions }: { actions: ReturnType<typeof useAuth>
 
 function SessionRevokedScreen({ actions }: { actions: ReturnType<typeof useAuth>['actions'] }) {
   return (
-    <AuthShell title="Session revoked" subtitle="Your session was revoked. This may indicate refresh-token reuse.">
+    <AuthShell title="Session revoked" subtitle="Your session was revoked. This may indicate refresh-token reuse." dataState="unauthorized">
       <StatusBanner text="For security, this session has been terminated. Please sign in again." />
       <PrimaryButton onClick={() => void actions.logout()}>Return to sign-in</PrimaryButton>
     </AuthShell>
@@ -236,7 +247,7 @@ function PasswordChangeScreen({ actions }: { actions: ReturnType<typeof useAuth>
     if (!r.ok) setReason(r.reason);
   };
   return (
-    <AuthShell title="Change password" subtitle="After changing your password, every session (including this one) will be revoked.">
+    <AuthShell title="Change password" subtitle="After changing your password, every session (including this one) will be revoked." dataState="unauthorized">
       {reason && <StatusBanner text={reasonLabel(reason) ?? reason} />}
       <Field label="Current password" type="password" value={current} onChange={setCurrent} autoFocus />
       <Field label="New password (min 14 characters)" type="password" value={pw} onChange={setPw} />
@@ -250,7 +261,7 @@ function PasswordChangeScreen({ actions }: { actions: ReturnType<typeof useAuth>
 
 function BootstrapUnavailableScreen({ state, onRetry }: { state: SanitizedAuthState; onRetry: () => void }) {
   return (
-    <AuthShell title="Waiting for server" subtitle="The Horizon Trade server has not signalled ready yet.">
+    <AuthShell title="Waiting for server" subtitle="The Horizon Trade server has not signalled ready yet." dataState="unavailable">
       <StatusBanner text={state.failureReason ?? 'The desktop supervisor has not been able to reach the server.'} />
       <PrimaryButton onClick={onRetry}>Retry</PrimaryButton>
     </AuthShell>
