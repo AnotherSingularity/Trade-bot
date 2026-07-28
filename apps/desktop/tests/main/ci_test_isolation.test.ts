@@ -21,6 +21,11 @@ describe('Stage 3C-CI-FIX4 — portable vitest config excludes service-dependent
   });
 
   it('excludes MariaDB/Redis probe suites', () => {
+    // Stage 3C-CI-RESET Part 2 Checkpoint D.0: three files that were
+    // previously excluded (stage2fix_db_isolation, stage1_supervisor_integration,
+    // stage1_command_runner) are now portable-safe pure/in-process
+    // tests and run under the portable config. See the D.0 audit for
+    // the safety verification.
     for (const f of [
       'tests/stage1_mariadb_probe.test.ts',
       'tests/stage1_redis_probe.test.ts',
@@ -28,9 +33,6 @@ describe('Stage 3C-CI-FIX4 — portable vitest config excludes service-dependent
       'tests/stage1fix_external_services_integration.test.ts',
       'tests/stage2_end_to_end_integration.test.ts',
       'tests/stage2fix_bootstrap_scope.test.ts',
-      'tests/stage2fix_db_isolation.test.ts',
-      'tests/stage1_supervisor_integration.test.ts',
-      'tests/stage1_command_runner.test.ts',
     ]) {
       expect(portableCfg, `portable vitest.config.ts must exclude ${f}`).toContain(`'${f}'`);
     }

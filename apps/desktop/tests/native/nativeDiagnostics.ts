@@ -202,8 +202,16 @@ export async function withNativeTimeout<T>(
 // Native run status file (updates in place as phases progress).
 // ---------------------------------------------------------------------------
 
+/**
+ * Stage 3C-CI-RESET Part 2 Checkpoint D.0 v1 quarantine:
+ *   contract is now `legacy_non_authoritative`. The file is
+ *   preserved so the existing CI artefact uploader keeps finding
+ *   it, but the final evidence validator (checkpoint E) reads
+ *   ONLY the v2 status writer at `native-run-status.v2.json`.
+ *   `completed:true` in this file has NO influence on CI success.
+ */
 export interface NativeRunStatusFields {
-  contract: 'stage3c-native-run-status.v1';
+  contract: 'stage3c-native-run-status.v1.legacy_non_authoritative';
   workflowRunId: string | null;
   gitCommit: string;
   runId: string;
@@ -235,7 +243,7 @@ export class NativeRunStatus {
     mkdirSync(logsDir, { recursive: true });
     this.path = join(logsDir, 'native-run-status.json');
     this.state = {
-      contract: 'stage3c-native-run-status.v1',
+      contract: 'stage3c-native-run-status.v1.legacy_non_authoritative',
       workflowRunId: process.env.GITHUB_RUN_ID ?? null,
       gitCommit: process.env.GITHUB_SHA ?? 'local',
       runId,

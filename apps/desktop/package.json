@@ -16,6 +16,7 @@
     "build:manifest": "tsx build/generate-build-manifest.ts",
     "verify:runtime-layout": "tsx build/verify-runtime-layout.ts",
     "verify:test-topology": "tsx build/verify-test-topology.ts",
+    "generate:native-inventory": "tsx build/generate-native-certification-inventory.ts",
     "build": "npm run clean && npm run typecheck:main && npm run typecheck:preload && npm run typecheck:renderer && npm run build:renderer && npm run build:bundle",
     "package:win": "electron-builder --win --publish never",
     "lint": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",

@@ -96,7 +96,10 @@ describe('Stage 3C-CI-FIX5 §9 — renderer-ready watchdog regression', () => {
       contract: string; startupComplete: boolean; completed: boolean;
       failureClassification: string | null; currentPhase: string;
     };
-    expect(nrs.contract).toBe('stage3c-native-run-status.v1');
+    // Stage 3C-CI-RESET Part 2 Checkpoint D.0 — v1 contract is
+    // quarantined `legacy_non_authoritative`; v2 is authoritative
+    // in stage3c-native-run-status.v2.
+    expect(nrs.contract).toBe('stage3c-native-run-status.v1.legacy_non_authoritative');
     // Critical: the FIX4 defect was `completed:true` on a hang.
     // FIX5 must keep it false.
     expect(nrs.completed).toBe(false);

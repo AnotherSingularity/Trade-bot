@@ -44,6 +44,9 @@
       "tests/main/native_certification_manifest.test.ts",
       "tests/main/native_evidence_v2.test.ts",
       "tests/main/native_execution_ledger.test.ts",
+      "tests/main/native_induction_policy.test.ts",
+      "tests/main/native_manifest_mapping.test.ts",
+      "tests/main/native_reconstructed_results.test.ts",
       "tests/main/native_run_status_v2.test.ts",
       "tests/main/bootstrap_authority.test.ts",
       "tests/main/build_manifest.test.ts",
@@ -86,7 +89,10 @@
       "tests/stage2_api_client.test.ts",
       "tests/stage2_bootstrap_token.test.ts",
       "tests/stage2_ipc_contract.test.ts",
+      "tests/stage1_command_runner.test.ts",
+      "tests/stage1_supervisor_integration.test.ts",
       "tests/stage2_secure_storage.test.ts",
+      "tests/stage2fix_db_isolation.test.ts",
       "tests/stage2fix_privileged_ipc.test.ts",
       "tests/stage3_desktop_data_client.test.ts",
       "tests/stage3_desktop_data_ipc.test.ts"
@@ -104,19 +110,6 @@
     "native": [
       "tests/native/nativeElectron.integration.test.ts"
     ],
-    "unassigned": [
-      {
-        "file": "tests/stage1_command_runner.test.ts",
-        "reason": "Spawns real child processes via ChildProcessCommandRunner + writes to os.tmpdir(); pre-RESET topology excluded it from portable but never bound it to external or native. Follow-up: reclassify into a new 'shell-integration' bucket or move to portable if the tmpdir writes are safe under vitest's per-test isolation."
-      },
-      {
-        "file": "tests/stage1_supervisor_integration.test.ts",
-        "reason": "End-to-end service-supervisor integration that stubs out MariaDB/Redis but exercises the real ChildProcessCommandRunner + ServiceSupervisor state machine. Pre-RESET topology excluded it from portable but never bound it to external or native. Follow-up: same bucketing decision as stage1_command_runner."
-      },
-      {
-        "file": "tests/stage2fix_db_isolation.test.ts",
-        "reason": "Regression guard for the scratchDb.ts protected-database refusal path. Pre-RESET topology excluded it from portable but never bound it to external. The test USES createScratchDb/dropScratchDb which need MariaDB, so it belongs in external; follow-up will move it there once the topology reclassification lands."
-      }
-    ]
+    "unassigned": []
   }
 }

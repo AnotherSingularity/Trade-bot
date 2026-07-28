@@ -35,9 +35,11 @@ export default defineConfig({
       'tests/stage1fix_external_services_integration.test.ts',
       'tests/stage2_end_to_end_integration.test.ts',
       'tests/stage2fix_bootstrap_scope.test.ts',
-      'tests/stage2fix_db_isolation.test.ts',
-      'tests/stage1_supervisor_integration.test.ts',
-      'tests/stage1_command_runner.test.ts',
+      // Stage 3C-CI-RESET Part 2 Checkpoint D.0: stage2fix_db_isolation,
+      // stage1_supervisor_integration, and stage1_command_runner
+      // previously appeared here but only exercise pure functions +
+      // in-process command spawns (verified in D0 audit). They now run
+      // in portable so no executable test remains unassigned.
       'node_modules/**',
       'dist/**',
     ],

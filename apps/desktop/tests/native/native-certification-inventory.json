@@ -1,0 +1,861 @@
+{
+  "contract": "stage3c-native-certification-inventory.v1",
+  "manifestHash": "ab416c4888269d8a85212ac4c1a371a898962be22e7b622d119f067683dcc84f",
+  "totalRequirements": 115,
+  "categoriesRecognized": [
+    "startup",
+    "screen_navigation",
+    "screen_signature",
+    "screen_manifest",
+    "domain",
+    "session",
+    "degradation",
+    "security",
+    "lifecycle",
+    "safety",
+    "evidence",
+    "cleanup"
+  ],
+  "byCategory": {
+    "startup": 17,
+    "screen_navigation": 19,
+    "screen_signature": 19,
+    "screen_manifest": 19,
+    "domain": 16,
+    "session": 3,
+    "degradation": 3,
+    "security": 2,
+    "lifecycle": 4,
+    "safety": 4,
+    "evidence": 4,
+    "cleanup": 5
+  },
+  "screenKeys": [
+    "overview",
+    "shadow_portfolio",
+    "positions",
+    "decision_journal",
+    "research_universe",
+    "fingerprints",
+    "regimes",
+    "portfolio_risk",
+    "microstructure",
+    "context",
+    "validation_lab",
+    "costs_attribution",
+    "protection",
+    "reconciliation",
+    "incidents",
+    "reports",
+    "configuration",
+    "system",
+    "safety"
+  ],
+  "requirements": [
+    {
+      "id": "T0",
+      "category": "startup",
+      "title": "preconditions — external services + built desktop present",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T0')"
+    },
+    {
+      "id": "T1",
+      "category": "startup",
+      "title": "real Electron process launches",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T1')"
+    },
+    {
+      "id": "T2",
+      "category": "startup",
+      "title": "real Electron main entry loaded (dist/main/index.cjs)",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T2')"
+    },
+    {
+      "id": "T3",
+      "category": "startup",
+      "title": "real preload initializes — window.horizon exposed",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T3')"
+    },
+    {
+      "id": "T4",
+      "category": "startup",
+      "title": "real renderer loads — HashRouter is active",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T4')"
+    },
+    {
+      "id": "T5",
+      "category": "startup",
+      "title": "HORIZON_ENVIRONMENT=development + HORIZON_DEVELOPMENT_FAKE=false",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T5')"
+    },
+    {
+      "id": "T6",
+      "category": "startup",
+      "title": "no stub adapters — createServerAdapterExternal is a probe-only real adapter",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T6')"
+    },
+    {
+      "id": "T7",
+      "category": "startup",
+      "title": "actual server child process running with a real pid",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T7')"
+    },
+    {
+      "id": "T8",
+      "category": "startup",
+      "title": "actual MariaDB — SELECT 1 returns 1 against the scratch DB",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T8')"
+    },
+    {
+      "id": "T9",
+      "category": "startup",
+      "title": "actual Redis — PING returns PONG",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T9')"
+    },
+    {
+      "id": "T10",
+      "category": "startup",
+      "title": "unique scratch DB name (hzn_scratch_native_...)",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T10')"
+    },
+    {
+      "id": "T11",
+      "category": "startup",
+      "title": "unique Redis namespace (native_<runId>)",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T11')"
+    },
+    {
+      "id": "T12",
+      "category": "startup",
+      "title": "bootstrap channel — /api/system/readiness accepts the bootstrap token",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T12')"
+    },
+    {
+      "id": "T13",
+      "category": "startup",
+      "title": "operator setup succeeded (ensureLocalOperator idempotent)",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T13')"
+    },
+    {
+      "id": "T14",
+      "category": "startup",
+      "title": "authenticated state established during beforeAll is visible",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T14')"
+    },
+    {
+      "id": "T15",
+      "category": "startup",
+      "title": "renderer state exposes SanitizedAuthState only",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T15')"
+    },
+    {
+      "id": "T16",
+      "category": "startup",
+      "title": "Overview renders authoritative readiness signals",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T16')"
+    },
+    {
+      "id": "NAV:overview",
+      "category": "screen_navigation",
+      "title": "overview navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "overview",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:overview",
+      "category": "screen_signature",
+      "title": "overview carries screen-specific signature",
+      "screenKey": "overview",
+      "originatingDeclaration": "static:certIt('SIG:overview')"
+    },
+    {
+      "id": "MANIFEST:overview",
+      "category": "screen_manifest",
+      "title": "overview expected data-state=healthy; 2 signature(s)",
+      "screenKey": "overview",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:shadow_portfolio",
+      "category": "screen_navigation",
+      "title": "shadow_portfolio navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "shadow_portfolio",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:shadow_portfolio",
+      "category": "screen_signature",
+      "title": "shadow_portfolio carries screen-specific signature",
+      "screenKey": "shadow_portfolio",
+      "originatingDeclaration": "static:certIt('SIG:shadow_portfolio')"
+    },
+    {
+      "id": "MANIFEST:shadow_portfolio",
+      "category": "screen_manifest",
+      "title": "shadow_portfolio expected data-state=healthy; 1 signature(s)",
+      "screenKey": "shadow_portfolio",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:positions",
+      "category": "screen_navigation",
+      "title": "positions navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "positions",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:positions",
+      "category": "screen_signature",
+      "title": "positions carries screen-specific signature",
+      "screenKey": "positions",
+      "originatingDeclaration": "static:certIt('SIG:positions')"
+    },
+    {
+      "id": "MANIFEST:positions",
+      "category": "screen_manifest",
+      "title": "positions expected data-state=healthy; 1 signature(s)",
+      "screenKey": "positions",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:decision_journal",
+      "category": "screen_navigation",
+      "title": "decision_journal navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "decision_journal",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:decision_journal",
+      "category": "screen_signature",
+      "title": "decision_journal carries screen-specific signature",
+      "screenKey": "decision_journal",
+      "originatingDeclaration": "static:certIt('SIG:decision_journal')"
+    },
+    {
+      "id": "MANIFEST:decision_journal",
+      "category": "screen_manifest",
+      "title": "decision_journal expected data-state=healthy; 1 signature(s)",
+      "screenKey": "decision_journal",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:research_universe",
+      "category": "screen_navigation",
+      "title": "research_universe navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "research_universe",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:research_universe",
+      "category": "screen_signature",
+      "title": "research_universe carries screen-specific signature",
+      "screenKey": "research_universe",
+      "originatingDeclaration": "static:certIt('SIG:research_universe')"
+    },
+    {
+      "id": "MANIFEST:research_universe",
+      "category": "screen_manifest",
+      "title": "research_universe expected data-state=healthy; 1 signature(s)",
+      "screenKey": "research_universe",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:fingerprints",
+      "category": "screen_navigation",
+      "title": "fingerprints navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "fingerprints",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:fingerprints",
+      "category": "screen_signature",
+      "title": "fingerprints carries screen-specific signature",
+      "screenKey": "fingerprints",
+      "originatingDeclaration": "static:certIt('SIG:fingerprints')"
+    },
+    {
+      "id": "MANIFEST:fingerprints",
+      "category": "screen_manifest",
+      "title": "fingerprints expected data-state=healthy; 1 signature(s)",
+      "screenKey": "fingerprints",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:regimes",
+      "category": "screen_navigation",
+      "title": "regimes navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "regimes",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:regimes",
+      "category": "screen_signature",
+      "title": "regimes carries screen-specific signature",
+      "screenKey": "regimes",
+      "originatingDeclaration": "static:certIt('SIG:regimes')"
+    },
+    {
+      "id": "MANIFEST:regimes",
+      "category": "screen_manifest",
+      "title": "regimes expected data-state=healthy; 1 signature(s)",
+      "screenKey": "regimes",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:portfolio_risk",
+      "category": "screen_navigation",
+      "title": "portfolio_risk navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "portfolio_risk",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:portfolio_risk",
+      "category": "screen_signature",
+      "title": "portfolio_risk carries screen-specific signature",
+      "screenKey": "portfolio_risk",
+      "originatingDeclaration": "static:certIt('SIG:portfolio_risk')"
+    },
+    {
+      "id": "MANIFEST:portfolio_risk",
+      "category": "screen_manifest",
+      "title": "portfolio_risk expected data-state=healthy; 3 signature(s)",
+      "screenKey": "portfolio_risk",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:microstructure",
+      "category": "screen_navigation",
+      "title": "microstructure navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "microstructure",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:microstructure",
+      "category": "screen_signature",
+      "title": "microstructure carries screen-specific signature",
+      "screenKey": "microstructure",
+      "originatingDeclaration": "static:certIt('SIG:microstructure')"
+    },
+    {
+      "id": "MANIFEST:microstructure",
+      "category": "screen_manifest",
+      "title": "microstructure expected data-state=healthy; 3 signature(s)",
+      "screenKey": "microstructure",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:context",
+      "category": "screen_navigation",
+      "title": "context navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "context",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:context",
+      "category": "screen_signature",
+      "title": "context carries screen-specific signature",
+      "screenKey": "context",
+      "originatingDeclaration": "static:certIt('SIG:context')"
+    },
+    {
+      "id": "MANIFEST:context",
+      "category": "screen_manifest",
+      "title": "context expected data-state=healthy; 1 signature(s)",
+      "screenKey": "context",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:validation_lab",
+      "category": "screen_navigation",
+      "title": "validation_lab navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "validation_lab",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:validation_lab",
+      "category": "screen_signature",
+      "title": "validation_lab carries screen-specific signature",
+      "screenKey": "validation_lab",
+      "originatingDeclaration": "static:certIt('SIG:validation_lab')"
+    },
+    {
+      "id": "MANIFEST:validation_lab",
+      "category": "screen_manifest",
+      "title": "validation_lab expected data-state=healthy; 3 signature(s)",
+      "screenKey": "validation_lab",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:costs_attribution",
+      "category": "screen_navigation",
+      "title": "costs_attribution navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "costs_attribution",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:costs_attribution",
+      "category": "screen_signature",
+      "title": "costs_attribution carries screen-specific signature",
+      "screenKey": "costs_attribution",
+      "originatingDeclaration": "static:certIt('SIG:costs_attribution')"
+    },
+    {
+      "id": "MANIFEST:costs_attribution",
+      "category": "screen_manifest",
+      "title": "costs_attribution expected data-state=empty; 1 signature(s)",
+      "screenKey": "costs_attribution",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:protection",
+      "category": "screen_navigation",
+      "title": "protection navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "protection",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:protection",
+      "category": "screen_signature",
+      "title": "protection carries screen-specific signature",
+      "screenKey": "protection",
+      "originatingDeclaration": "static:certIt('SIG:protection')"
+    },
+    {
+      "id": "MANIFEST:protection",
+      "category": "screen_manifest",
+      "title": "protection expected data-state=healthy; 1 signature(s)",
+      "screenKey": "protection",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:reconciliation",
+      "category": "screen_navigation",
+      "title": "reconciliation navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "reconciliation",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:reconciliation",
+      "category": "screen_signature",
+      "title": "reconciliation carries screen-specific signature",
+      "screenKey": "reconciliation",
+      "originatingDeclaration": "static:certIt('SIG:reconciliation')"
+    },
+    {
+      "id": "MANIFEST:reconciliation",
+      "category": "screen_manifest",
+      "title": "reconciliation expected data-state=healthy; 1 signature(s)",
+      "screenKey": "reconciliation",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:incidents",
+      "category": "screen_navigation",
+      "title": "incidents navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "incidents",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:incidents",
+      "category": "screen_signature",
+      "title": "incidents carries screen-specific signature",
+      "screenKey": "incidents",
+      "originatingDeclaration": "static:certIt('SIG:incidents')"
+    },
+    {
+      "id": "MANIFEST:incidents",
+      "category": "screen_manifest",
+      "title": "incidents expected data-state=healthy; 1 signature(s)",
+      "screenKey": "incidents",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:reports",
+      "category": "screen_navigation",
+      "title": "reports navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "reports",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:reports",
+      "category": "screen_signature",
+      "title": "reports carries screen-specific signature",
+      "screenKey": "reports",
+      "originatingDeclaration": "static:certIt('SIG:reports')"
+    },
+    {
+      "id": "MANIFEST:reports",
+      "category": "screen_manifest",
+      "title": "reports expected data-state=healthy; 2 signature(s)",
+      "screenKey": "reports",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:configuration",
+      "category": "screen_navigation",
+      "title": "configuration navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "configuration",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:configuration",
+      "category": "screen_signature",
+      "title": "configuration carries screen-specific signature",
+      "screenKey": "configuration",
+      "originatingDeclaration": "static:certIt('SIG:configuration')"
+    },
+    {
+      "id": "MANIFEST:configuration",
+      "category": "screen_manifest",
+      "title": "configuration expected data-state=healthy; 1 signature(s)",
+      "screenKey": "configuration",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:system",
+      "category": "screen_navigation",
+      "title": "system navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "system",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:system",
+      "category": "screen_signature",
+      "title": "system carries screen-specific signature",
+      "screenKey": "system",
+      "originatingDeclaration": "static:certIt('SIG:system')"
+    },
+    {
+      "id": "MANIFEST:system",
+      "category": "screen_manifest",
+      "title": "system expected data-state=healthy; 2 signature(s)",
+      "screenKey": "system",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "NAV:safety",
+      "category": "screen_navigation",
+      "title": "safety navigates + leaves loading + shows LIVE ORDER SUBMISSION DISABLED",
+      "screenKey": "safety",
+      "originatingDeclaration": "dynamic:NAV_loop"
+    },
+    {
+      "id": "SIG:safety",
+      "category": "screen_signature",
+      "title": "safety carries screen-specific signature",
+      "screenKey": "safety",
+      "originatingDeclaration": "static:certIt('SIG:safety')"
+    },
+    {
+      "id": "MANIFEST:safety",
+      "category": "screen_manifest",
+      "title": "safety expected data-state=healthy; 1 signature(s)",
+      "screenKey": "safety",
+      "originatingDeclaration": "dynamic:MANIFEST_loop"
+    },
+    {
+      "id": "T20",
+      "category": "domain",
+      "title": "no screen renders a fabricated placeholder (source .v0-stub absent)",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T20')"
+    },
+    {
+      "id": "T21",
+      "category": "domain",
+      "title": "Positions — empty seed renders empty banner, never fabricates positions",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T21')"
+    },
+    {
+      "id": "T22",
+      "category": "domain",
+      "title": "Positions — dust surface is present and honestly labeled",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T22')"
+    },
+    {
+      "id": "T23",
+      "category": "domain",
+      "title": "Protection — unknown protection labelled unknown",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T23')"
+    },
+    {
+      "id": "T24",
+      "category": "domain",
+      "title": "Decision Journal — champion vs observer sections structurally present",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T24')"
+    },
+    {
+      "id": "T25",
+      "category": "domain",
+      "title": "Decision Journal — evidence-time separation is a schema-level guarantee",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T25')"
+    },
+    {
+      "id": "T26",
+      "category": "domain",
+      "title": "Research Universe — champion + observer as distinct arrays",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T26')"
+    },
+    {
+      "id": "T27",
+      "category": "domain",
+      "title": "Fingerprints — LOW / UNCLASSIFIED qualifiers preserved when present",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T27')"
+    },
+    {
+      "id": "T28",
+      "category": "domain",
+      "title": "Regimes — latent state + semantic regime rendered as distinct columns",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T28')"
+    },
+    {
+      "id": "T29",
+      "category": "domain",
+      "title": "Portfolio Risk — multiplier never exceeds 1 (structurally clamped)",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T29')"
+    },
+    {
+      "id": "T30",
+      "category": "domain",
+      "title": "Context — multiplier ≤ 1 preserved",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T30')"
+    },
+    {
+      "id": "T31",
+      "category": "domain",
+      "title": "Portfolio Risk — Kelly disabled banner visible",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T31')"
+    },
+    {
+      "id": "T32",
+      "category": "domain",
+      "title": "Validation Lab — Model promotion disabled banner visible",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T32')"
+    },
+    {
+      "id": "T33",
+      "category": "domain",
+      "title": "Microstructure — queue not known + L2 provider inactive banners",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T33')"
+    },
+    {
+      "id": "T34",
+      "category": "domain",
+      "title": "Costs — screen renders without exposing gross-without-net evidence",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T34')"
+    },
+    {
+      "id": "T35",
+      "category": "domain",
+      "title": "Reports — generation NOT YET IMPLEMENTED banner visible",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T35')"
+    },
+    {
+      "id": "T36",
+      "category": "session",
+      "title": "lock — business data cleared; unauthenticated phase entered",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T36')"
+    },
+    {
+      "id": "T37",
+      "category": "session",
+      "title": "session revoke — clears business data",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T37')"
+    },
+    {
+      "id": "T38",
+      "category": "session",
+      "title": "re-login restores authenticated data",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T38')"
+    },
+    {
+      "id": "T39-41",
+      "category": "degradation",
+      "title": "at least one screen renders one of stale / degraded / unavailable",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T39-41')"
+    },
+    {
+      "id": "T42",
+      "category": "degradation",
+      "title": "SIGSTOP the server → next authenticated read renders api_failure",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T42')"
+    },
+    {
+      "id": "T43",
+      "category": "degradation",
+      "title": "contract_mismatch code path exists in shipped renderer bundle",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T43')"
+    },
+    {
+      "id": "T44",
+      "category": "security",
+      "title": "renderer sandbox — no process, no require, no fs",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T44')"
+    },
+    {
+      "id": "T45",
+      "category": "security",
+      "title": "renderer cannot invoke arbitrary IPC channels (unknown key rejected)",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T45')"
+    },
+    {
+      "id": "T46",
+      "category": "lifecycle",
+      "title": "graceful close — window.close() dispatches; app remains alive",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T46')"
+    },
+    {
+      "id": "T47",
+      "category": "lifecycle",
+      "title": "server child process still healthy after mid-suite exercise",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T47')"
+    },
+    {
+      "id": "T48",
+      "category": "lifecycle",
+      "title": "relaunch prep — bootstrap token + operator remain valid across a fresh IPC round-trip",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T48')"
+    },
+    {
+      "id": "T49",
+      "category": "lifecycle",
+      "title": "reconciliation gate on restart — /api/reconciliation/status responds",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T49')"
+    },
+    {
+      "id": "T50-52",
+      "category": "safety",
+      "title": "Create Order counters — functionInvocations / attemptCount / networkCount all zero",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T50-52')"
+    },
+    {
+      "id": "T53",
+      "category": "safety",
+      "title": "safe flags unchanged (DRY_RUN=true, ORDER_SUBMISSION_ENABLED=false)",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T53')"
+    },
+    {
+      "id": "T54",
+      "category": "safety",
+      "title": "no Coinbase credentials referenced in the harness process env",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T54')"
+    },
+    {
+      "id": "T55",
+      "category": "safety",
+      "title": "no production providers activated (HORIZON_PROVIDER_MODE unset / fixture)",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T55')"
+    },
+    {
+      "id": "T-coverage",
+      "category": "evidence",
+      "title": "all 19 screens exercised at least once",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T-coverage')"
+    },
+    {
+      "id": "T-manifest-completeness",
+      "category": "evidence",
+      "title": "every one of 19 screens has an executed manifest assertion",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T-manifest-completeness')"
+    },
+    {
+      "id": "T-evidence",
+      "category": "evidence",
+      "title": "preliminary evidence bundle can be derived from ledger + runtime results",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T-evidence')"
+    },
+    {
+      "id": "T-summary",
+      "category": "evidence",
+      "title": "ledger-derived counts + startup trace echoed for the report",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T-summary')"
+    },
+    {
+      "id": "CLEANUP:electron_close",
+      "category": "cleanup",
+      "title": "Electron app.close() completed",
+      "screenKey": null,
+      "originatingDeclaration": "afterAll:ledger.recordCleanup('CLEANUP:electron_close')"
+    },
+    {
+      "id": "CLEANUP:server_stop",
+      "category": "cleanup",
+      "title": "Server child process stopped",
+      "screenKey": null,
+      "originatingDeclaration": "afterAll:ledger.recordCleanup('CLEANUP:server_stop')"
+    },
+    {
+      "id": "CLEANUP:redis_cleanup",
+      "category": "cleanup",
+      "title": "Redis namespace cleared",
+      "screenKey": null,
+      "originatingDeclaration": "afterAll:ledger.recordCleanup('CLEANUP:redis_cleanup')"
+    },
+    {
+      "id": "CLEANUP:database_drop",
+      "category": "cleanup",
+      "title": "Scratch database dropped",
+      "screenKey": null,
+      "originatingDeclaration": "afterAll:ledger.recordCleanup('CLEANUP:database_drop')"
+    },
+    {
+      "id": "CLEANUP:process_leak_check",
+      "category": "cleanup",
+      "title": "No child processes survived teardown",
+      "screenKey": null,
+      "originatingDeclaration": "afterAll:ledger.recordCleanup('CLEANUP:process_leak_check')"
+    }
+  ]
+}

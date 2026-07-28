@@ -15,6 +15,7 @@ import { reconcileOnStartup } from './trading/reconciler';
 import { withLease, RECONCILE_LEASE_KEY } from './jobs/lease';
 import { desktopOperatorRouter, desktopRouter, systemReadinessRouter } from './routes/desktop';
 import { operatorAuthRouter } from './routes/auth';
+import { nativeInductionRouter, shouldMountNativeInduction } from './routes/nativeInduction';
 import { configureBootstrapToken } from './auth/bootstrap';
 
 /**
@@ -116,6 +117,18 @@ async function main() {
   // ── Stage 2 §13: operator authentication endpoints (setup, login,
   //    refresh, logout, lock, change-password, revoke-all, session).
   app.use('/api/operator-auth', operatorAuthRouter());
+
+  // Stage 3C-CI-RESET Part 2 Checkpoint D.1 — native induction
+  // controller. Mounted ONLY when NODE_ENV=test AND
+  // HORIZON_NATIVE_DIAGNOSTICS=true AND HORIZON_SERVER_EXTERNAL=true.
+  // Every other build (production, dev, non-diagnostics test) has
+  // no route mounted; requests return 404. See
+  // packages/shared/src/nativeInduction.ts for the policy.
+  if (shouldMountNativeInduction()) {
+    app.use('/api/native-induction', nativeInductionRouter());
+    // eslint-disable-next-line no-console
+    console.log('[native-induction] mounted /api/native-induction (test-only)');
+  }
 
   // ── tRPC
   app.use(

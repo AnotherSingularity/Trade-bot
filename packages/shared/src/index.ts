@@ -6,3 +6,4 @@ export * from './desktopContracts';
 export * from './operatorAuth';
 // Stage 3C-CI-RESET Part 2 §1: schema-aware desktop API route registry.
 export * from './desktopApiRoutes';
+export * from './nativeInduction';

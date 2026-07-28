@@ -46,6 +46,10 @@ import {
 import { NativeExecutionLedger } from './nativeExecutionLedger';
 import { NativeRunStatusV2Writer } from './nativeRunStatusV2';
 import {
+  makeIncompleteReconstructedResults, validateReconstructedResults,
+  type ReconstructedResults,
+} from './nativeReconstructedResults';
+import {
   deriveEvidenceV2, validateEvidenceV2Structure, writeEvidenceV2,
   type CreateOrderCountersV2, type DegradationResultV2, type ProcessLeakResultV2,
   type ProviderResultV2, type RendererSecurityResultV2, type SafeFlagsV2,
@@ -121,6 +125,13 @@ let evidenceSafeFlags: SafeFlagsV2 = { kind: 'incomplete', detail: 'not_yet_obse
 let evidenceProvider: ProviderResultV2 = { kind: 'incomplete', detail: 'not_yet_observed' };
 let evidenceTeardown: TeardownResultV2 = { kind: 'incomplete', detail: 'not_yet_observed' };
 let evidenceProcessLeak: ProcessLeakResultV2 = { kind: 'incomplete', detail: 'not_yet_observed' };
+// Stage 3C-CI-RESET Part 2 Checkpoint D.13 — reconstructed result set.
+// Every reconstructed test (T34, T36, T37, T39-41, T42, T43, T46,
+// T49, T53, T54, T55) upgrades one field on this record from
+// `incomplete` to `passed`/`failed`. The evidence writer feeds the
+// whole record through `validateReconstructedResults('final')`
+// during the afterAll bundle build.
+let reconstructedResults: ReconstructedResults = makeIncompleteReconstructedResults();
 
 /**
  * Look up a manifest requirement by ID. Throws if the ID is not in
@@ -1065,14 +1076,28 @@ afterAll(async () => {
       });
       try { writeEvidenceV2(iso.logsDir, finalBundle, 'native-evidence.v2.final.json'); }
       catch { /* best-effort */ }
+      // Stage 3C-CI-RESET Part 2 Checkpoint D.13 — cross-check the
+      // reconstructed-test result set. If any reconstructed test
+      // left its record as `incomplete` (a body threw before
+      // populating it) or a domain cross-check tripped, we surface
+      // it as a distinct failure tag alongside the evidence
+      // structure validation. Both must be clean for
+      // `evidenceValid` to flip true.
       const finalValidation = validateEvidenceV2Structure(finalBundle, 'final');
+      const reconstructedFailures = validateReconstructedResults(reconstructedResults, 'final');
+      if (reconstructedFailures.length > 0) {
+        try {
+          const path = join(iso.logsDir, 'reconstructed-results-failures.json');
+          writeFileSync(path, JSON.stringify({ failures: reconstructedFailures }, null, 2));
+        } catch { /* best-effort */ }
+      }
 
       // Propagate ALL evidence + runtime state into the v2 status
       // writer, then let its recompute() derive `completed`.
       runStatusV2?.setLedgerSummary(summary);
       runStatusV2?.setProcessLeakOk(processLeakResult.ok);
       if (teardownOk && processLeakResult.ok) runStatusV2?.markCleanupComplete();
-      if (finalValidation.ok) runStatusV2?.markEvidenceValid();
+      if (finalValidation.ok && reconstructedFailures.length === 0) runStatusV2?.markEvidenceValid();
     }
     ledger.close();
   }

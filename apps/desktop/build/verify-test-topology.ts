@@ -269,10 +269,29 @@ async function main(): Promise<void> {
     }
   }
 
-  // T7: Every unassigned entry MUST carry a non-empty reason.
+  // Stage 3C-CI-RESET Part 2 Checkpoint D.0 — no executable test file
+  // may remain in the `unassigned` bucket. An entry here MUST cite
+  // that the file is a non-executable fixture/helper AND the on-disk
+  // scan MUST corroborate (no describe/it/test declarations). For
+  // now the bucket is enforced to be empty: any *.test.ts under
+  // tests/ that walks a describe/it/test IS executable by
+  // definition. The check below fails if the bucket contains any
+  // entry whose file matches the test-discovery scan (which is all
+  // of them, since the walker only picks up .test.ts files).
   for (const entry of manifest.assignments.unassigned) {
-    if (typeof entry.reason !== 'string' || entry.reason.trim().length < 20) {
-      violations.push({ tag: 'topology_missing_reason', detail: `unassigned entry ${entry.file} lacks a substantive reason (min 20 chars)` });
+    if (diskFiles.has(entry.file)) {
+      violations.push({
+        tag: 'topology_unassigned_executable',
+        detail: `${entry.file} is a discovered test file — it MUST be assigned to portable / external / native (reason='${(entry.reason ?? '').slice(0, 60)}')`,
+      });
+    } else {
+      // Non-existent file in the unassigned bucket is a pure stale
+      // entry — surfaces via topology_missing_file above too, but a
+      // dedicated tag makes cleanup unambiguous.
+      violations.push({
+        tag: 'topology_unassigned_stale',
+        detail: `${entry.file} listed as unassigned but not present on disk`,
+      });
     }
   }
 
