@@ -190,21 +190,34 @@ try {
         ok: boolean; data: DesktopDataChannelResponse | null; error: string | null;
       };
       if (!result.ok || !result.data) {
-        return { ok: false, key, error: { code: result.error ?? 'ipc_call_failed', detail: null } };
+        // Stage 3C-E.1.15/E.1.16 — the outer IPC handler blocks the
+        // desktopData channel BEFORE reaching desktopDataClient when
+        // the auth phase is not `authenticated`, returning
+        // `authentication_required` (or `authentication_manager_
+        // unavailable` if the manager is missing) at the outer
+        // envelope. These are indistinguishable from a genuine gate
+        // and are treated the same way — throw so direct callers can
+        // detect the block.
+        const outerCode = result.error ?? 'ipc_call_failed';
+        if (outerCode === 'authentication_required' || outerCode === 'authentication_manager_unavailable') {
+          throw new Error(`${outerCode}:${key}`);
+        }
+        return { ok: false, key, error: { code: outerCode, detail: null } };
       }
       if (!result.data.ok) {
-        // Stage 3C-E.1.15 — auth-loss errors (no access token, session
-        // expired, session revoked) are EXCEPTIONAL: the operator is
-        // no longer authorized to observe business data at all. The
-        // preload rejects such responses so consumers can distinguish
-        // "operator is gated" from "server returned an error envelope
-        // for a still-authorized operator". useDesktopData has
-        // already cleared its cache via the authPhase-loss effect,
-        // so the rejection is a no-op for the React tree; direct
-        // callers (like behavioral test T36) see the throw and can
-        // assert the gate is real. All other error codes (contract
-        // mismatch, timeout, api_failure, etc.) still return as a
-        // resolved `{ok:false}` envelope so screens can render them.
+        // Auth-loss errors (no access token, session expired, session
+        // revoked) reported by the inner client are EXCEPTIONAL: the
+        // operator is no longer authorized to observe business data
+        // at all. The preload rejects such responses so consumers can
+        // distinguish "operator is gated" from "server returned an
+        // error envelope for a still-authorized operator".
+        // useDesktopData has already cleared its cache via the
+        // authPhase-loss effect, so the rejection is a no-op for the
+        // React tree; direct callers (like behavioral test T36) see
+        // the throw and can assert the gate is real. All other error
+        // codes (contract mismatch, timeout, api_failure, etc.) still
+        // return as a resolved `{ok:false}` envelope so screens can
+        // render them.
         const code = result.data.error?.code ?? '';
         if (code === 'unauthenticated' || code === 'session_expired' || code === 'session_revoked') {
           throw new Error(`${code}:${result.data.error?.detail ?? 'auth_gate'}`);
