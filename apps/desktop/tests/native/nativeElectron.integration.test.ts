@@ -457,13 +457,36 @@ function screenStateMatcher(screenAttr: string): RegExp {
   );
 }
 
-async function navigateAndWaitFor(hashRoute: string, screenAttr: string, timeoutMs = 25_000): Promise<{ frame: string; leftLoading: boolean }> {
+// Stage 3C-E.1.5 — `unauthorized` / `session_expired` are TRANSIENT
+// during the mount race: a screen's useAuth() hook starts in
+// `bootstrap_unavailable`, useDesktopData observes non-authenticated
+// authPhase and paints the StateFrame as `data-state="unauthorized"`
+// for ~50-500 ms until useAuth's first IPC poll returns
+// phase="authenticated" and useDesktopData actually fetches. If the
+// navigator accepts unauthorized instantly, SIG assertions run
+// against the transient frame and see no seeded content.
+//
+// So the base wait accepts ONLY genuine data-completion states.
+// The lock / revoke-all / expiry tests that legitimately expect
+// unauthorized pass `acceptUnauthorized=true` to opt back in.
+const DATA_STATES_RX =
+  /data-state="(healthy|empty|stale|degraded|unavailable|api_failure|contract_mismatch)"/;
+const DATA_OR_AUTHLOSS_RX =
+  /data-state="(healthy|empty|stale|degraded|unavailable|api_failure|contract_mismatch|unauthorized|session_expired)"/;
+
+async function navigateAndWaitFor(
+  hashRoute: string,
+  screenAttr: string,
+  timeoutMs = 25_000,
+  opts: { acceptUnauthorized?: boolean } = {},
+): Promise<{ frame: string; leftLoading: boolean }> {
   if (!launch) throw new Error('launch missing');
   await launch.page.evaluate((h) => { window.location.hash = h; }, hashRoute);
   const deadline = Date.now() + timeoutMs;
   let leftLoading = false;
   let lastFrame = '';
   const screenMatcher = screenAttrMatcher(screenAttr);
+  const stateRx = opts.acceptUnauthorized ? DATA_OR_AUTHLOSS_RX : DATA_STATES_RX;
   while (Date.now() < deadline) {
     lastFrame = await launch.page.content();
     // Fail-fast: AuthGate blockers or preload bridge absence should
@@ -473,12 +496,12 @@ async function navigateAndWaitFor(hashRoute: string, screenAttr: string, timeout
         throw new Error(`${code}:${screenAttr}:matched=${text}`);
       }
     }
-    // Screen mounted (StateFrame emits data-screen attr).
-    if (screenMatcher.test(lastFrame)) {
-      if (/data-state="(healthy|empty|stale|degraded|unavailable|api_failure|contract_mismatch|unauthorized|session_expired)"/.test(lastFrame)) {
-        leftLoading = true;
-        break;
-      }
+    // Screen mounted (StateFrame emits data-screen attr) AND its
+    // data-state has settled to something other than the transient
+    // `unauthorized` (unless caller opts in).
+    if (screenMatcher.test(lastFrame) && stateRx.test(lastFrame)) {
+      leftLoading = true;
+      break;
     }
     await new Promise((r) => setTimeout(r, 250));
   }
