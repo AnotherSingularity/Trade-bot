@@ -969,14 +969,17 @@ export const NINETEEN_SCREEN_MANIFEST: ReadonlyArray<ScreenManifestEntry> = Obje
     screenKey: 'reports',
     hash: '#/ops/reports',
     screenAttr: 'reports',
-    // Reports is intentionally generation-pending (Stage 4). The query
-    // returns fixed literals (13-item catalog, generationAvailable=false,
-    // reasonCode='report_generation_stage4_pending'). We render `healthy`
-    // (the fixed literals are the real query response).
+    // Stage 4E — the reports screen now renders the real generation
+    // UI. Signatures are structural DOM anchors emitted by
+    // Reports.tsx: the danger banner text, the report-catalog table
+    // testid, and every one of the 13 per-kind generate buttons is
+    // proven separately by T56. Two signatures here are enough for
+    // the MANIFEST assertion — they're the two strings that render
+    // regardless of enqueue state.
     expectedState: 'healthy',
-    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED', 'NOT YET IMPLEMENTED'],
+    expectedSignatures: ['LIVE ORDER SUBMISSION DISABLED', 'report-catalog-table'],
     requiredSeedTables: [],
-    seededOutcomeReason: 'reports query returns fixed literal catalog (13 kinds, generationAvailable=false)',
+    seededOutcomeReason: 'reports.get query returns the 13-item catalog; Reports.tsx renders the Stage 4 enqueue UI',
   },
   {
     screenKey: 'configuration',

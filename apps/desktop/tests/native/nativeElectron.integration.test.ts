@@ -1483,9 +1483,15 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
     expect(frame).toMatch(/seed_incident_open|seed_incident_acked|3001|3002|native_seed/);
   });
 
-  certIt('SIG:reports', 'shows NOT YET IMPLEMENTED + report_generation_stage4_pending literal', async () => {
+  certIt('SIG:reports', 'shows Stage 4 report-generation UI (Generate button + data-report-kind rows)', async () => {
     const { frame } = await navigateAndWaitFor('#/ops/reports', 'reports');
-    expect(frame).toMatch(/NOT YET IMPLEMENTED|report_generation_stage4_pending|Stage 4 pending/i);
+    // Stage 4E replaces the "generation pending" stub with the real
+    // enqueue UI. The unique Stage 4 anchors are the deterministic
+    // subtitle, the report-controls region, and per-kind Generate
+    // buttons — each carries `data-testid=generate-<kind>`.
+    expect(frame).toMatch(/data-report-kind="safety_status"/);
+    expect(frame).toMatch(/data-testid="generate-safety_status"/);
+    expect(frame).toMatch(/deterministic, content-addressable report generation|report-catalog-table/);
   });
 
   certIt('SIG:configuration', 'shows fixed literals championVersion=observed + coinbase=absent', async () => {
@@ -1702,10 +1708,18 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
     expect(safetyBannerPresent, 't34_safety_banner_absent').toBe(true);
   });
 
-  // §12.35 Reports generation-pending.
-  certIt('T35', 'Reports — generation NOT YET IMPLEMENTED banner visible', async () => {
+  // §12.35 — Stage 4E replaced the generation-pending stub with the
+  // real enqueue UI. T35 asserts the Stage 4 UI structure is intact:
+  // catalog table renders and every one of the 13 kinds has a
+  // matching Generate button. Visible-text drift (e.g. the removed
+  // "NOT YET IMPLEMENTED" banner) is intentional and does not signal
+  // regression.
+  certIt('T35', 'Reports — Stage 4 enqueue UI renders (13 kinds + Generate buttons)', async () => {
     const { frame } = await navigateAndWaitFor('#/ops/reports', 'reports');
-    expect(frame).toMatch(/NOT YET IMPLEMENTED|report_generation_stage4_pending|Stage 4 pending/i);
+    expect(frame).toMatch(/data-testid="report-catalog-table"/);
+    for (const kind of ['decision_chain','daily_shadow','portfolio_risk','universe_and_hygiene','fingerprints','regimes','microstructure','context','cost_attribution','validation','incidents','safety_status','system_manifest']) {
+      expect(frame, `t35_missing_kind_${kind}`).toMatch(new RegExp(`data-testid="generate-${kind}"`));
+    }
   });
 
   // §12.36 Lock clears business data.
