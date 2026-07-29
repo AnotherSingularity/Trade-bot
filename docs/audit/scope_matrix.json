@@ -190,6 +190,42 @@
       "Stage 5 unblocked"
     ]
   },
+  "stage5Update": {
+    "note": "Stage 5 REPOSITORY CLOSURE. Seven numbered slices (5A typed runtime-mode policy, 5B managed-Docker orchestrator, 5C readiness evidence + CI, 5D Windows installer CI smoke, 5E human Windows operator smoke package, 5F operational validation harness, 5G soak manifest contract + incident policy). Verdicts that require a green CI run on a docker-capable or Windows runner are marked `ci_pending` (no repository change is required to flip them). Verdicts that require external wall-clock (7-day soak) or human action (Windows operator smoke) are left `pending` — repository closure cannot claim them. All safety invariants preserved end-to-end: DRY_RUN=true, ORDER_SUBMISSION_ENABLED=false, liveCapitalAuthorized=false, promotionEnabled=false, kellyEnabled=false, Create Order counters 0/0/0. Notably these invariants are now enforced at the SCHEMA level via z.literal in SoakSafetyFlagsSchema + SoakCreateOrderCountersSchema — a soak manifest carrying a drifted flag cannot even parse. See docs/audit/stage5_report.md for the full closure record.",
+    "changes": [
+      { "capabilityId": "desktop.runtimeModePolicy", "before": "absent", "after": "integration_verified", "evidence": "apps/desktop/src/main/runtimeModePolicy.ts — pure resolveRuntimeMode({packaged, serverModeEnv, serverExternalEnv, developmentFakeEnv, nodeEnv}) → RuntimeModeResult. Three modes: external_test_server / managed_docker / packaged_managed_docker. Four failure codes: packaged_forbids_external_test_server, packaged_forbids_development_fake, invalid_server_mode_value, conflicting_server_mode_flags. 15 unit tests in tests/main/runtime_mode_policy.test.ts covering every legal + rejecting branch." },
+      { "capabilityId": "desktop.managedDockerOrchestrator", "before": "absent", "after": "integration_verified", "evidence": "apps/desktop/src/main/managedDockerOrchestrator.ts — 5-phase lifecycle (preflight/provision/readiness_wait/supervise_ready/teardown). Ten typed failure codes. Owner=horizon label guard: refuses to touch any container missing the label at provision OR teardown. FakeClock for deterministic timeout tests. 20 unit tests in tests/main/managed_docker_orchestrator.test.ts." },
+      { "capabilityId": "desktop.managedDockerEvidence", "before": "absent", "after": "integration_verified", "evidence": "apps/desktop/src/main/managedDockerEvidence.ts — buildManagedRuntimeReadinessReport(...) produces machine-readable JSON (tool + version + generatedAt + outcome + timeline + totals). sanitizeDetail scrubs Bearer/authorization/password/token and caps at 500 chars. Timeline rebased to relativeMs. 15 unit tests in tests/main/managed_docker_evidence.test.ts." },
+      { "capabilityId": "desktop.managedDockerCompose", "before": "absent", "after": "contract_present_ci_pending", "evidence": "apps/desktop/resources/managed-docker-compose.yml — every container carries owner=horizon; data volumes carry data=true; network labelled. tests/integration/managedDockerOrchestrator.integration.test.ts drives the real orchestrator against a real docker daemon under HORIZON_REQUIRE_MANAGED_DOCKER=true. .github/workflows/managed-docker-runtime.yml runs the integration on ubuntu-latest and uploads readiness JSON with 30-day retention. Green run establishes managed_docker_runtime_verification_ci_verified." },
+      { "capabilityId": "desktop.windowsInstallerSmoke", "before": "packaging_only", "after": "contract_present_ci_pending", "evidence": "apps/desktop/build/verify-packaged-installer.ts runs AFTER electron-builder --win. Checks installer size >=20MB, verifies win-unpacked/Horizon Trade.exe + resources/app.asar + elevate.exe present, scans text-bearing files (json/js/cjs/mjs/map/env/yml/yaml/txt/html/md ≤8MB) for 8 forbidden patterns (bearer_token, authorization_header, coinbase_key, coinbase_secret, bootstrap_token_literal, private_key_pem, jwt_secret_literal, password_literal). Writes windows-installer-checksum.txt + windows-installer-manifest.json. desktop-windows.yml gained the verify:packaged-installer step + separate 90-day-retention checksum artifact." },
+      { "capabilityId": "operator.windowsSmokePackage", "before": "absent", "after": "human_operator_gated", "evidence": "docs/operator/windows_smoke_checklist.md — 9 sections covering prerequisites, installer acquisition + checksum comparison, install, first launch + managed runtime, authentication, critical screen tour, report export end-to-end, application restart, clean shutdown + uninstall, evidence. Safety-invariant checkpoints AT every applicable step. docs/operator/windows_smoke_evidence_template.md mandates verbatim recording of every checklist outcome + all seven safety invariants + refuses attachment of any credential/token/cookie/env dump. scripts/operator/verify-windows-install.ps1 collects installer checksum + install tree + filtered process tree (horizon/electron/node only) + docker inventory filtered to label=owner=horizon only. Fails hard on COINBASE, password=, JWT_SECRET, BEARER, BOOTSTRAP_TOKEN patterns in any output." },
+      { "capabilityId": "server.operationalValidationHarness", "before": "absent", "after": "integration_verified", "evidence": "apps/server/src/soak/operationalValidation.ts — 30 event kinds (info observations + warn lifecycle + 4 HARD_FAIL). HARD_FAIL_EVENT_KINDS set: secret_scan_failure, path_rejected, process_leak, container_leak → critical severity, invalidatesSoak=true. OperationalValidationHarness class with observe/events/incidents/buildDailyResult. eventId is content-addressed via SHA256 for deterministic reproducibility. sanitizeDetail scrubs Bearer/password=/token=/authorization= and caps at 2000 chars. 12 unit tests in stage5f-operational-validation.test.ts." },
+      { "capabilityId": "shared.soakManifestContract", "before": "absent", "after": "integration_verified", "evidence": "packages/shared/src/soakManifest.ts — 23 SOAK_INCIDENT_TYPES, 13 MANDATORY_SOAK_INVALIDATORS (read-only frozen Set), DEFAULT_SOAK_DAY_COUNT=7. SoakSafetyFlagsSchema uses z.literal(true|false) so a manifest carrying a drifted flag cannot parse (schema_invalid rejection). SoakCreateOrderCountersSchema uses z.literal(0) so counters cannot be nonzero at schema level. validateSoakManifest with 9 rejection codes: schema_invalid, day_count_wrong, utc_date_out_of_order, utc_date_duplicate, utc_date_missing, invalidator_present_but_verdict_not_invalidated, no_invalidator_but_verdict_invalidated, code_change_not_reflected_in_verdict, incident_count_and_verdict_inconsistent. 17 unit tests in stage5g-soak-manifest.test.ts." },
+      { "capabilityId": "desktop.suiteTopologyExtensibility", "before": "four_bucket_only", "after": "five_bucket", "evidence": "apps/desktop/build/verify-test-topology.ts extended with managed-docker bucket + associated T5-style disagreement check. tests/suite-manifest.json extended with managed-docker suite definition. vitest.config.ts excludes tests/integration/** + *.integration.test.ts. New tests classified: runtime_mode_policy + managed_docker_orchestrator + managed_docker_evidence → portable; managedDockerOrchestrator.integration → managed-docker. verify:test-topology OK — 75 files across 5 suites." }
+    ],
+    "verdict": [
+      "stage5a_typed_runtime_mode_policy_shipped",
+      "stage5b_managed_docker_orchestrator_shipped",
+      "stage5c_managed_runtime_evidence_shipped",
+      "stage5d_windows_installer_ci_smoke_shipped_ci_pending",
+      "stage5e_windows_operator_smoke_package_shipped_human_pending",
+      "stage5f_operational_validation_harness_shipped",
+      "stage5g_soak_manifest_contract_shipped",
+      "managed_docker_runtime_verification_ci_pending",
+      "windows_installer_ci_smoke_ci_pending",
+      "windows_human_operator_smoke_pending",
+      "operational_validation_harness_repository_closed",
+      "operational_soak_awaits_wall_clock",
+      "release_audit_pending",
+      "code_freeze_pending",
+      "coinbase_preflight_pending_credentials",
+      "live_data_shadow_soak_pending_credentials",
+      "final_shadow_certification_pending",
+      "live_capital_prohibited",
+      "Stage 5 repository closure complete",
+      "Stage 6 requires 7-day wall clock — cannot begin in this session"
+    ]
+  },
   "capabilities": [
     {
       "capabilityId": "exec.orderStateMachine",

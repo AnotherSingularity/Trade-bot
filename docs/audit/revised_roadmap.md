@@ -326,18 +326,82 @@ which `blocking_gaps.md` categories it consumes.
 - **Closure record**: `docs/audit/stage4_report.md`.
 - **Next**: Stage 5 may begin under an explicit user-directed opening.
 
-## Stage 5 — Windows packaging correction
+## Stage 5 — Managed runtime + Windows installer + operational validation harness (REPOSITORY CLOSURE)
 
-- **Entry**: Stage 4 committed.
+- **Entry**: Stage 4 closed on `de926c94`.
+- **Exit** (all achieved):
+  - 5A: Typed managed-runtime decision contract (`resolveRuntimeMode` — 3 modes, 4 rejection codes, 15 tests).
+  - 5B: Managed-Docker orchestrator (5-phase lifecycle, 10 failure codes, owner=horizon label guard, 20 tests).
+  - 5C: Managed-Docker readiness evidence emitter + labelled compose file + integration test + `.github/workflows/managed-docker-runtime.yml` (15 tests, awaits green CI run).
+  - 5D: Windows installer CI smoke verifier (`verify:packaged-installer`) + `windows-installer-checksum.txt` published as separate 90-day-retention artifact (awaits green CI run).
+  - 5E: Human Windows operator smoke package (`docs/operator/windows_smoke_checklist.md` + `windows_smoke_evidence_template.md` + `scripts/operator/verify-windows-install.ps1` with 5-pattern sanitization guard).
+  - 5F: Operational validation harness (`OperationalValidationHarness`, 30 event kinds, 4 HARD_FAIL, deterministic eventIds, 12 tests).
+  - 5G: Soak manifest contract + incident policy (`validateSoakManifest`, 23 incident types, 13 mandatory invalidators, safety flags + counters locked at Zod schema level via `z.literal`, 9 rejection codes, 17 tests).
+  - Suite topology extended with new `managed-docker` bucket (verifier + manifest + config).
+- **Consumes**: Categories G + N + operational-validation harness surface.
+- **Verdict**: See §5 verdict block in `docs/audit/stage5_report.md`. Repository closure is done; CI-gated verdicts flip on their next green run.
+
+## Stage 6 — Seven-day operational soak (EXTERNAL WALL-CLOCK BOUNDARY)
+
+- **Entry**: Stage 5 repository closure done + green `managed-docker-runtime.yml` run establishing `managed_docker_runtime_verification_ci_verified`.
 - **Exit**:
-  - `build.files` widened (Cat G 23)
-  - Server distribution decision made + implemented (Cat G 24)
-  - Manifest generator ES-module fix (Cat G 25)
-  - Windows CI produces a green artifact (Cat G 26)
-- **Consumes**: Category G.
-- **Verdict**: `package.windowsInstaller: packaged`.
+  - 7 consecutive UTC calendar days of the operational validation harness observing a live-clock replay of the certified pipeline against the managed-Docker runtime.
+  - Daily results built via `OperationalValidationHarness.buildDailyResult` → assembled into a `SoakManifest` → `validateSoakManifest(manifest).ok === true` with `finalVerdict='passed'`.
+  - `MANDATORY_SOAK_INVALIDATORS` (13 items) all absent from the manifest's incidents.
+  - Safety invariants held every day (schema rejects any daily result claiming otherwise).
+- **Consumes**: Stage 5F + 5G harness/contract.
+- **Verdict**: `operational_soak_verified` becomes claimable ONLY after the wall-clock has actually elapsed. Cannot be fabricated; cannot be started in a repository session.
 
-## Stage 6 — Native Windows smoke test (§N)
+## Stage 7 — Integrated release audit
+
+- **Entry**: Stage 6 passed manifest + Stage 5D+5E CI/human evidence.
+- **Exit**: Cross-check the manifest against the release-candidate commit SHA, migration head + chain digest, report spec versions, and desktop installer checksum. Produce `docs/audit/release_audit_<sha>.md`.
+- **Consumes**: Stage 5F/5G harness output + Stage 5D CI checksum + Stage 5E human evidence.
+- **Verdict**: `release_audit_verified` claimable.
+
+## Stage 8 — Code freeze establishment
+
+- **Entry**: Stage 7 committed.
+- **Exit**: `code_freeze_manifest.json` regenerated with `status=verified`, populated `windowsInstallerHash`, `windowsInstallerRunId`, populated test counts and SBOM hash. New freeze commit pushed. Runbook 26 (change control) becomes the only sanctioned path to modify anything after this commit.
+- **Verdict**: `desktop_code_frozen` (unqualified).
+
+## Stage 9 — Coinbase preflight infrastructure (EXTERNAL CREDENTIAL BOUNDARY)
+
+- **Entry**: Stage 8 committed + explicit risk-owner authorization + private Coinbase read-only credentials provisioned OUTSIDE CI and OUTSIDE any repository/session.
+- **Exit**: Two-hour operational preflight with genuine Coinbase read-only providers; no order submitted. All safety flags and counters remain at their locked values.
+- **Verdict**: preflight `ok`.
+
+## Stage 10 — Private read-only preflight
+
+- **Entry**: Stage 9 `ok`.
+- **Exit**: extended read-only validation.
+- **Verdict**: read-only path certified.
+
+## Stage 11 — Genuine live-data shadow soak
+
+- **Entry**: Stage 10 complete.
+- **Exit**: 7 real calendar days of live-data shadow validation. `phase1_2_pass_prospective` per the P1.2-OPS bar.
+- **Verdict**: `live_data_shadow_soak_verified`.
+
+## Stage 12 — Extended prospective shadow validation
+
+- **Entry**: Stage 11 complete.
+- **Exit**: Observer stack (Phase 2A-2F) runs against genuine data for a duration TBD. Validation experiments produce PBO/DSR/attribution numbers on real observations.
+- **Verdict**: `prospectively_validated` (per capability).
+
+## Stage 13 — Final shadow certification
+
+- **Entry**: Stage 12 complete.
+- **Exit**: Cross-observer decision-chain audit reproduced end-to-end from live data.
+- **Verdict**: `final_shadow_certification_verified`.
+
+## Stage 14 — Live-canary preparation (EXTERNAL LIVE-CAPITAL AUTHORIZATION BOUNDARY)
+
+- **Entry**: Stage 13 complete + EXPLICIT risk-owner user directive granting live-capital authorization.
+- **Exit**: A separate certification exercise, not covered by this roadmap. `liveCapitalAuthorized` schema constant would need to be reviewed and altered under change control.
+- **Verdict**: `live_authorized` for the canary scope only. Never claimable without explicit authorization.
+
+## Stage 6 (legacy) — Native Windows smoke test (§N)
 
 - **Entry**: Stage 5 committed and CI green.
 - **Exit**:

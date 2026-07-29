@@ -275,3 +275,17 @@ Total: roughly **28 discrete gaps** before the current freeze claim
 becomes honest (down from ~88 pre-Stage-3B; Stage 3A cleared
 authentication, and Stage 3B cleared per-screen data binding — the two
 largest categories).
+
+## Stage 5 update — repository-side categories closed
+
+Stage 5 repository closure (see `stage5_report.md`) closes the
+repository-side content of categories G + H + operational-validation
+harness. The following gaps remain but their nature has changed from
+"repository work is missing" to "external boundary must be crossed":
+
+| Category | Repository-side status | External boundary that remains |
+|---|---|---|
+| G. Windows packaging | CI smoke shipped (verify-packaged-installer + windows-installer-checksum artifact) | awaits a green `desktop-windows.yml` run |
+| H. Native Windows smoke | Human operator smoke package shipped (checklist + evidence template + PowerShell mechanical collector) | awaits a real Windows workstation + human execution |
+| operational validation | Harness (5F) + soak-manifest contract (5G) shipped and unit-tested; safety flags + counters locked at Zod schema level via `z.literal` | awaits 7 real UTC calendar days of live-clock replay (Stage 6) |
+| managed-Docker runtime | Orchestrator + label guard + readiness evidence + labelled compose file + CI workflow shipped | awaits a green `managed-docker-runtime.yml` run |
