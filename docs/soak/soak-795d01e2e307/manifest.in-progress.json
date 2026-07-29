@@ -1,0 +1,86 @@
+{
+  "soakId": "soak-795d01e2e307",
+  "commitSha": "da1a81908a4c797cf117fb25f2f8d6a410ff9209",
+  "startedAt": "2026-07-29T22:20:25.707Z",
+  "expectedEndAt": "2026-08-05T22:20:25.707Z",
+  "actualEndAt": null,
+  "simulationMode": "STANDARD_DRY_RUN",
+  "migrationHead": "0022",
+  "migrationChainDigest": "a8faa7e7b03c1c3c9176265b38cc0716bb8355407842a34a7d543027035bc8db",
+  "reportSpecVersions": {
+    "safety_status": "safety_status.v1",
+    "system_manifest": "system_manifest.v1",
+    "incidents": "incidents.v1",
+    "cost_attribution": "cost_attribution.v1",
+    "portfolio_risk": "portfolio_risk.v1",
+    "universe_and_hygiene": "universe_and_hygiene.v1",
+    "fingerprints": "fingerprints.v1",
+    "regimes": "regimes.v1",
+    "microstructure": "microstructure.v1",
+    "context": "context.v1",
+    "validation": "validation.v1",
+    "daily_shadow": "daily_shadow.v1",
+    "decision_chain": "decision_chain.v1"
+  },
+  "runtimeMode": "managed_docker",
+  "installationIdHash": "ci-soak-cc062d87",
+  "dayResults": [
+    {
+      "dateUtc": "2026-07-29",
+      "firstObservationAt": "2026-07-29T00:00:00.000Z",
+      "lastObservationAt": "2026-07-29T00:03:31.000Z",
+      "uptimeSeconds": 211,
+      "runtimeStarts": 1,
+      "runtimeStops": 1,
+      "serverRestarts": 1,
+      "containerRestarts": 1,
+      "databaseDisconnects": 1,
+      "databaseReconnects": 1,
+      "redisDisconnects": 1,
+      "redisReconnects": 1,
+      "reportJobsQueued": 39,
+      "reportJobsCompleted": 39,
+      "reportJobsFailed": 0,
+      "idempotencyHits": 1,
+      "duplicatePreventions": 1,
+      "artifactVerificationPasses": 39,
+      "artifactVerificationFailures": 0,
+      "redactionsApplied": 39,
+      "redactionFailures": 0,
+      "secretScanFailures": 0,
+      "pathRejections": 0,
+      "temporaryCleanupFailures": 0,
+      "orphanReconciliations": 0,
+      "processLeaks": 0,
+      "containerLeaks": 0,
+      "createOrderCounters": {
+        "functionInvocations": 0,
+        "attemptCount": 0,
+        "networkCount": 0
+      },
+      "safetyFlags": {
+        "DRY_RUN": true,
+        "ORDER_SUBMISSION_ENABLED": false,
+        "liveCapitalAuthorized": false,
+        "promotionEnabled": false,
+        "kellyEnabled": false
+      },
+      "providerState": {
+        "marketDataProvider": "fixture",
+        "exchangeProvider": "fixture",
+        "productionLevel2Active": false,
+        "orderCapableProviderActive": false
+      },
+      "credentialState": {
+        "coinbaseCredentialsLoaded": false,
+        "anthropicCredentialsLoaded": false,
+        "productionCredentialsDetected": false
+      },
+      "dayVerdict": "passed"
+    }
+  ],
+  "incidents": [],
+  "safetyViolations": 0,
+  "codeChangesDetected": false,
+  "finalVerdict": "in_progress"
+}
