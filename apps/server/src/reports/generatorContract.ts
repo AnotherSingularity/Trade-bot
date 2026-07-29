@@ -68,6 +68,22 @@ export interface GeneratorRawOutput {
 
 export interface ReportGenerator<K extends ReportKind = ReportKind> {
   readonly kind: K;
+  /**
+   * MUST equal REPORT_SPEC_VERSIONS[kind] at construction. The
+   * Stage 4C worker verifies this equality before writing a job so
+   * a shipped generator that forgets to bump its version cannot
+   * accidentally reuse an old artifact's contentDigest.
+   */
   readonly specVersion: string;
+  /**
+   * Read-only under `ctx.db` (worker binds it to a REPEATABLE READ
+   * transaction). Every read MUST honour sourceHighWaterMark
+   * bounds (`WHERE id <= hwm.<table>`) so a concurrent scan cannot
+   * perturb the snapshot even in tests that don't use the
+   * transaction wrapper. Throwing rejects the whole job — the
+   * worker records the sanitized error on
+   * desktop_export_jobs.failureReason and never writes an artifact
+   * row.
+   */
   generate(ctx: GeneratorContext): Promise<GeneratorRawOutput>;
 }
