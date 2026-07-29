@@ -1992,6 +1992,11 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
     let recovered = false;
     let finalPid = initialPid;
     let stoppedExists = false;
+    let observedUrl = 'unknown';
+    let observedDataScreen = 'unknown';
+    let observedDataState = 'unknown';
+    let observedDataReason = 'unknown';
+    let capturedFrameExcerpt = '';
     try {
       // 2. Send SIGSTOP.
       server!.suspend();
@@ -2003,6 +2008,22 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
       const frame = await launch!.page.content();
       const match = frame.match(/data-state="(api_failure|unavailable|contract_mismatch)"/);
       observedFailureState = match ? match[1] : 'no_failure_state';
+      // Capture all observability the diagnostic emitter needs. The
+      // outer try/finally must not swallow these reads because a
+      // fetch that never resolves would surface as a fresh throw.
+      try { observedUrl = await launch!.page.url(); } catch { /* best-effort */ }
+      const dsScreen = frame.match(/data-screen="([^"]+)"/);
+      observedDataScreen = dsScreen ? dsScreen[1] : 'absent';
+      const dsState = frame.match(/data-state="([^"]+)"/);
+      observedDataState = dsState ? dsState[1] : 'absent';
+      const dsReason = frame.match(/data-reason="([^"]+)"/);
+      observedDataReason = dsReason ? dsReason[1] : 'absent';
+      // Excerpt the region between the first state-frame open tag
+      // and its first closing div, bounded to 800 chars.
+      const stateFrameIdx = frame.indexOf('class="state-frame');
+      capturedFrameExcerpt = stateFrameIdx >= 0
+        ? frame.slice(stateFrameIdx, stateFrameIdx + 800)
+        : frame.slice(0, 800);
     } finally {
       // 5. SIGCONT in finally — never leave the server stopped.
       try { server!.resume(); } catch { /* ignore */ }
@@ -2028,6 +2049,47 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
       },
     };
     try { writeFileSync(join(iso!.logsDir, 'server-suspension-evidence.json'), JSON.stringify(reconstructedResults.serverSuspensionResult, null, 2)); } catch { /* best-effort */ }
+    // Stage 3C-E.1.26 — CI-visible diagnostic. Vitest streams
+    // process.stdout to CI stdout even when other logging is
+    // muted. The diagnostic is redacted (Bearer tokens, hex
+    // secrets ≥32 chars) so the operator can inspect the state
+    // and DOM excerpt without leaking credentials. The evidence
+    // JSON is also duplicated so a broken artifact upload does
+    // not hide the observation.
+    const primaryClassification = observedFailureState === 'no_failure_state'
+      ? 'state_transition_never_fired'
+      : (['stale', 'degraded', 'healthy', 'empty'].includes(observedFailureState)
+        ? 'stale_success_after_suspension'
+        : 'other_state');
+    const secondaryClassification = recovered ? 'recovery_ok' : 'recovery_absent';
+    const redact = (s: string): string => s
+      .replace(/Bearer [A-Za-z0-9._-]+/gi, 'Bearer <REDACTED>')
+      .replace(/[a-f0-9]{32,}/gi, '<HEX_REDACTED>')
+      .replace(/password[=:][^&\s"]+/gi, 'password=<REDACTED>')
+      .replace(/token[=:][^&\s"]+/gi, 'token=<REDACTED>')
+      .replace(/authorization[=:][^&\s"]+/gi, 'authorization=<REDACTED>');
+    const ledger = {
+      test: 'T42',
+      description: 'SIGSTOP suspends server → renderer api_failure → SIGCONT recovers',
+      expectedFailureState: ['api_failure', 'unavailable'],
+      observedFailureState,
+      observedUrl: redact(observedUrl).slice(0, 300),
+      observedDataScreen,
+      observedDataState,
+      observedDataReason,
+      primaryClassification,
+      secondaryClassification,
+      initialPid,
+      stoppedExists,
+      recovered,
+      finalPid,
+      frameExcerpt: redact(capturedFrameExcerpt).slice(0, 800),
+      evidence: reconstructedResults.serverSuspensionResult,
+    };
+    const banner = '===== T42-DIAG =====';
+    const dump = `${banner}\n${JSON.stringify(ledger, null, 2)}\n===== /T42-DIAG =====\n`;
+    process.stdout.write(dump);
+    try { writeFileSync(join(iso!.logsDir, 't42-diagnostic.json'), JSON.stringify(ledger, null, 2)); } catch { /* best-effort */ }
     expect(initialPid, 't42_no_initial_pid').toBeGreaterThan(0);
     expect(stoppedExists, 't42_server_missing_after_stop').toBe(true);
     expect(['api_failure', 'unavailable'], 't42_state_not_failure').toContain(observedFailureState);
