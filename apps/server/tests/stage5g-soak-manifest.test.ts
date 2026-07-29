@@ -70,7 +70,7 @@ function day(dateUtc: string, dayVerdict: 'passed' | 'invalidated' = 'passed'): 
 
 function baseManifest(
   overrides: Partial<SoakManifest> = {},
-  dayCount = DEFAULT_SOAK_DAY_COUNT,
+  dayCount: number = DEFAULT_SOAK_DAY_COUNT,
 ): SoakManifest {
   const days: SoakDailyResult[] = [];
   for (let i = 0; i < dayCount; i++) {
