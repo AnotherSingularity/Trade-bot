@@ -8,4 +8,5 @@ export * from './operatorAuth';
 export * from './desktopApiRoutes';
 // Stage 4 §S4.1: deterministic report contracts + canonical stringify.
 export * from './reports';
+export * from './soakManifest';
 export * from './nativeInduction';
