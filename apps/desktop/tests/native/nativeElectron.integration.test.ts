@@ -2555,6 +2555,32 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
       },
     };
     try { writeFileSync(join(iso!.logsDir, 'safe-configuration-evidence.json'), JSON.stringify(reconstructedResults.safeConfigurationResult, null, 2)); } catch { /* best-effort */ }
+    // Stage 3C-E.1.34 — CI-visible T53 diagnostic. E.1.33 fixed the
+    // bridge key + envelope path but T53 still fails at
+    // t53_order_submission_not_disabled while dry_run passes — the
+    // AND-check for orderSubEnabled means one of the two sources
+    // must be reporting orderSubmissionEnabled=true. Print both
+    // sources' resolved fields so the operator can see which one is
+    // wrong without downloading the evidence artifact.
+    try {
+      const ledger = {
+        test: 'T53',
+        bridge: {
+          ok: bridgeRes.ok,
+          err: (bridgeRes as { err?: string }).err ?? null,
+          hasEnvelope: !!(bridgeBody as { envelope?: unknown })?.envelope,
+          championView,
+        },
+        readinessSafe,
+        env: {
+          DRY_RUN: process.env.DRY_RUN ?? null,
+          ORDER_SUBMISSION_ENABLED: process.env.ORDER_SUBMISSION_ENABLED ?? null,
+        },
+        computed: { dryRun, orderSubEnabled, harnessAgrees },
+      };
+      const banner = '===== T53-DIAG =====';
+      process.stdout.write(`${banner}\n${JSON.stringify(ledger, null, 2)}\n===== /T53-DIAG =====\n`);
+    } catch { /* best-effort */ }
     expect(dryRun, 't53_dry_run_not_true').toBe(true);
     expect(orderSubEnabled, 't53_order_submission_not_disabled').toBe(true);
     expect(harnessAgrees, 't53_harness_env_mismatch').toBe(true);
