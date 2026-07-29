@@ -180,8 +180,15 @@ try {
       revokeAll: () => invoke(IPC_CHANNELS.authRevokeAll, {}),
     },
     desktopData: async (key, input) => {
+      // Stage 3C-E.1.29 — throw on unknown desktopData keys. T45
+      // (renderer cannot invoke arbitrary IPC channels) asserts that
+      // an unknown key rejects the promise, not that it resolves with
+      // {ok:false}. A resolved envelope is indistinguishable from a
+      // real server error; a THROW is the canonical "bridge refused"
+      // signal callers can detect without inspecting the payload
+      // shape. This matches the treatment of auth-loss codes below.
       if (!(DESKTOP_DATA_KEYS as readonly string[]).includes(key)) {
-        return { ok: false, key, error: { code: 'unknown_desktop_data_key', detail: null } };
+        throw new Error(`unknown_desktop_data_key:${String(key).slice(0, 60)}`);
       }
       const req: DesktopDataChannelRequest = input === undefined
         ? { key } as DesktopDataChannelRequest
