@@ -2302,7 +2302,24 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
       const wins = BrowserWindow.getAllWindows();
       return { count: wins.length, ids: wins.map((w) => w.id) };
     });
-    const targetWindowId = initial.ids[0];
+    // Stage 3C-E.1.31 — target a throwaway BrowserWindow, not the
+    // primary operator window. Electron's default is `window-all-
+    // closed → app.quit()` on Linux/Windows: closing the primary
+    // window (initial.ids[0]) kills the app, Playwright loses its
+    // main-process connection, and every subsequent `launch.app.
+    // evaluate` (T47+ path) fails with "Target page, context or
+    // browser has been closed". A throwaway window exercises the
+    // same close→destroyed→recreate lifecycle without collapsing
+    // the app or invalidating `launch.page` for T48+. The primary
+    // window is the guaranteed "keeper" that stays alive throughout.
+    const targetInfo = await launch!.app.evaluate(({ BrowserWindow }) => {
+      const t = new BrowserWindow({
+        width: 400, height: 300, show: false,
+        webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+      });
+      return { targetId: t.id };
+    });
+    const targetWindowId = targetInfo.targetId;
     // 2. Subscribe to close on the target window + attach a
     //    poisoned flag we can read afterwards.
     await launch!.app.evaluate(({ BrowserWindow }, id) => {
@@ -2366,6 +2383,17 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
       },
     };
     try { writeFileSync(join(iso!.logsDir, 'window-lifecycle-evidence.json'), JSON.stringify(reconstructedResults.windowLifecycleResult, null, 2)); } catch { /* best-effort */ }
+    // Stage 3C-E.1.31 — clean up the recreated (bare) window so it
+    // doesn't leak into T47+ or the afterAll teardown. The target
+    // window was already destroyed by w.close() at step 3; the
+    // primary operator window (initial.ids[0]) is untouched and
+    // remains bound to launch.page.
+    try {
+      await launch!.app.evaluate(({ BrowserWindow }, id) => {
+        const w = BrowserWindow.fromId(id);
+        if (w && !w.isDestroyed()) w.destroy();
+      }, recreated.newId);
+    } catch { /* best-effort */ }
     expect(observed.closeFired, 't46_close_event').toBe(true);
     expect(observed.targetDestroyed, 't46_not_destroyed').toBe(true);
     expect(observed.mainAlive, 't46_main_dead').toBe(true);
