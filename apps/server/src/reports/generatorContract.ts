@@ -50,6 +50,15 @@ export interface GeneratorContext {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly db: MySql2Database<any>;
   readonly installationId: number;
+  /**
+   * Optional caller-supplied identifier — the SAME value that gets
+   * fed into the idempotency key's `referenceId` slot. Generators
+   * that legitimately branch on a specific entity (e.g.
+   * decision_chain by chainId) read this; generators that don't
+   * care ignore it. `null` means "no reference — emit the index
+   * form" for generators that support both shapes.
+   */
+  readonly referenceId?: string | null;
 }
 
 /**
