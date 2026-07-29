@@ -43,34 +43,52 @@ jobs:
     name: Soak day cycle
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: hashFiles('SOAK_ANCHOR.json') != ''
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
 
+      # `hashFiles()` is not available at job-level `if:`, so the
+      # anchor-existence check is a step. Absent anchor → clean exit.
+      - name: Skip if SOAK_ANCHOR.json missing
+        id: anchor_check
+        shell: bash
+        run: |
+          if [ ! -f SOAK_ANCHOR.json ]; then
+            echo "SOAK_ANCHOR.json absent — soak not launched. Exiting cleanly."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Node.js 22
+        if: steps.anchor_check.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
 
       - name: Install workspace dependencies
+        if: steps.anchor_check.outputs.skip != 'true'
         run: npm ci
 
       - name: Typecheck (shared)
+        if: steps.anchor_check.outputs.skip != 'true'
         working-directory: packages/shared
         run: npx tsc --noEmit
 
       - name: Typecheck (server)
+        if: steps.anchor_check.outputs.skip != 'true'
         working-directory: apps/server
         run: npx tsc --noEmit
 
       - name: Print anchor snapshot
+        if: steps.anchor_check.outputs.skip != 'true'
         run: cat SOAK_ANCHOR.json
 
       - name: Run daily soak cycle
+        if: steps.anchor_check.outputs.skip != 'true'
         id: cycle
         working-directory: apps/server
         env:
