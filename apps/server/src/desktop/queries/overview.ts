@@ -32,26 +32,23 @@ export interface OverviewOptions {
 
 export async function getOverview(opts: OverviewOptions = {}): Promise<OverviewEnvelope> {
   try {
-    // Stage 3C-E.1.18 — behavioural T40 induces the
-    // `scannerReadiness` route into degraded/etc. Overview reads
-    // scannerReadiness internally rather than fetching /scanner-
-    // readiness, so the induction is honoured here so the induced
-    // state actually reaches the DOM. The overall envelope is
-    // downgraded to the induced status; the reader-visible payload
-    // may be null (unavailable) or the last-known snapshot.
+    // Stage 3C-E.1.18/E.1.22 — behavioural T40 induces the
+    // `scannerReadiness` route. Contract-mismatch shortcuts to a
+    // deliberately schema-invalid body. The other three modes
+    // downgrade the envelope status but preserve the real payload
+    // so the reader still sees the current overview snapshot
+    // (with a warning banner via StateFrame), and screens can
+    // emit derived attributes (e.g. `data-scanner-state`) from
+    // the envelope.status.
     const induced = readActiveInductionFor('scannerReadiness');
-    if (induced) {
-      switch (induced.mode) {
-        case 'stale_response':
-          return stale<OverviewPayload>(null, 'authoritative_timestamp_expired_via_induction', { sourceVersion: OVERVIEW_SOURCE_VERSION });
-        case 'degraded_response':
-          return degraded<OverviewPayload>(null, 'observer_source_unavailable_via_induction', { sourceVersion: OVERVIEW_SOURCE_VERSION });
-        case 'unavailable_response':
-          return unavailable<OverviewPayload>('endpoint_unreachable_via_induction', { sourceVersion: OVERVIEW_SOURCE_VERSION });
-        case 'contract_mismatch':
-          return { known: 'nope', shape: 'contract_mismatch_induced' } as unknown as OverviewEnvelope;
-      }
+    if (induced && induced.mode === 'contract_mismatch') {
+      return { known: 'nope', shape: 'contract_mismatch_induced' } as unknown as OverviewEnvelope;
     }
+    const inducedEnvelopeStatus =
+      induced?.mode === 'stale_response' ? 'stale'
+      : induced?.mode === 'degraded_response' ? 'degraded'
+      : induced?.mode === 'unavailable_response' ? 'unavailable'
+      : null;
     return await withTimeout(async () => {
       const [openPositions, unresolvedActions, reconciliationStatus, lastReconRunAt, migrationCount] =
         await Promise.all([
@@ -141,17 +138,17 @@ export async function getOverview(opts: OverviewOptions = {}): Promise<OverviewE
         services.some((s) => s.state === 'degraded' || s.state === 'failed');
 
       const generatedAt = nowIso();
+      const meta = {
+        generatedAt,
+        sourceVersion: OVERVIEW_SOURCE_VERSION,
+        policyVersions: { ...OBSERVER_POLICY_VERSIONS },
+      };
+      if (inducedEnvelopeStatus === 'stale') return stale(payload, 'authoritative_timestamp_expired_via_induction', meta);
+      if (inducedEnvelopeStatus === 'degraded') return degraded(payload, 'observer_source_unavailable_via_induction', meta);
+      if (inducedEnvelopeStatus === 'unavailable') return unavailable<OverviewPayload>('endpoint_unreachable_via_induction', meta);
       return anyDegraded
-        ? degraded(payload, 'overview_partial_health', {
-            generatedAt,
-            sourceVersion: OVERVIEW_SOURCE_VERSION,
-            policyVersions: { ...OBSERVER_POLICY_VERSIONS },
-          })
-        : healthy(payload, {
-            generatedAt,
-            sourceVersion: OVERVIEW_SOURCE_VERSION,
-            policyVersions: { ...OBSERVER_POLICY_VERSIONS },
-          });
+        ? degraded(payload, 'overview_partial_health', meta)
+        : healthy(payload, meta);
     });
   } catch (err) {
     return unavailable<OverviewPayload>('overview_query_failed', {

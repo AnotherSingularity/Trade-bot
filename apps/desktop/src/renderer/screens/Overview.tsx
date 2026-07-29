@@ -72,7 +72,7 @@ export function OverviewScreen() {
                     <td>{s.lastCheckedAt ?? '—'}</td>
                   </tr>
                 ))}
-                <tr>
+                <tr data-scanner-state={env.status === 'healthy' || env.status === 'empty' ? payload.scannerReadiness.state : env.status}>
                   <td>scanner</td>
                   <td><span className={`state-badge ${payload.scannerReadiness.state}`}>{payload.scannerReadiness.state}</span></td>
                   <td>{payload.scannerReadiness.blockingReasons.join(', ') || '—'}</td>
