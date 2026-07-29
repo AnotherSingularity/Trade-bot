@@ -6198,10 +6198,32 @@ export const desktopExportJobs = mysqlTable(
     completedAt: timestamp('completedAt', { fsp: 3 }),
     status: mysqlEnum('status', DESKTOP_EXPORT_STATUS).notNull().default('queued'),
     failureReason: varchar('failureReason', { length: 500 }),
+    // Stage 4 §S4.0 — additive versioning + snapshot + idempotency.
+    // All three columns are NULLABLE so migration 0022 remains
+    // existing-row-safe (Stage 4 work order correction: "any new
+    // NOT NULL field must use an existing-row-safe add/backfill/
+    // enforce sequence"). Stage 4 has no pre-existing production
+    // rows in this table (Stage 3's export handler returned a fixed
+    // stub without inserting), so the practical effect matches
+    // NOT NULL at the application layer — the export worker always
+    // writes non-null values on job creation.
+    reportSpecVersion: varchar('reportSpecVersion', { length: 32 }),
+    sourceHighWaterMark: json('sourceHighWaterMark'),
+    // Idempotency key = deterministic hash of (installationId,
+    // reportKind, referenceId, sourceHighWaterMark). NULLABLE so
+    // existing rows carry no constraint; UNIQUE index below permits
+    // multiple NULLs (MySQL/MariaDB standard). New rows written by
+    // the worker always carry a non-null key, giving DB-enforced
+    // idempotency per Stage 4 work order correction ("must be
+    // enforced by a database uniqueness constraint, not
+    // application-only check-then-insert logic").
+    idempotencyKey: varchar('idempotencyKey', { length: 128 }),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
   },
   (t) => ({
     statusIdx: index('desk_exp_job_status_idx').on(t.status, t.requestedAt),
+    kindStatusIdx: index('desk_exp_job_kind_status_idx').on(t.reportKind, t.status, t.requestedAt),
+    idempotencyUq: uniqueIndex('desk_exp_job_idem_uq').on(t.idempotencyKey),
     instFk: foreignKey({
       name: 'desk_exp_job_inst_fk',
       columns: [t.installationId],
@@ -6220,12 +6242,18 @@ export const desktopExportArtifacts = mysqlTable(
     sizeBytes: bigint('sizeBytes', { mode: 'number' }).notNull(),
     reportVersion: varchar('reportVersion', { length: 32 }).notNull(),
     redactionsApplied: varchar('redactionsApplied', { length: 500 }).notNull(),
+    // Stage 4 §S4.0 — contentDigest is the SHA256 of the canonical
+    // pre-format payload (deterministic across formats). NULLABLE
+    // for existing-row-safety; worker always populates on write so
+    // any row that survives to `completed` has a non-null digest.
+    contentDigest: varchar('contentDigest', { length: 64 }),
     generatedAt: timestamp('generatedAt', { fsp: 3 }).notNull(),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
   },
   (t) => ({
     uq: uniqueIndex('desk_exp_art_job_uq').on(t.exportJobId),
     hashIdx: index('desk_exp_art_hash_idx').on(t.checksumSha256),
+    contentDigestIdx: index('desk_exp_art_content_idx').on(t.contentDigest),
     jobFk: foreignKey({
       name: 'desk_exp_art_job_fk',
       columns: [t.exportJobId],
