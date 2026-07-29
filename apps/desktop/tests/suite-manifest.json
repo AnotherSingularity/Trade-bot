@@ -28,6 +28,14 @@
       "npmScript": "test:native",
       "includeMode": "explicit"
     },
+    "managed-docker": {
+      "configFile": "vitest.managed-docker.config.ts",
+      "purpose": "Stage 5C — ManagedDockerOrchestrator vs REAL docker daemon. Gated on HORIZON_REQUIRE_MANAGED_DOCKER=true. Runs in the managed-docker-runtime workflow on ubuntu-latest (docker pre-installed). Skipped in portable, external, and native suites so the strict inventory is respected.",
+      "runsOnCi": ["linux"],
+      "requiresServices": ["docker-daemon"],
+      "npmScript": "test:managed-docker",
+      "includeMode": "explicit"
+    },
     "unassigned": {
       "configFile": null,
       "purpose": "Test files that are structurally excluded from the portable suite but not yet claimed by any external / native config. Every entry MUST cite a reason so the audit trail explains why the file is currently not executed on CI. This bucket is a KNOWN GAP inherited from the pre-RESET topology; entries here should be reclassified in a follow-up (not in Checkpoint B, which is scope-limited to making the topology machine-checkable).",
@@ -62,6 +70,9 @@
       "tests/main/renderer_ready_watchdog.test.ts",
       "tests/main/renderer_url_policy.test.ts",
       "tests/main/sandbox_policy.test.ts",
+      "tests/main/runtime_mode_policy.test.ts",
+      "tests/main/managed_docker_orchestrator.test.ts",
+      "tests/main/managed_docker_evidence.test.ts",
       "tests/main/suite_topology.test.ts",
       "tests/main/topology_verifier_paths.test.ts",
       "tests/phase3a_authentication.test.ts",
@@ -114,6 +125,9 @@
     ],
     "native": [
       "tests/native/nativeElectron.integration.test.ts"
+    ],
+    "managed-docker": [
+      "tests/integration/managedDockerOrchestrator.integration.test.ts"
     ],
     "unassigned": []
   }

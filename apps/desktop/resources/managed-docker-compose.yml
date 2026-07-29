@@ -1,0 +1,58 @@
+# ---------------------------------------------------------------------------
+# Stage 5B/5C — Managed-Docker compose file (ships with the packaged
+# desktop app). Every container carries `owner=horizon` so the
+# orchestrator's teardown guard can refuse to touch anything else.
+# Data volumes carry `data=true` so the runtime teardown preserves
+# user data.
+# ---------------------------------------------------------------------------
+version: '3.8'
+
+x-horizon-labels: &horizon-labels
+  owner: horizon
+  managed-by: horizon-desktop-orchestrator
+
+services:
+  mariadb:
+    image: mariadb:10.11.6
+    environment:
+      MARIADB_ROOT_PASSWORD: password
+      MARIADB_DATABASE: horizon_trade
+    ports:
+      - '3306:3306'
+    labels: *horizon-labels
+    volumes:
+      - horizon_mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mariadb-admin', 'ping', '-h', 'localhost', '-ppassword']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7.4-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    labels: *horizon-labels
+    volumes:
+      - horizon_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  horizon_mariadb_data:
+    labels:
+      owner: horizon
+      data: 'true'
+  horizon_redis_data:
+    labels:
+      owner: horizon
+      data: 'true'
+
+networks:
+  default:
+    labels:
+      owner: horizon

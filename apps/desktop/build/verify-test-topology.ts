@@ -64,6 +64,7 @@ const MANIFEST_PATH = resolve(TESTS_ROOT, 'suite-manifest.json');
 const PORTABLE_CONFIG = resolve(DESKTOP_ROOT, 'vitest.config.ts');
 const EXTERNAL_CONFIG = resolve(DESKTOP_ROOT, 'vitest.external.config.ts');
 const NATIVE_CONFIG = resolve(DESKTOP_ROOT, 'vitest.native.config.ts');
+const MANAGED_DOCKER_CONFIG = resolve(DESKTOP_ROOT, 'vitest.managed-docker.config.ts');
 
 // ---------------------------------------------------------------------------
 // Types describing the manifest shape. Kept structural (no z.parse) so
@@ -93,12 +94,14 @@ export interface SuiteManifest {
     portable: SuiteDefinition;
     external: SuiteDefinition;
     native: SuiteDefinition;
+    'managed-docker': SuiteDefinition;
     unassigned: SuiteDefinition;
   };
   assignments: {
     portable: readonly string[];
     external: readonly string[];
     native: readonly string[];
+    'managed-docker': readonly string[];
     unassigned: readonly UnassignedEntry[];
   };
 }
@@ -235,8 +238,9 @@ async function main(): Promise<void> {
   const portableSet = new Set(manifest.assignments.portable);
   const externalSet = new Set(manifest.assignments.external);
   const nativeSet = new Set(manifest.assignments.native);
+  const managedDockerSet = new Set(manifest.assignments['managed-docker']);
   const unassignedSet = new Set(manifest.assignments.unassigned.map((e) => e.file));
-  const allClaimed = new Set([...portableSet, ...externalSet, ...nativeSet, ...unassignedSet]);
+  const allClaimed = new Set([...portableSet, ...externalSet, ...nativeSet, ...managedDockerSet, ...unassignedSet]);
 
   // T2: Every manifest-listed file exists on disk.
   for (const f of allClaimed) {
@@ -262,6 +266,7 @@ async function main(): Promise<void> {
   portableSet.forEach((f) => add(f, 'portable'));
   externalSet.forEach((f) => add(f, 'external'));
   nativeSet.forEach((f) => add(f, 'native'));
+  managedDockerSet.forEach((f) => add(f, 'managed-docker'));
   unassignedSet.forEach((f) => add(f, 'unassigned'));
   for (const [f, buckets] of counts) {
     if (buckets.length > 1) {
@@ -299,6 +304,7 @@ async function main(): Promise<void> {
   const external = await loadConfig(EXTERNAL_CONFIG);
   const native = await loadConfig(NATIVE_CONFIG);
   const portable = await loadConfig(PORTABLE_CONFIG);
+  const managedDocker = await loadConfig(MANAGED_DOCKER_CONFIG);
 
   const externalCfgList = [...external.include].map((s) => s.replace(/\\/g, '/')).sort();
   const externalManifestList = [...manifest.assignments.external].sort();
@@ -334,6 +340,25 @@ async function main(): Promise<void> {
       violations.push({
         tag: 'topology_native_disagreement',
         detail: `files in manifest.native but NOT in vitest.native.config.ts: ${manifestOnly.join(', ')}`,
+      });
+    }
+  }
+
+  const managedDockerCfgList = [...managedDocker.include].map((s) => s.replace(/\\/g, '/')).sort();
+  const managedDockerManifestList = [...manifest.assignments['managed-docker']].sort();
+  if (managedDockerCfgList.join('\n') !== managedDockerManifestList.join('\n')) {
+    const cfgOnly = managedDockerCfgList.filter((f) => !managedDockerManifestList.includes(f));
+    const manifestOnly = managedDockerManifestList.filter((f) => !managedDockerCfgList.includes(f));
+    if (cfgOnly.length > 0) {
+      violations.push({
+        tag: 'topology_managed_docker_disagreement',
+        detail: `files in vitest.managed-docker.config.ts but NOT in manifest[managed-docker]: ${cfgOnly.join(', ')}`,
+      });
+    }
+    if (manifestOnly.length > 0) {
+      violations.push({
+        tag: 'topology_managed_docker_disagreement',
+        detail: `files in manifest[managed-docker] but NOT in vitest.managed-docker.config.ts: ${manifestOnly.join(', ')}`,
       });
     }
   }

@@ -1,0 +1,81 @@
+name: managed-docker-runtime
+
+# Stage 5C — Managed-Docker orchestrator vs real docker daemon.
+#
+# GitHub-hosted ubuntu-latest runners come with docker pre-installed.
+# This job runs the ManagedDockerOrchestrator through preflight →
+# provision → readiness → teardown against the real daemon, using
+# apps/desktop/resources/managed-docker-compose.yml.
+#
+# Green run establishes: managed_docker_orchestration_ci_verified.
+# It does NOT establish operator soak or human smoke — those have
+# their own workflows.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/horizon-trade-bot-mcbcfo
+      - main
+
+jobs:
+  orchestrator:
+    name: Managed-Docker orchestrator (real daemon)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # docker is pre-installed on ubuntu-latest but we still want to
+      # record the version + prove the daemon is reachable before we
+      # ask the orchestrator to do anything.
+      - name: Verify docker daemon reachable
+        run: |
+          docker --version
+          docker info --format 'server={{.ServerVersion}}'
+          docker compose version --short
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Typecheck (desktop)
+        working-directory: apps/desktop
+        run: npx tsc -p tsconfig.json --noEmit
+
+      - name: Run managed-docker orchestrator integration
+        working-directory: apps/desktop
+        env:
+          HORIZON_REQUIRE_MANAGED_DOCKER: 'true'
+          NODE_ENV: 'test'
+        run: npm run test:managed-docker
+
+      # Stage 5C evidence: readiness JSON is written to
+      # apps/desktop/tests/integration/logs/managed-docker-readiness-*.json
+      # even when the run fails. Upload always so review has
+      # something to look at either way.
+      - name: Upload orchestrator readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-docker-runtime-evidence-${{ github.run_id }}
+          path: |
+            apps/desktop/tests/integration/logs/*.json
+            apps/desktop/tests/integration/logs/*.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Owner-label sweep (no owner=horizon container should remain)
+        if: always()
+        run: |
+          echo "===== docker ps -a (all) ====="
+          docker ps -a
+          echo "===== docker ps -a --filter label=owner=horizon (must be empty) ====="
+          docker ps -a --filter label=owner=horizon
+          # Do NOT fail this step: parallel jobs on the same runner
+          # could conceivably co-exist. Reporting is enough.

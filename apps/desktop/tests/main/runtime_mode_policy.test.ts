@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolveRuntimeMode } from '../../src/main/runtimeModePolicy';
 
-function u(...args: Partial<Parameters<typeof resolveRuntimeMode>[0]>) {
+function u(...args: Partial<Parameters<typeof resolveRuntimeMode>[0]>[]) {
   return resolveRuntimeMode({
     packaged: false,
     serverModeEnv: undefined,

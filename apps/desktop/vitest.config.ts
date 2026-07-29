@@ -28,7 +28,9 @@ export default defineConfig({
     // vitest.native.config.ts.
     exclude: [
       'tests/native/**',
+      'tests/integration/**',
       'tests/**/*external*.test.ts',
+      'tests/**/*.integration.test.ts',
       'tests/stage1_schema_fingerprint.test.ts',
       'tests/stage1_mariadb_probe.test.ts',
       'tests/stage1_redis_probe.test.ts',
