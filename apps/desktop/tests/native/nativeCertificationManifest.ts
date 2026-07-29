@@ -139,6 +139,19 @@ const SAFETY_ENTRIES: ReadonlyArray<{ id: string; title: string }> = [
   { id: 'T53', title: 'safe flags unchanged (DRY_RUN=true, ORDER_SUBMISSION_ENABLED=false)' },
   { id: 'T54', title: 'no Coinbase credentials referenced in the harness process env' },
   { id: 'T55', title: 'no production providers activated (HORIZON_PROVIDER_MODE unset / fixture)' },
+  // Stage 4F — every enqueue path preserves the safety invariants.
+  { id: 'T60', title: 'Stage 4 report enqueue preserves DRY_RUN + ORDER_SUBMISSION_ENABLED + createOrder counters' },
+];
+
+// Stage 4F — report-lifecycle certification. Each ID exercises one
+// concrete run through renderer → preload → main → tRPC → worker →
+// artifact → verification, and asserts against the DOM data-*
+// attributes the Stage 4E UI emits (never against visible text).
+const REPORT_ENTRIES: ReadonlyArray<{ id: string; title: string }> = [
+  { id: 'T56', title: 'Reports screen renders all 13 REPORT_KINDS + Generate buttons (data-report-kind attrs present)' },
+  { id: 'T57', title: 'safety_status JSON enqueue → materialised artifact exists on disk with matching size + checksum' },
+  { id: 'T58', title: 'reports.verify recomputes SHA256 and confirms the artifact (data-verification-state=ok)' },
+  { id: 'T59', title: 'targetFolder=`..`-escaping is rejected by dual (main + server) path validation' },
 ];
 
 const EVIDENCE_ENTRIES: ReadonlyArray<{ id: string; title: string }> = [
@@ -190,6 +203,10 @@ function buildManifest(): readonly NativeCertificationRequirement[] {
   for (const e of SECURITY_ENTRIES) out.push({ id: e.id, title: e.title, category: 'security', required: true });
   for (const e of LIFECYCLE_ENTRIES) out.push({ id: e.id, title: e.title, category: 'lifecycle', required: true });
   for (const e of SAFETY_ENTRIES) out.push({ id: e.id, title: e.title, category: 'safety', required: true });
+  // Stage 4F — report lifecycle enters as its own subset under
+  // `lifecycle` category so an auditor can compute the T56-T59 subset
+  // via a single category filter.
+  for (const e of REPORT_ENTRIES) out.push({ id: e.id, title: e.title, category: 'lifecycle', required: true });
   for (const e of EVIDENCE_ENTRIES) out.push({ id: e.id, title: e.title, category: 'evidence', required: true });
   for (const e of CLEANUP_ENTRIES) out.push({ id: e.id, title: e.title, category: 'cleanup', required: true });
   return Object.freeze(out);

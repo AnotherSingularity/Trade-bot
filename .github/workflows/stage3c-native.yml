@@ -256,6 +256,13 @@ jobs:
             apps/desktop/tests/native/logs/**/identity-preflight.txt
             apps/desktop/tests/native/logs/**/authseam-readiness-diagnostic.json
             apps/desktop/tests/native/logs/**/native-launch-policy.json
+            apps/desktop/tests/native/logs/**/stage4-export-result.json
+            apps/desktop/tests/native/logs/**/stage4-export-verification.json
+            apps/desktop/tests/native/logs/**/stage4-export-redactions.json
+            apps/desktop/tests/native/logs/**/stage4-export-safety.json
+            apps/desktop/tests/native/logs/**/stage4-export-counters.json
+            apps/desktop/tests/native/logs/**/stage4-export-pathreject.json
+            apps/desktop/tests/native/logs/**/stage4-report-inventory.json
           retention-days: 30
           if-no-files-found: error
 

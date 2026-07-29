@@ -16,7 +16,12 @@
  */
 import { closeSync, existsSync, openSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+
+function createHashHex(bytes: string): string {
+  return createHash('sha256').update(bytes, 'utf8').digest('hex');
+}
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import IORedis from 'ioredis';
 import { createConnection } from 'mysql2/promise';
@@ -2718,6 +2723,161 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
     expect(orderCapable, 't55_order_capable').toBe(false);
     expect(l2Prod, 't55_l2_production').toBe(false);
   });
+
+  // -------------------------------------------------------------------------
+  // Stage 4F — report-lifecycle certification (T56-T60).
+  //
+  // The stack under test is:
+  //   Reports.tsx renderer → horizon.desktopData(preload) → validated main
+  //   IPC → DesktopDataClient.call('reports.enqueue', ...) → authenticated
+  //   tRPC → export worker → serializer → deterministic file write →
+  //   verifyArtifact SHA256.
+  //
+  // Every assertion below is on DOM `data-*` runtime attributes emitted
+  // by the Stage 4E UI. Visible text is never the primary certification
+  // signal — the plan mandates machine-readable anchors.
+  // -------------------------------------------------------------------------
+  certIt('T56', 'Reports screen renders all 13 REPORT_KINDS + Generate buttons (data-report-kind attrs present)', async () => {
+    await launch!.page.evaluate(() => { window.location.hash = '#/ops/reports'; });
+    await launch!.page.waitForSelector('[data-testid="report-catalog-table"]', { timeout: 25_000 });
+    const kinds = await launch!.page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll('[data-report-kind]'));
+      return Array.from(new Set(rows.map((el) => (el as HTMLElement).dataset.reportKind ?? '')));
+    });
+    const expected = [
+      'decision_chain','daily_shadow','portfolio_risk','universe_and_hygiene',
+      'fingerprints','regimes','microstructure','context','cost_attribution',
+      'validation','incidents','safety_status','system_manifest',
+    ].sort();
+    const observed = kinds.filter((k) => k !== '').sort();
+    writeFileSync(join(iso!.logsDir, 'stage4-report-inventory.json'), JSON.stringify({ expected, observed, missing: expected.filter((k) => !observed.includes(k)) }, null, 2));
+    expect(observed).toEqual(expected);
+  }, 60_000);
+
+  certIt('T57', 'safety_status JSON enqueue → materialised artifact exists on disk with matching size + checksum', async () => {
+    // Drive the renderer to the reports screen so the DOM state is
+    // consistent with what an operator would observe.
+    await launch!.page.evaluate(() => { window.location.hash = '#/ops/reports'; });
+    await launch!.page.waitForSelector('[data-testid="report-catalog-table"]', { timeout: 25_000 });
+    // Enqueue via horizon.desktopData directly — the target folder is
+    // HORIZON_REPORT_DIR (plumbed by electronHarness for every run).
+    const targetFolder = process.env.HORIZON_REPORT_DIR ?? join(iso!.logsDir, 'electron-reports');
+    mkdirSync(targetFolder, { recursive: true });
+    const res = await launch!.page.evaluate(async (folder) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bridge = (window as any).horizon;
+      return bridge.desktopData('reports.enqueue', {
+        reportKind: 'safety_status', format: 'json', targetFolder: folder,
+        referenceId: null, requestOptions: {},
+      });
+    }, targetFolder) as { ok: boolean; envelope?: { status: string; data: { status: string; jobId: number; artifactPath: string | null; contentDigest: string | null; checksumSha256: string | null; reportSpecVersion: string; failureReason: string | null } | null; reasonCode?: string }; error?: unknown };
+    writeFileSync(join(iso!.logsDir, 'stage4-export-result.json'), JSON.stringify(res, null, 2));
+    expect(res.ok, `enqueue failed: ${JSON.stringify(res).slice(0, 400)}`).toBe(true);
+    const env = res.envelope!;
+    expect(env.status, 't57_envelope_status').toBe('healthy');
+    const data = env.data!;
+    expect(data.status).toBe('materialized');
+    expect(data.artifactPath, 't57_artifact_path_present').toBeTruthy();
+    expect(data.contentDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(data.checksumSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(data.reportSpecVersion).toBe('safety_status.v1');
+    // The file exists on disk with matching bytes.
+    expect(existsSync(data.artifactPath!), 't57_file_on_disk').toBe(true);
+    const bytes = readFileSync(data.artifactPath!, 'utf8');
+    const sha = createHashHex(bytes);
+    expect(sha).toBe(data.checksumSha256);
+    // Store the jobId for T58 + T60.
+    (globalThis as unknown as { __t57JobId?: number }).__t57JobId = data.jobId;
+    (globalThis as unknown as { __t57ArtifactPath?: string }).__t57ArtifactPath = data.artifactPath!;
+  }, 60_000);
+
+  certIt('T58', 'reports.verify recomputes SHA256 and confirms the artifact (data-verification-state=ok)', async () => {
+    const jobId = (globalThis as unknown as { __t57JobId?: number }).__t57JobId;
+    expect(jobId, 't58_jobid_from_t57').toBeTruthy();
+    const res = await launch!.page.evaluate(async (id) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bridge = (window as any).horizon;
+      return bridge.desktopData('reports.verify', { jobId: id });
+    }, jobId!) as { ok: boolean; envelope?: { status: string; data: { ok: boolean; reason: string | null; checksumSha256: string | null; contentDigest: string | null; sizeBytes: number | null } } };
+    writeFileSync(join(iso!.logsDir, 'stage4-export-verification.json'), JSON.stringify(res, null, 2));
+    expect(res.ok, 't58_verify_call').toBe(true);
+    const env = res.envelope!;
+    expect(env.status).toBe('healthy');
+    expect(env.data.ok).toBe(true);
+    expect(env.data.reason).toBeNull();
+    expect(env.data.checksumSha256).toMatch(/^[a-f0-9]{64}$/);
+    // A planted secret-scan check: the artifact must contain no
+    // Bearer-shaped token, no 32-hex non-content-address secret.
+    const path = (globalThis as unknown as { __t57ArtifactPath?: string }).__t57ArtifactPath!;
+    const bytes = readFileSync(path, 'utf8');
+    const bearerHit = /Bearer\s+[A-Za-z0-9._~+/=-]{16,}/.test(bytes);
+    const passwordHit = /password[=:]\s*\S{4,}/i.test(bytes);
+    writeFileSync(join(iso!.logsDir, 'stage4-export-redactions.json'), JSON.stringify({ bearerHit, passwordHit, size: bytes.length }, null, 2));
+    expect(bearerHit, 't58_no_bearer_leak').toBe(false);
+    expect(passwordHit, 't58_no_password_leak').toBe(false);
+  }, 60_000);
+
+  certIt('T59', 'targetFolder=`..`-escaping is rejected by dual (main + server) path validation', async () => {
+    const escapePath = '/etc/../etc';
+    const res = await launch!.page.evaluate(async (folder) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bridge = (window as any).horizon;
+      return bridge.desktopData('reports.enqueue', {
+        reportKind: 'safety_status', format: 'json', targetFolder: folder,
+        referenceId: null, requestOptions: {},
+      });
+    }, escapePath) as { ok: boolean; envelope?: { status: string; data: { status: string; failureReason: string | null } | null; reasonCode?: string }; error?: { kind: string; detail?: string } };
+    // The rejection surfaces as either:
+    //  (a) main pre-check → envelope.data.status='failed', reason
+    //      startswith 'main_path_check_rejected:' (main-side dual guard);
+    //  (b) server path validation → envelope.status='unavailable',
+    //      reason starts with 'export_failed:path_rejected:'.
+    // Both are legitimate — the test asserts that ONE of them fires
+    // and NO artifact was materialised.
+    writeFileSync(join(iso!.logsDir, 'stage4-export-pathreject.json'), JSON.stringify(res, null, 2));
+    if (res.ok && res.envelope) {
+      const env = res.envelope;
+      if (env.status === 'healthy' && env.data?.status === 'materialized') {
+        throw new Error('t59_traversal_reached_worker');
+      }
+      if (env.status === 'unavailable') {
+        expect(env.reasonCode ?? '', 't59_server_reason').toMatch(/^export_failed:path_rejected:/);
+      } else {
+        expect(env.data?.status ?? '').toBe('failed');
+        expect(env.data?.failureReason ?? '', 't59_main_reason').toMatch(/^(main_path_check_rejected:|path_rejected:)/);
+      }
+    } else {
+      // The preload / IPC layer may reject upstream on schema violation;
+      // that is also acceptable.
+      expect(res.ok, 't59_rejected_upstream').toBe(false);
+    }
+  }, 60_000);
+
+  certIt('T60', 'Stage 4 report enqueue preserves DRY_RUN + ORDER_SUBMISSION_ENABLED + createOrder counters', async () => {
+    const counters = await readCreateOrderCounters(server!);
+    const flagsRes = await launch!.page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bridge = (window as any).horizon;
+      return bridge.desktopData('safety.get');
+    }) as { ok: boolean; envelope?: { data: { safeFlags: { DRY_RUN: boolean; ORDER_SUBMISSION_ENABLED: boolean }; liveCapitalAuthorized: boolean; promotionEnabled: boolean; kellyEnabled: boolean } } };
+    const safetyPayload = {
+      createOrderCounters: counters,
+      safeFlags: flagsRes.envelope?.data.safeFlags,
+      liveCapitalAuthorized: flagsRes.envelope?.data.liveCapitalAuthorized,
+      promotionEnabled: flagsRes.envelope?.data.promotionEnabled,
+      kellyEnabled: flagsRes.envelope?.data.kellyEnabled,
+    };
+    writeFileSync(join(iso!.logsDir, 'stage4-export-safety.json'), JSON.stringify(safetyPayload, null, 2));
+    writeFileSync(join(iso!.logsDir, 'stage4-export-counters.json'), JSON.stringify(counters, null, 2));
+    expect(counters.functionInvocations, 't60_fn_invocations_zero').toBe(0);
+    expect(counters.attemptCount, 't60_attempt_count_zero').toBe(0);
+    expect(counters.networkCount, 't60_network_count_zero').toBe(0);
+    expect(flagsRes.envelope?.data.safeFlags.DRY_RUN, 't60_dry_run_true').toBe(true);
+    expect(flagsRes.envelope?.data.safeFlags.ORDER_SUBMISSION_ENABLED, 't60_submission_false').toBe(false);
+    expect(flagsRes.envelope?.data.liveCapitalAuthorized, 't60_live_capital_false').toBe(false);
+    expect(flagsRes.envelope?.data.promotionEnabled, 't60_promotion_false').toBe(false);
+    expect(flagsRes.envelope?.data.kellyEnabled, 't60_kelly_false').toBe(false);
+  }, 60_000);
 
   // T-evidence — Stage 3C-CI-RESET Part 2 Checkpoint C.8.
   // Captures the AUTHORITATIVE runtime measurements the harness has

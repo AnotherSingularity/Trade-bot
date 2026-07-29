@@ -1,7 +1,7 @@
 {
   "contract": "stage3c-native-certification-inventory.v1",
-  "manifestHash": "ab416c4888269d8a85212ac4c1a371a898962be22e7b622d119f067683dcc84f",
-  "totalRequirements": 115,
+  "manifestHash": "598c4abc6252a5822918ab8417638fdfc9c53c380cc88f0d74c958c52a8c368c",
+  "totalRequirements": 120,
   "categoriesRecognized": [
     "startup",
     "screen_navigation",
@@ -25,8 +25,8 @@
     "session": 3,
     "degradation": 3,
     "security": 2,
-    "lifecycle": 4,
-    "safety": 4,
+    "lifecycle": 8,
+    "safety": 5,
     "evidence": 4,
     "cleanup": 5
   },
@@ -793,6 +793,41 @@
       "title": "no production providers activated (HORIZON_PROVIDER_MODE unset / fixture)",
       "screenKey": null,
       "originatingDeclaration": "static:certIt('T55')"
+    },
+    {
+      "id": "T60",
+      "category": "safety",
+      "title": "Stage 4 report enqueue preserves DRY_RUN + ORDER_SUBMISSION_ENABLED + createOrder counters",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T60')"
+    },
+    {
+      "id": "T56",
+      "category": "lifecycle",
+      "title": "Reports screen renders all 13 REPORT_KINDS + Generate buttons (data-report-kind attrs present)",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T56')"
+    },
+    {
+      "id": "T57",
+      "category": "lifecycle",
+      "title": "safety_status JSON enqueue → materialised artifact exists on disk with matching size + checksum",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T57')"
+    },
+    {
+      "id": "T58",
+      "category": "lifecycle",
+      "title": "reports.verify recomputes SHA256 and confirms the artifact (data-verification-state=ok)",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T58')"
+    },
+    {
+      "id": "T59",
+      "category": "lifecycle",
+      "title": "targetFolder=`..`-escaping is rejected by dual (main + server) path validation",
+      "screenKey": null,
+      "originatingDeclaration": "static:certIt('T59')"
     },
     {
       "id": "T-coverage",
