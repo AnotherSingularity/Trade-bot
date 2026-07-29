@@ -292,3 +292,112 @@ export function composeContentCanonicalPayload<K extends ReportKind>(
     payload: env.payload,
   });
 }
+
+// ---------------------------------------------------------------------------
+// tRPC input/output schemas for the four Stage 4D procedures.
+// ---------------------------------------------------------------------------
+
+/**
+ * enqueue input. `targetFolder` is validated on the server BEFORE
+ * anything is written — the schema enforces the shape (non-empty
+ * absolute-ish) but the fail-closed path checker (pathValidation.ts)
+ * is the security-critical guard. requestOptions is normalised on
+ * the client (sorted keys, defaults resolved) before being passed
+ * — the server does not re-normalise; two different-looking option
+ * objects intentionally hash to different idempotency keys.
+ */
+export const ExportEnqueueInputSchema = z.object({
+  reportKind: ReportKindSchema,
+  format: ReportFormatSchema,
+  targetFolder: z.string().min(1).max(500),
+  referenceId: z.string().min(1).max(128).nullable().optional(),
+  requestOptions: z.record(z.string(), z.unknown()).optional(),
+}).strict();
+export type ExportEnqueueInput = z.infer<typeof ExportEnqueueInputSchema>;
+
+/**
+ * enqueue output. `status`:
+ *   `materialized` — this call produced the artifact bytes.
+ *   `idempotent_hit` — the same idempotency key was already stored
+ *     (either from this session or a prior one); the caller receives
+ *     the winning artifact's identity, not a fresh one.
+ *   `failed` — job row inserted, generator or serialiser threw;
+ *     failureReason carries a sanitised one-liner.
+ */
+export const ExportEnqueueOutputSchema = z.object({
+  status: z.enum(['materialized', 'idempotent_hit', 'failed']),
+  jobId: z.number().int().positive(),
+  idempotencyKey: z.string(),
+  contentDigest: z.string().nullable(),
+  checksumSha256: z.string().nullable(),
+  artifactPath: z.string().nullable(),
+  failureReason: z.string().nullable(),
+  reportSpecVersion: z.string(),
+  sourceHighWaterMark: SourceHighWaterMarkSchema,
+});
+export type ExportEnqueueOutput = z.infer<typeof ExportEnqueueOutputSchema>;
+
+export const ExportStatusInputSchema = z.object({
+  jobId: z.number().int().positive(),
+}).strict();
+export type ExportStatusInput = z.infer<typeof ExportStatusInputSchema>;
+
+export const ExportStatusOutputSchema = z.object({
+  jobId: z.number().int().positive(),
+  reportKind: ReportKindSchema,
+  format: ReportFormatSchema,
+  status: z.enum(['queued', 'running', 'completed', 'failed']),
+  requestedAt: z.string(),
+  completedAt: z.string().nullable(),
+  failureReason: z.string().nullable(),
+  reportSpecVersion: z.string().nullable(),
+  idempotencyKey: z.string().nullable(),
+  artifact: z.object({
+    artifactPath: z.string(),
+    checksumSha256: z.string(),
+    contentDigest: z.string().nullable(),
+    sizeBytes: z.number().int().nonnegative(),
+    reportVersion: z.string(),
+    generatedAt: z.string(),
+  }).nullable(),
+});
+export type ExportStatusOutput = z.infer<typeof ExportStatusOutputSchema>;
+
+export const ExportListInputSchema = z.object({
+  limit: z.number().int().min(1).max(200).default(50),
+  reportKind: ReportKindSchema.optional(),
+}).strict();
+export type ExportListInput = z.infer<typeof ExportListInputSchema>;
+
+export const ExportListItemSchema = z.object({
+  jobId: z.number().int().positive(),
+  reportKind: ReportKindSchema,
+  format: ReportFormatSchema,
+  status: z.enum(['queued', 'running', 'completed', 'failed']),
+  requestedAt: z.string(),
+  completedAt: z.string().nullable(),
+  contentDigest: z.string().nullable(),
+  checksumSha256: z.string().nullable(),
+});
+export type ExportListItem = z.infer<typeof ExportListItemSchema>;
+
+export const ExportListOutputSchema = z.object({
+  items: z.array(ExportListItemSchema),
+});
+export type ExportListOutput = z.infer<typeof ExportListOutputSchema>;
+
+export const ExportVerifyInputSchema = z.object({
+  jobId: z.number().int().positive(),
+}).strict();
+export type ExportVerifyInput = z.infer<typeof ExportVerifyInputSchema>;
+
+export const ExportVerifyOutputSchema = z.object({
+  ok: z.boolean(),
+  reason: z.enum(['artifact_row_missing', 'file_missing', 'checksum_mismatch', 'size_mismatch', 'io_error']).nullable(),
+  detail: z.string().nullable(),
+  checksumSha256: z.string().nullable(),
+  contentDigest: z.string().nullable(),
+  sizeBytes: z.number().int().nonnegative().nullable(),
+  artifactPath: z.string().nullable(),
+});
+export type ExportVerifyOutput = z.infer<typeof ExportVerifyOutputSchema>;
