@@ -433,26 +433,101 @@ async function boot(): Promise<void> {
       return snap.championConfiguration ?? { championVersion: 'unknown' };
     },
     selectExportFolder: async () => {
+      // Stage 4E — constrain the operator's choice to the environment-
+      // provided HORIZON_REPORT_DIR (native harness plumbs it per-run).
+      // If unset we still surface the OS folder picker BUT reject any
+      // choice outside HORIZON_REPORT_DIR (when set). Path-shape
+      // safety is enforced by the server-side validateOutputPath on
+      // top of this — dual guard.
+      const constrainedRoot = process.env.HORIZON_REPORT_DIR ?? null;
       const win = BrowserWindow.getFocusedWindow();
       const result = await dialog.showOpenDialog(win ?? undefined!, {
+        defaultPath: constrainedRoot ?? undefined,
         properties: ['openDirectory', 'createDirectory'],
       });
-      return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+      if (result.canceled || result.filePaths.length === 0) return null;
+      const picked = result.filePaths[0];
+      if (constrainedRoot !== null) {
+        const relative = path.relative(constrainedRoot, picked);
+        if (relative.startsWith('..') || path.isAbsolute(relative)) {
+          logger.warn('export folder rejected: outside HORIZON_REPORT_DIR', { picked, constrainedRoot });
+          return null;
+        }
+      }
+      return picked;
     },
     openLogFolder: async () => {
       const err = await shell.openPath(assets.logDirectory);
       return err === '';
     },
+    /**
+     * Stage 4E — real enqueue path replacing the Stage 1 stub.
+     *
+     * Flow:
+     *   1. Local pre-check on targetFolder — reject `..` traversal
+     *      immediately without touching tRPC (fast, fail-closed).
+     *   2. Optional HORIZON_REPORT_DIR constraint — if set, targetFolder
+     *      MUST be under it (dual guard on top of selectExportFolder).
+     *   3. Call `desktopDataClient.call('reports.enqueue', ...)` — the
+     *      authenticated operator session token flows through the
+     *      client automatically.
+     *   4. Translate the envelope into the legacy `ExportReportResponse`
+     *      shape so pre-Stage-4 callers keep working; new callers can
+     *      hit `horizon.desktopData('reports.enqueue', ...)` directly
+     *      for the full ExportEnqueueOutput.
+     *   5. Bounded 60s deadline — an ill-behaved tRPC/server hang
+     *      surfaces as `failed: export_deadline_exceeded_60s` rather
+     *      than a blocked renderer.
+     */
     exportReport: async (input) => {
+      const constrainedRoot = process.env.HORIZON_REPORT_DIR ?? null;
       logger.info('export request received', { kind: input.kind, format: input.format });
+      const generatedAt = new Date().toISOString();
+      const defaultRedactions = ['coinbase_api_key', 'coinbase_api_secret', 'admin_password_hash', 'session_tokens'];
+      if (input.targetFolder.includes('..')) {
+        return { ok: false, artifactPath: null, checksum: null, reportVersion: 'unknown', generatedAt, redactionsApplied: [], failureReason: 'main_path_check_rejected:target_folder_contains_traversal' };
+      }
+      if (constrainedRoot !== null) {
+        const relative = path.relative(constrainedRoot, input.targetFolder);
+        if (relative.startsWith('..') || path.isAbsolute(relative)) {
+          return { ok: false, artifactPath: null, checksum: null, reportVersion: 'unknown', generatedAt, redactionsApplied: [], failureReason: 'main_path_check_rejected:outside_horizon_report_dir' };
+        }
+      }
+      const timeoutMs = 60_000;
+      const enqueue = ctx.desktopDataClient!.call('reports.enqueue', {
+        reportKind: input.kind,
+        format: input.format,
+        targetFolder: input.targetFolder,
+        referenceId: input.referenceId,
+        requestOptions: {},
+      });
+      const timeout = new Promise<{ ok: false; error: { kind: 'timeout' } }>((resolve) =>
+        setTimeout(() => resolve({ ok: false, error: { kind: 'timeout' } }), timeoutMs),
+      );
+      const raced = await Promise.race([enqueue, timeout]);
+      if (!raced.ok) {
+        const reason = raced.error.kind === 'timeout' ? 'export_deadline_exceeded_60s' : `enqueue_failed:${raced.error.kind}`;
+        return { ok: false, artifactPath: null, checksum: null, reportVersion: 'unknown', generatedAt, redactionsApplied: defaultRedactions, failureReason: reason };
+      }
+      const env = raced.envelope;
+      const data = env.data;
+      if (env.status !== 'healthy' || data === null) {
+        return {
+          ok: false, artifactPath: null, checksum: null,
+          reportVersion: data?.reportSpecVersion ?? 'unknown',
+          generatedAt,
+          redactionsApplied: defaultRedactions,
+          failureReason: env.reasonCode ?? data?.failureReason ?? 'export_failed',
+        };
+      }
       return {
-        ok: false,
-        artifactPath: null,
-        checksum: null,
-        reportVersion: 'stage1-report-pending',
-        generatedAt: new Date().toISOString(),
-        redactionsApplied: ['coinbase_api_key', 'coinbase_api_secret', 'admin_password_hash', 'session_tokens'],
-        failureReason: 'stage4_report_generation_not_implemented',
+        ok: data.status === 'materialized' || data.status === 'idempotent_hit',
+        artifactPath: data.artifactPath,
+        checksum: data.checksumSha256,
+        reportVersion: data.reportSpecVersion,
+        generatedAt,
+        redactionsApplied: defaultRedactions,
+        failureReason: data.failureReason,
       };
     },
     requestControlledChange: async (input) => {

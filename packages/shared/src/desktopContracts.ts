@@ -1015,6 +1015,33 @@ export const SafetyEnvelopeSchema = desktopDataEnvelope(SafetyPayloadSchema);
 export type SafetyEnvelope = z.infer<typeof SafetyEnvelopeSchema>;
 
 // ---------------------------------------------------------------------------
+// Stage 4D — report export procedures wrapped in DesktopDataEnvelope so
+// they flow through the same DesktopDataClient/IPC surface as read
+// procedures. `enqueue` is the ONLY mutation; the others are queries.
+// Input + output types live in packages/shared/src/reports.ts.
+// ---------------------------------------------------------------------------
+
+import {
+  ExportEnqueueInputSchema,
+  ExportEnqueueOutputSchema,
+  ExportListInputSchema,
+  ExportListOutputSchema,
+  ExportStatusInputSchema,
+  ExportStatusOutputSchema,
+  ExportVerifyInputSchema,
+  ExportVerifyOutputSchema,
+} from './reports';
+
+export const ExportEnqueueEnvelopeSchema = desktopDataEnvelope(ExportEnqueueOutputSchema);
+export type ExportEnqueueEnvelope = z.infer<typeof ExportEnqueueEnvelopeSchema>;
+export const ExportStatusEnvelopeSchema = desktopDataEnvelope(ExportStatusOutputSchema);
+export type ExportStatusEnvelope = z.infer<typeof ExportStatusEnvelopeSchema>;
+export const ExportListEnvelopeSchema = desktopDataEnvelope(ExportListOutputSchema);
+export type ExportListEnvelope = z.infer<typeof ExportListEnvelopeSchema>;
+export const ExportVerifyEnvelopeSchema = desktopDataEnvelope(ExportVerifyOutputSchema);
+export type ExportVerifyEnvelope = z.infer<typeof ExportVerifyEnvelopeSchema>;
+
+// ---------------------------------------------------------------------------
 // Discriminated union of every desktop-data request key.
 //
 // Preload + IPC accept ONLY these keys. Unknown keys fail closed.
@@ -1042,6 +1069,10 @@ export const DesktopDataRequestSchema = z.discriminatedUnion('key', [
   z.object({ key: z.literal('incidents.list'), input: IncidentListInputSchema.optional() }).strict(),
   z.object({ key: z.literal('incidents.acknowledge'), input: IncidentAcknowledgeInputSchema }).strict(),
   z.object({ key: z.literal('reports.get'), input: PaginationInputSchema.optional() }).strict(),
+  z.object({ key: z.literal('reports.enqueue'), input: ExportEnqueueInputSchema }).strict(),
+  z.object({ key: z.literal('reports.status'), input: ExportStatusInputSchema }).strict(),
+  z.object({ key: z.literal('reports.list'), input: ExportListInputSchema.optional() }).strict(),
+  z.object({ key: z.literal('reports.verify'), input: ExportVerifyInputSchema }).strict(),
   z.object({ key: z.literal('configuration.get'), input: EmptyInputSchema.optional() }).strict(),
   z.object({ key: z.literal('system.get'), input: EmptyInputSchema.optional() }).strict(),
   z.object({ key: z.literal('safety.get'), input: EmptyInputSchema.optional() }).strict(),
@@ -1074,6 +1105,10 @@ export const DESKTOP_DATA_RESPONSE_SCHEMAS = {
   'incidents.list': IncidentListEnvelopeSchema,
   'incidents.acknowledge': IncidentAcknowledgeEnvelopeSchema,
   'reports.get': ReportsEnvelopeSchema,
+  'reports.enqueue': ExportEnqueueEnvelopeSchema,
+  'reports.status': ExportStatusEnvelopeSchema,
+  'reports.list': ExportListEnvelopeSchema,
+  'reports.verify': ExportVerifyEnvelopeSchema,
   'configuration.get': ConfigurationEnvelopeSchema,
   'system.get': SystemEnvelopeSchema,
   'safety.get': SafetyEnvelopeSchema,
@@ -1098,7 +1133,9 @@ export const DESKTOP_DATA_KEYS: readonly DesktopDataRequestKey[] = [
   'validation.get', 'costs.get',
   'protection.get', 'reconciliation.list',
   'incidents.list', 'incidents.acknowledge',
-  'reports.get', 'configuration.get',
+  'reports.get',
+  'reports.enqueue', 'reports.status', 'reports.list', 'reports.verify',
+  'configuration.get',
   'system.get', 'safety.get',
 ] as const;
 

@@ -11,6 +11,7 @@
  */
 
 import {
+  DESKTOP_CONTRACT_VERSION,
   DecisionDetailInputSchema,
   DecisionListInputSchema,
   ExportEnqueueInputSchema,
@@ -26,10 +27,11 @@ import {
   ReconciliationListInputSchema,
   UniverseListInputSchema,
   ValidationExperimentListInputSchema,
-  type ExportEnqueueOutput,
-  type ExportListItem,
-  type ExportStatusOutput,
-  type ExportVerifyOutput,
+  type ExportEnqueueEnvelope,
+  type ExportListEnvelope,
+  type ExportStatusEnvelope,
+  type ExportVerifyEnvelope,
+  type IsoTimestamp,
 } from '@horizon/shared';
 import { TRPCError } from '@trpc/server';
 import { and, desc, eq } from 'drizzle-orm';
@@ -152,7 +154,7 @@ export const desktopRouter = router({
      */
     enqueue: operatorProcedure
       .input(ExportEnqueueInputSchema)
-      .mutation(async ({ input, ctx }): Promise<ExportEnqueueOutput> => {
+      .mutation(async ({ input, ctx }): Promise<ExportEnqueueEnvelope> => {
         if (ctx.auth?.kind !== 'operator') {
           throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Operator session required' });
         }
@@ -161,7 +163,7 @@ export const desktopRouter = router({
           throw new TRPCError({ code: 'UNAUTHORIZED', message: 'installation_required' });
         }
         const actor = ctx.auth.account.usernameNormalized;
-        return enqueueAndRunExport(db, {
+        const result = await enqueueAndRunExport(db, {
           installationId,
           reportKind: input.reportKind,
           format: input.format,
@@ -170,13 +172,29 @@ export const desktopRouter = router({
           requestedBy: actor,
           requestOptions: input.requestOptions ?? {},
         });
+        const generatedAt = new Date().toISOString() as IsoTimestamp;
+        if (result.status === 'failed') {
+          return {
+            contractVersion: DESKTOP_CONTRACT_VERSION,
+            status: 'unavailable',
+            data: result,
+            generatedAt,
+            reasonCode: `export_failed:${result.failureReason ?? 'unknown'}`.slice(0, 200),
+          };
+        }
+        return {
+          contractVersion: DESKTOP_CONTRACT_VERSION,
+          status: 'healthy',
+          data: result,
+          generatedAt,
+        };
       }),
     /**
      * Fetch a single job's terminal state + artifact metadata.
      */
     status: operatorProcedure
       .input(ExportStatusInputSchema)
-      .query(async ({ input, ctx }): Promise<ExportStatusOutput> => {
+      .query(async ({ input, ctx }): Promise<ExportStatusEnvelope> => {
         if (ctx.auth?.kind !== 'operator') {
           throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Operator session required' });
         }
@@ -184,32 +202,46 @@ export const desktopRouter = router({
         if (typeof installationId !== 'number') {
           throw new TRPCError({ code: 'UNAUTHORIZED', message: 'installation_required' });
         }
+        const generatedAt = new Date().toISOString() as IsoTimestamp;
         const rows = await db.select().from(desktopExportJobs)
           .where(and(eq(desktopExportJobs.id, input.jobId), eq(desktopExportJobs.installationId, installationId)))
           .limit(1);
         const job = rows[0];
-        if (!job) throw new TRPCError({ code: 'NOT_FOUND', message: 'job_not_found' });
+        if (!job) {
+          return {
+            contractVersion: DESKTOP_CONTRACT_VERSION,
+            status: 'unavailable',
+            data: null,
+            generatedAt,
+            reasonCode: 'job_not_found',
+          };
+        }
         const artRows = await db.select().from(desktopExportArtifacts)
           .where(eq(desktopExportArtifacts.exportJobId, input.jobId)).limit(1);
         const art = artRows[0];
         return {
-          jobId: Number(job.id),
-          reportKind: job.reportKind,
-          format: job.format,
-          status: job.status,
-          requestedAt: (job.requestedAt instanceof Date ? job.requestedAt.toISOString() : String(job.requestedAt)),
-          completedAt: job.completedAt ? (job.completedAt instanceof Date ? job.completedAt.toISOString() : String(job.completedAt)) : null,
-          failureReason: job.failureReason ?? null,
-          reportSpecVersion: job.reportSpecVersion ?? null,
-          idempotencyKey: job.idempotencyKey ?? null,
-          artifact: art ? {
-            artifactPath: art.artifactPath,
-            checksumSha256: art.checksumSha256,
-            contentDigest: art.contentDigest ?? null,
-            sizeBytes: Number(art.sizeBytes),
-            reportVersion: art.reportVersion,
-            generatedAt: (art.generatedAt instanceof Date ? art.generatedAt.toISOString() : String(art.generatedAt)),
-          } : null,
+          contractVersion: DESKTOP_CONTRACT_VERSION,
+          status: 'healthy',
+          data: {
+            jobId: Number(job.id),
+            reportKind: job.reportKind,
+            format: job.format,
+            status: job.status,
+            requestedAt: (job.requestedAt instanceof Date ? job.requestedAt.toISOString() : String(job.requestedAt)),
+            completedAt: job.completedAt ? (job.completedAt instanceof Date ? job.completedAt.toISOString() : String(job.completedAt)) : null,
+            failureReason: job.failureReason ?? null,
+            reportSpecVersion: job.reportSpecVersion ?? null,
+            idempotencyKey: job.idempotencyKey ?? null,
+            artifact: art ? {
+              artifactPath: art.artifactPath,
+              checksumSha256: art.checksumSha256,
+              contentDigest: art.contentDigest ?? null,
+              sizeBytes: Number(art.sizeBytes),
+              reportVersion: art.reportVersion,
+              generatedAt: (art.generatedAt instanceof Date ? art.generatedAt.toISOString() : String(art.generatedAt)),
+            } : null,
+          },
+          generatedAt,
         };
       }),
     /**
@@ -218,7 +250,7 @@ export const desktopRouter = router({
      */
     list: operatorProcedure
       .input(ExportListInputSchema.optional())
-      .query(async ({ input, ctx }): Promise<{ items: ExportListItem[] }> => {
+      .query(async ({ input, ctx }): Promise<ExportListEnvelope> => {
         if (ctx.auth?.kind !== 'operator') {
           throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Operator session required' });
         }
@@ -226,6 +258,7 @@ export const desktopRouter = router({
         if (typeof installationId !== 'number') {
           throw new TRPCError({ code: 'UNAUTHORIZED', message: 'installation_required' });
         }
+        const generatedAt = new Date().toISOString() as IsoTimestamp;
         const limit = input?.limit ?? 50;
         const rows = input?.reportKind
           ? await db.select().from(desktopExportJobs)
@@ -244,7 +277,7 @@ export const desktopRouter = router({
           .where((desktopExportArtifacts.exportJobId as any).in(ids));
         const artByJob = new Map<number, typeof artRows[number]>();
         for (const a of artRows) artByJob.set(Number(a.exportJobId), a);
-        const items: ExportListItem[] = rows.map((r) => {
+        const items = rows.map((r) => {
           const a = artByJob.get(Number(r.id));
           return {
             jobId: Number(r.id),
@@ -257,7 +290,22 @@ export const desktopRouter = router({
             checksumSha256: a?.checksumSha256 ?? null,
           };
         });
-        return { items };
+        const data = { items };
+        if (items.length === 0) {
+          return {
+            contractVersion: DESKTOP_CONTRACT_VERSION,
+            status: 'empty',
+            data,
+            generatedAt,
+            reasonCode: 'no_export_jobs_yet',
+          };
+        }
+        return {
+          contractVersion: DESKTOP_CONTRACT_VERSION,
+          status: 'healthy',
+          data,
+          generatedAt,
+        };
       }),
     /**
      * Re-hash the file bytes vs desktop_export_artifacts.checksumSha256.
@@ -266,7 +314,7 @@ export const desktopRouter = router({
      */
     verify: operatorProcedure
       .input(ExportVerifyInputSchema)
-      .query(async ({ input, ctx }): Promise<ExportVerifyOutput> => {
+      .query(async ({ input, ctx }): Promise<ExportVerifyEnvelope> => {
         if (ctx.auth?.kind !== 'operator') {
           throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Operator session required' });
         }
@@ -274,21 +322,41 @@ export const desktopRouter = router({
         if (typeof installationId !== 'number') {
           throw new TRPCError({ code: 'UNAUTHORIZED', message: 'installation_required' });
         }
+        const generatedAt = new Date().toISOString() as IsoTimestamp;
         const rows = await db.select().from(desktopExportJobs)
           .where(and(eq(desktopExportJobs.id, input.jobId), eq(desktopExportJobs.installationId, installationId)))
           .limit(1);
-        if (!rows[0]) throw new TRPCError({ code: 'NOT_FOUND', message: 'job_not_found' });
+        if (!rows[0]) {
+          return {
+            contractVersion: DESKTOP_CONTRACT_VERSION,
+            status: 'unavailable',
+            data: null,
+            generatedAt,
+            reasonCode: 'job_not_found',
+          };
+        }
         const outcome = await verifyArtifact(db, input.jobId);
         if (outcome.ok) {
           return {
-            ok: true, reason: null, detail: null,
-            checksumSha256: outcome.checksumSha256, contentDigest: outcome.contentDigest,
-            sizeBytes: outcome.sizeBytes, artifactPath: outcome.artifactPath,
+            contractVersion: DESKTOP_CONTRACT_VERSION,
+            status: 'healthy',
+            data: {
+              ok: true, reason: null, detail: null,
+              checksumSha256: outcome.checksumSha256, contentDigest: outcome.contentDigest,
+              sizeBytes: outcome.sizeBytes, artifactPath: outcome.artifactPath,
+            },
+            generatedAt,
           };
         }
         return {
-          ok: false, reason: outcome.reason, detail: outcome.detail ?? null,
-          checksumSha256: null, contentDigest: null, sizeBytes: null, artifactPath: null,
+          contractVersion: DESKTOP_CONTRACT_VERSION,
+          status: 'degraded',
+          data: {
+            ok: false, reason: outcome.reason, detail: outcome.detail ?? null,
+            checksumSha256: null, contentDigest: null, sizeBytes: null, artifactPath: null,
+          },
+          generatedAt,
+          reasonCode: `verify_failed:${outcome.reason}`,
         };
       }),
   }),
