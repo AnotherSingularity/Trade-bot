@@ -164,9 +164,18 @@ export interface ServerSpawn {
   resume: () => void;
 }
 
-export async function spawnServer(iso: NativeIsolation): Promise<ServerSpawn> {
-  const port = await pickFreePort();
-  const bootstrapToken = randomBytes(32).toString('hex');
+export async function spawnServer(iso: NativeIsolation, opts?: { port?: number; bootstrapToken?: string }): Promise<ServerSpawn> {
+  // Stage 3C-E.1.36 — allow the caller to pin the port + bootstrap
+  // token. The T49 server-restart test needs the replacement server
+  // to answer on the SAME URL the desktop main was launched with —
+  // otherwise every subsequent `desktopData` call fails with
+  // `network_error` because the DesktopDataClient's baseUrl (set from
+  // HORIZON_SERVER_HEALTH_URL at Electron launch) still points at the
+  // dead process's port. Same rationale for the bootstrap token: the
+  // desktop's `requireBootstrapAuthorization`-guarded probes carry
+  // the ORIGINAL token from launch env.
+  const port = opts?.port ?? await pickFreePort();
+  const bootstrapToken = opts?.bootstrapToken ?? randomBytes(32).toString('hex');
   const logStream = { out: '' as string };
   // Stage 3C-E.1.27 — resolve tsx binary directly. Previously we
   // spawned `npx tsx src/index.ts`, which builds a process tree of

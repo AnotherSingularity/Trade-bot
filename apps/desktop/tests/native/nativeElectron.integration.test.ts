@@ -2427,6 +2427,16 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
   certIt('T49', 'server restart yields new PID + schema-valid reconciliation + auth re-established', async () => {
     const oldPid = server?.proc.pid ?? -1;
     if (oldPid <= 0) throw new Error('t49_no_old_pid');
+    // Stage 3C-E.1.36 — capture the ORIGINAL port + bootstrap token
+    // so the replacement server answers on the same URL. The Electron
+    // main was launched with HORIZON_SERVER_HEALTH_URL pointing at
+    // this port and HORIZON_BOOTSTRAP_TOKEN pinned to this token;
+    // env vars can't change after the process starts. Without pinning
+    // both, T50+ tests that go through the desktopData bridge
+    // (T50-52, T53) get `network_error` because DesktopDataClient's
+    // baseUrl still targets the dead process's socket.
+    const oldPort = server?.port ?? 0;
+    const oldBootstrapToken = server?.bootstrapToken ?? '';
     let newPid = oldPid;
     let readinessOutcome: 'ready' | 'contract_mismatch' | 'timeout' = 'timeout';
     let authReestablished = false;
@@ -2442,8 +2452,8 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
         try { process.kill(oldPid, 0); await new Promise((r) => setTimeout(r, 200)); }
         catch { break; }
       }
-      // 3. Start a replacement with same DB/redis/bootstrap.
-      server = await spawnServer(iso!);
+      // 3. Start a replacement with same DB/redis/bootstrap + port.
+      server = await spawnServer(iso!, { port: oldPort, bootstrapToken: oldBootstrapToken });
       newPid = server.proc.pid ?? -1;
       // 4. Wait for schema-validated readiness.
       const readiness = await waitForReadiness(server, 30_000);
