@@ -1,0 +1,27 @@
+{
+  "soakId": "soak-795d01e2e307",
+  "commitSha": "da1a81908a4c797cf117fb25f2f8d6a410ff9209",
+  "runtimeContentDigest": "96c660a995a070f9b387b2c246e9f242d684aa2fb8d259578ab0929a8de3424a",
+  "startedAt": "2026-07-29T22:20:25.707Z",
+  "expectedEndAt": "2026-08-05T22:20:25.707Z",
+  "finalVerdict": "in_progress",
+  "installationIdHash": "ci-soak-cc062d87",
+  "migrationHead": "0022",
+  "migrationChainDigest": "a8faa7e7b03c1c3c9176265b38cc0716bb8355407842a34a7d543027035bc8db",
+  "reportSpecVersions": {
+    "safety_status": "safety_status.v1",
+    "system_manifest": "system_manifest.v1",
+    "incidents": "incidents.v1",
+    "cost_attribution": "cost_attribution.v1",
+    "portfolio_risk": "portfolio_risk.v1",
+    "universe_and_hygiene": "universe_and_hygiene.v1",
+    "fingerprints": "fingerprints.v1",
+    "regimes": "regimes.v1",
+    "microstructure": "microstructure.v1",
+    "context": "context.v1",
+    "validation": "validation.v1",
+    "daily_shadow": "daily_shadow.v1",
+    "decision_chain": "decision_chain.v1"
+  },
+  "runtimeMode": "managed_docker"
+}
