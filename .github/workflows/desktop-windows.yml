@@ -88,6 +88,17 @@ jobs:
         run: npm run package:win
         env:
           HORIZON_BUILD_COMMIT: ${{ github.sha }}
+      # Stage 5D §CI — installer smoke: SHA256 the produced installer,
+      # extract structural layout, scan unpacked bundle for credential
+      # leaks. Writes windows-installer-checksum.txt + manifest.json.
+      # This ESTABLISHES windows_installer_ci_smoke_verified. It does
+      # NOT establish windows_human_operator_smoke_verified — that
+      # requires the human smoke per docs/operator/windows_smoke_checklist.md.
+      - name: Verify packaged installer (Stage 5D CI smoke)
+        working-directory: apps/desktop
+        run: npm run verify:packaged-installer
+        env:
+          HORIZON_BUILD_COMMIT: ${{ github.sha }}
       # Stage 3C-CI-FIX8 §8.4: upload on always() so a failed installer
       # step still leaves diagnostics. Uploads whatever was produced —
       # unpacked directory, installer exe, manifest, verifier output.
@@ -100,5 +111,20 @@ jobs:
             apps/desktop/release/*.exe
             apps/desktop/release/win-unpacked/**
             apps/desktop/dist/build-manifest.json
+            apps/desktop/release/windows-installer-checksum.txt
+            apps/desktop/release/windows-installer-manifest.json
           if-no-files-found: warn
           retention-days: 14
+      # Stage 5D §CI — separately publish the checksum + manifest so the
+      # human operator can download JUST these two small files during
+      # the checklist without pulling the full installer artifact.
+      - name: Upload installer checksum (Stage 5D)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-checksum
+          path: |
+            apps/desktop/release/windows-installer-checksum.txt
+            apps/desktop/release/windows-installer-manifest.json
+          if-no-files-found: warn
+          retention-days: 90
