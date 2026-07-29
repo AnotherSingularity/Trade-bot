@@ -226,6 +226,36 @@
       "Stage 6 requires 7-day wall clock — cannot begin in this session"
     ]
   },
+  "stage6_through_14_update": {
+    "note": "Stages 6-14 REPOSITORY-SIDE work complete. See docs/audit/stage6_through_14_report.md. Every remaining gate is a genuine external boundary: seven-day UTC wall clock (Stage 6), private Coinbase credentials (Stages 9-11), explicit live-capital authorization + separate risk-owner sign-off (Stage 14). The safety contract is now enforced at the SCHEMA level via z.literal in five schemas — a downstream parser cannot accept a drifted manifest.",
+    "changes": [
+      { "capabilityId": "server.operationalValidationPreflight", "before": "absent", "after": "integration_verified", "evidence": "apps/server/src/soak/operationalPreflight.ts + scripts/run-operational-preflight.ts. 7-check preflight, 8 unit tests, .github/workflows/operational-validation-preflight.yml green. Establishes operational_validation_preflight_verified." },
+      { "capabilityId": "server.durableSoakRunner", "before": "absent", "after": "contract_present_awaiting_wall_clock", "evidence": "apps/server/scripts/soak-launch.ts creates SOAK_ANCHOR.json; scripts/soak-daily-cycle.ts runs one UTC day per invocation (13 kinds × 3 formats + idempotency + verify + restart + reconnect + shutdown). .github/workflows/operational-soak-launch.yml + operational-soak-daily.yml. Runtime-content-digest anchoring lets docs/audit changes ship during soak without invalidation." },
+      { "capabilityId": "server.releaseAudit", "before": "absent", "after": "integration_verified", "evidence": "apps/server/scripts/release-audit.ts covers 16 dimensions across 43 checks (migrations, schema fingerprint, suite/workflow topology, safety-flag z.literal enforcement, credential absence via git-tracked scan, order-submission barrier, provider selection, path security, redaction, 13 report generators, idempotency, managed runtime, Windows installer, runtime manifest, dependency lockfile). Local run 43/43 pass. Writes docs/audit/release_audit_<sha>.json." },
+      { "capabilityId": "server.codeFreezeManifest", "before": "absent", "after": "integration_verified", "evidence": "apps/server/scripts/code-freeze-manifest.ts parses REPORT_SPEC_VERSIONS from packages/shared/src/reports.ts (13 entries), computes 268-file runtime digest, embeds frozen safety contract, captures CI/artifact IDs from env. Writes docs/audit/code_freeze_manifest.json." },
+      { "capabilityId": "server.coinbaseReadOnlyPreflight", "before": "absent", "after": "harness_shipped_awaiting_credentials", "evidence": "apps/server/src/preflight/coinbaseReadOnly.ts covers every read-only integration contract: 4-host allowlist, TLS, bounded timeouts + rate limits + WS heartbeats, credential source (absent/env/kms), Create Order counters MUST be 0/0/0, order-POST barrier (4 forbidden endpoints), clock sync ±2s, 12 live-observation subchecks. 25 typed verdict codes. 19 unit tests. Awaiting-credentials is a first-class verdict." },
+      { "capabilityId": "shared.prospectiveValidationContract", "before": "absent", "after": "integration_verified", "evidence": "packages/shared/src/prospectiveValidation.ts — Zod-strict schemas for 7 distribution dimensions + 8 evidence buckets. Multiplier bounded [0,1]; NumericOrUnknown distinguishes unknown from zero. Observer promotions locked at z.literal(0). evaluateProspectiveSufficiency with DEFAULT_SUFFICIENCY_THRESHOLDS. Insufficient-evidence verdict cannot be forced positive. 9 tests." },
+      { "capabilityId": "shared.shadowCertificationContract", "before": "absent", "after": "integration_verified", "evidence": "packages/shared/src/shadowCertification.ts — three-conclusion enum, 13-gate assembly. Hard-fail gates (safety flags, counters, secret leakage, provider policy, migration/report-spec drift, invalidating incidents, SHA/soakId alignment, reconciliation) each force shadow_not_certified. Insufficient gates (prospective sufficient, soak passed, evidence recent) → additional_shadow_evidence_required. Only every gate → certified. safetyFlagsRemainLocked + createOrderCountersRemainZero locked at z.literal(true). 10 tests including hostile-caller planting DRY_RUN=false." },
+      { "capabilityId": "docs.liveCanaryPreparation", "before": "absent", "after": "documentation_shipped_not_executed", "evidence": "docs/live_canary/plan.md (9 sections including hard-cap bounds table + 8 kill switches + credential-scope contract + non-flippable safety invariants), docs/live_canary/abort_matrix.md (30 trigger conditions T01-T30 + response ladder + no-auto-flatten rule), docs/live_canary/evidence_template.md (per-session record + attachments allowlist/blocklist). Enabling live capital requires explicit user directive AND schema change." }
+    ],
+    "verdict": [
+      "stage5_full_closure_ci_verified",
+      "stage6_durable_soak_runner_shipped",
+      "stage6_operational_soak_awaits_wall_clock",
+      "stage7_integrated_release_audit_shipped",
+      "stage8_code_freeze_manifest_generator_shipped",
+      "stage9_coinbase_read_only_preflight_harness_shipped",
+      "stage9_coinbase_preflight_awaiting_credentials",
+      "stage10_private_credential_boundary_reached",
+      "stage11_live_data_shadow_soak_pending_credentials",
+      "stage12_prospective_validation_contract_shipped",
+      "stage13_shadow_certification_contract_shipped",
+      "stage14_live_canary_plan_prepared_not_executed",
+      "live_capital_prohibited",
+      "non_capital_roadmap_repository_complete",
+      "external_boundaries_documented"
+    ]
+  },
   "capabilities": [
     {
       "capabilityId": "exec.orderStateMachine",
