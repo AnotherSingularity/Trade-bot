@@ -26,6 +26,21 @@ export default defineConfig({
     ],
     environment: 'node',
     globals: true,
+    // Stage 3C-E.1.37 — the harness process itself (this vitest
+    // worker) must carry DRY_RUN=true + ORDER_SUBMISSION_ENABLED=false
+    // so T53's `harnessAgrees` check has authoritative env values to
+    // compare against the server-side safeFlags and the
+    // championConfigurationView bridge response. spawnServer/
+    // launchElectron already set these on the SPAWNED processes;
+    // pinning them on the vitest process closes the last leg of the
+    // defense-in-depth triangle without touching production defaults.
+    // These are test-only flags — the safety spec REQUIRES DRY_RUN=
+    // true and ORDER_SUBMISSION_ENABLED=false in every native run
+    // regardless.
+    env: {
+      DRY_RUN: 'true',
+      ORDER_SUBMISSION_ENABLED: 'false',
+    },
     // Playwright + Electron + real server bootstrap dominates the
     // wall-clock; individual assertions may still complete quickly.
     testTimeout: 240_000,
