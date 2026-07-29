@@ -1884,6 +1884,59 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
           recoveryVerified: false,
         },
       };
+      // Stage 3C-E.1.28 — CI-visible T39 diagnostic. Same shape as
+      // T42-DIAG. Prints observedDataState, matched screen tag,
+      // and a bounded, redacted DOM excerpt via process.stdout so
+      // the operator can see why the state is not `stale` without
+      // downloading an artifact. Redacts Bearer tokens, 32+-char
+      // hex, password=, token=, authorization=.
+      try {
+        const redact = (s: string): string => s
+          .replace(/Bearer [A-Za-z0-9._-]+/gi, 'Bearer <REDACTED>')
+          .replace(/[a-f0-9]{32,}/gi, '<HEX_REDACTED>')
+          .replace(/password[=:][^&\s"]+/gi, 'password=<REDACTED>')
+          .replace(/token[=:][^&\s"]+/gi, 'token=<REDACTED>')
+          .replace(/authorization[=:][^&\s"]+/gi, 'authorization=<REDACTED>');
+        // Find the reconciliation StateFrame's element and grab a
+        // bounded excerpt centered on it so we can see the full tag.
+        const idx = frame.search(/data-screen="reconciliation(?:\.[a-zA-Z_]+)?"/);
+        const excerpt = idx >= 0
+          ? frame.slice(Math.max(0, idx - 100), Math.min(frame.length, idx + 600))
+          : frame.slice(0, 700);
+        // Also probe the induction endpoint directly to confirm the
+        // server still reports it as active BEFORE our reconciliation
+        // fetch completed.
+        let inductionStateAtCheck = 'unknown';
+        try {
+          const s = await readInductionState(inductionClient);
+          inductionStateAtCheck = JSON.stringify(s).slice(0, 200);
+        } catch (e) { inductionStateAtCheck = `error:${String(e).slice(0, 60)}`; }
+        // Direct server probe: hit reconciliation.list via bootstrap
+        // token to see if listReconciliation itself returns stale.
+        let directTrpcState = 'unknown';
+        let directTrpcBodyPreview = '';
+        try {
+          const url = `${server!.baseUrl}/trpc/desktop.reconciliation.list?input=${encodeURIComponent(JSON.stringify({}))}`;
+          const r = await fetch(url, { headers: { 'x-horizon-bootstrap-token': server!.bootstrapToken } });
+          const body = await r.text();
+          directTrpcState = `http=${r.status}`;
+          directTrpcBodyPreview = redact(body).slice(0, 400);
+        } catch (e) { directTrpcState = `error:${String(e).slice(0, 60)}`; }
+        const ledger = {
+          test: 'T39',
+          expectedState: 'stale',
+          observedState,
+          observedReason,
+          forbiddenSeen: forbidden,
+          inductionStateAtCheck,
+          directTrpcState,
+          directTrpcBodyPreview,
+          frameExcerpt: redact(excerpt).slice(0, 700),
+        };
+        const banner = '===== T39-DIAG =====';
+        process.stdout.write(`${banner}\n${JSON.stringify(ledger, null, 2)}\n===== /T39-DIAG =====\n`);
+        try { writeFileSync(join(iso!.logsDir, 't39-diagnostic.json'), JSON.stringify(ledger, null, 2)); } catch { /* best-effort */ }
+      } catch { /* diagnostic best-effort */ }
     } finally {
       if (stale) { try { await clearInduction(inductionClient, stale); } catch { /* best-effort */ } }
       // Verify recovery: state must return to non-stale after clearing.
