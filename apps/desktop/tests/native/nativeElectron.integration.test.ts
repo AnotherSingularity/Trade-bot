@@ -2555,20 +2555,35 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
       },
     };
     try { writeFileSync(join(iso!.logsDir, 'safe-configuration-evidence.json'), JSON.stringify(reconstructedResults.safeConfigurationResult, null, 2)); } catch { /* best-effort */ }
-    // Stage 3C-E.1.34 — CI-visible T53 diagnostic. E.1.33 fixed the
-    // bridge key + envelope path but T53 still fails at
-    // t53_order_submission_not_disabled while dry_run passes — the
-    // AND-check for orderSubEnabled means one of the two sources
-    // must be reporting orderSubmissionEnabled=true. Print both
-    // sources' resolved fields so the operator can see which one is
-    // wrong without downloading the evidence artifact.
+    // Stage 3C-E.1.34/E.1.35 — CI-visible T53 diagnostic. E.1.33
+    // fixed the bridge key + envelope path but T53 still fails at
+    // t53_order_submission_not_disabled while dry_run passes. E.1.34
+    // showed hasEnvelope=false, so the bridge inner response is not
+    // the {ok,key,envelope} shape we expected; dump the whole
+    // sanitized body (bounded) so the operator can see what
+    // configuration.get actually resolved to.
     try {
+      // Snapshot the inner bridge response shape safely — only the
+      // outer body (envelope keys) is dumped, no raw payload text.
+      const innerBridgeResponse = bridgeBody as {
+        ok?: boolean; key?: string; envelope?: unknown; error?: unknown;
+      };
+      const bodyShape = {
+        ok: innerBridgeResponse.ok ?? null,
+        key: innerBridgeResponse.key ?? null,
+        hasEnvelope: !!innerBridgeResponse.envelope,
+        envelopeStatus: (innerBridgeResponse.envelope as { status?: string })?.status ?? null,
+        envelopeDataKeys: innerBridgeResponse.envelope
+          ? Object.keys((innerBridgeResponse.envelope as { data?: object }).data ?? {}).slice(0, 12)
+          : [],
+        errorCode: (innerBridgeResponse.error as { code?: string })?.code ?? null,
+      };
       const ledger = {
         test: 'T53',
         bridge: {
-          ok: bridgeRes.ok,
+          wrapperOk: bridgeRes.ok,
           err: (bridgeRes as { err?: string }).err ?? null,
-          hasEnvelope: !!(bridgeBody as { envelope?: unknown })?.envelope,
+          bodyShape,
           championView,
         },
         readinessSafe,
