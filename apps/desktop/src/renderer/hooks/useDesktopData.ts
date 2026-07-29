@@ -152,10 +152,17 @@ export function useDesktopData<K extends DesktopDataRequestKey>(
     void run();
   }, [run, authPhase]);
 
-  // Optional polling.
+  // Stage 3C-E.1.19 — default poll interval of 1500ms so screens
+  // pick up server-side state transitions (native induction
+  // activate/clear, session-revoke on the server, etc.) without
+  // requiring an operator re-navigation. Callers can still opt in
+  // to a shorter or longer cadence via opts.refreshMs, or opt out
+  // by passing 0. Poll only while authenticated so a locked/
+  // expired session does not keep hammering the server.
   useEffect(() => {
-    if (!opts.refreshMs || authPhase !== 'authenticated') return;
-    const timer = setInterval(() => { void run(); }, opts.refreshMs);
+    const effectiveMs = opts.refreshMs ?? 1_500;
+    if (effectiveMs <= 0 || authPhase !== 'authenticated') return;
+    const timer = setInterval(() => { void run(); }, effectiveMs);
     return () => clearInterval(timer);
   }, [run, opts.refreshMs, authPhase]);
 
