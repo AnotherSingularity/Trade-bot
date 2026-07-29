@@ -16,6 +16,8 @@
     "preflight:operational": "tsx scripts/run-operational-preflight.ts",
     "soak:daily-cycle": "tsx scripts/soak-daily-cycle.ts",
     "soak:launch": "tsx scripts/soak-launch.ts",
+    "release:audit": "tsx scripts/release-audit.ts",
+    "freeze:manifest": "tsx scripts/code-freeze-manifest.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:migrate": "tsx src/db/migrate.ts"

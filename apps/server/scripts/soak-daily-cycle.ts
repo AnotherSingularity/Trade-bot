@@ -154,11 +154,11 @@ function runDailyWorkload(anchor: SoakAnchor, dateUtc: string): OperationalValid
   h.observe('create_order_counter_observation', 'counters 0/0/0 at cycle start');
 
   // 13 report kinds × 3 formats = 39 report jobs.
+  // The canonical kinds match apps/server/src/reports/generators/generators.ts.
   const REPORT_KINDS = [
-    'safety_status', 'system_health', 'positions_snapshot', 'shadow_portfolio',
-    'decision_journal', 'decision_chain', 'reconciliation_actions',
-    'protection_status', 'cost_attribution', 'strategy_activity',
-    'observer_diagnostics', 'audit_events', 'configuration_snapshot',
+    'safety_status', 'system_manifest', 'incidents', 'cost_attribution',
+    'portfolio_risk', 'universe_and_hygiene', 'fingerprints', 'regimes',
+    'microstructure', 'context', 'validation', 'daily_shadow', 'decision_chain',
   ] as const;
   const FORMATS = ['json', 'csv', 'html'] as const;
   for (const kind of REPORT_KINDS) {
