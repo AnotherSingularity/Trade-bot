@@ -1854,6 +1854,21 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
     }, { u: ADMIN_USER, p: ADMIN_PASSWORD });
     if (!relogin.ok) throw new Error('t39_41_relogin_failed');
     const inductionClient: InductionClient = { baseUrl: server!.baseUrl, bootstrapToken: server!.bootstrapToken };
+    // Stage 3C-E.1.30 — T36 (lock test) leaves the hash at
+    // '#/ops/reconciliation' and the Reconciliation screen stays
+    // mounted through T37/T38. When T39 sets `window.location.hash`
+    // to the same '#/ops/reconciliation', the browser does NOT fire
+    // a `hashchange` event (spec: no event on same-hash assignment),
+    // so useDesktopData's E.1.20 refetch listener does not fire and
+    // the screen keeps whatever envelope it already had — a healthy
+    // one from the relogin-triggered useAuth authPhase transition.
+    // Force a remount by navigating away first so the subsequent
+    // navigate to '#/ops/reconciliation' inside T39 is a real
+    // mount that fires an initial fetch AFTER induction is active.
+    // T40/T41 already avoid this because they target different
+    // hashes (#/overview and #/research/universe).
+    await launch!.page.evaluate(() => { window.location.hash = '#/'; });
+    await new Promise((r) => setTimeout(r, 200));
     // ---------- T39 STALE (reconciliationStatus) ----------
     let stale: InductionActivation | null = null;
     try {
