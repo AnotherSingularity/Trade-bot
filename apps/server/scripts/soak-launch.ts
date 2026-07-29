@@ -88,7 +88,11 @@ function main(): void {
   }
 
   const commitSha = normalizeCommit(process.env.HORIZON_BUILD_COMMIT ?? process.env.GITHUB_SHA ?? '0'.repeat(40));
-  const startedAt = process.env.HORIZON_SOAK_START_UTC ?? new Date().toISOString();
+  // Env-var passthrough from workflow_dispatch inputs comes as an
+  // empty string when the operator omits the field; `??` alone
+  // treats that as "provided", so gate on non-empty.
+  const rawStart = process.env.HORIZON_SOAK_START_UTC;
+  const startedAt = rawStart && rawStart.trim().length > 0 ? rawStart.trim() : new Date().toISOString();
   const startedDate = new Date(startedAt);
   if (Number.isNaN(startedDate.getTime())) fail('start_iso_invalid', startedAt);
   const expectedEndAt = new Date(startedDate.getTime() + DEFAULT_SOAK_DAY_COUNT * 86_400_000).toISOString();
