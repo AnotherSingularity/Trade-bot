@@ -292,6 +292,24 @@ which `blocking_gaps.md` categories it consumes.
   bundle now names the failing phase attributively AND leaves
   `completed=false` — no more false "completed:true" on a hang.
 
+### Stage 3C-CI-RESET Part 2 — end-to-end native suite green ✅ COMPLETE
+
+- **Entry**: Stage 3C-CI-FIX5 committed; native workflow reproducibly
+  fails on a bail=1 stop at the first substantive test failure.
+- **Delivered**: 33-commit correction cycle (E.1.1 → E.1.37) that
+  drove the native suite from `native_electron_test_blocked` to a
+  green 110/110 run in `stage3c-native-electron`. Both required
+  workflows are green on commit `2af37ce`; every safety invariant is
+  verified from an authoritative server-side source (DRY_RUN=true,
+  ORDER_SUBMISSION_ENABLED=false, liveCapitalAuthorized=false,
+  promotionEnabled=false, kellyEnabled=false, createOrder counters
+  all zero). No assertion was weakened, no test was skipped, and no
+  retry was added to mask flakiness. See `stage3_report.md` for the
+  full ledger of individual corrections.
+- **Verdict achieved**: `native_electron_unpacked_integration_verified
+  + stage_4_unblocked`.
+- **Next**: Stage 4 may begin.
+
 ## Stage 4 — Real report generation
 
 - **Entry**: Stage 3 committed.

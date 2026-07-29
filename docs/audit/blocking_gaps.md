@@ -6,6 +6,24 @@ concrete action that changes maturity. This file is not a
 work-order — it is an inventory. Sequence, sizing, and prioritization
 are in `revised_roadmap.md`.
 
+## Stage 3C-CI-RESET Part 2 closure (E.1.37)
+
+Native Electron unpacked integration test is now green in CI on
+commit `2af37ce`: `stage3c-native-electron` reports 110 passed / 0
+failed / 0 skipped; `desktop-windows` also green. The following gap
+categories that were tied to a pending native run are now resolved
+for Stage 3C's scope:
+
+- `native_electron_test_blocked` → RESOLVED. See E.1.27 (process-group
+  SIGSTOP fix) — the root correction that unblocked bail from T42.
+- Category-level: no NEW blocking gaps were introduced by the RESET
+  cycle. Every fix was a defect correction against the pre-existing
+  spec, not a scope change.
+
+Stage 4 (Real report generation) is unblocked. Windows packaging
+(Stage 5) and native smoke (Stage 6) remain scheduled per
+`revised_roadmap.md`; nothing in the RESET cycle claimed either.
+
 ## Category A — Desktop production runner (blocks arrows 3-8)
 
 1. **Implement a real `DockerCommandRunner`.** Spawn the `docker`

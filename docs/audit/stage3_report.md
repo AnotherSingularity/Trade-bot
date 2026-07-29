@@ -5,6 +5,93 @@ real unpackaged Electron main against a live Horizon server + real
 MariaDB + real Redis and verify the complete runtime boundary for
 authentication + all 19 bound screens.
 
+## Verdict (as of Stage 3C-E.1.37 — native suite green in CI)
+
+```
+stage3c_native_harness_implemented
+stage3c_native_harness_completeness_hardened
+native_electron_unpacked_integration_verified   ← CLAIMED (commit 2af37ce)
+all_19_screens_bound_verified
+authenticated_desktop_data_integration_verified
+create_order_counters_zero_verified
+safe_configuration_verified
+provider_status_verified
+coinbase_credentials_absent_verified
+sigstop_recovery_verified
+native_induction_stale_degraded_unavailable_verified
+contract_mismatch_state_verified
+report_generation_pending
+managed_docker_runtime_verification_pending
+windows_packaging_pending
+operational_validation_not_started
+live_capital_prohibited
+stage_4_unblocked
+```
+
+Stage 3C-CI-RESET Part 2 (E.1.1 → E.1.37) drove the native suite from
+`native_electron_test_blocked` to a green 110/110 CI run on Ubuntu
+runners. Both required workflows are green on commit `2af37ce`:
+
+- `stage3c-native-electron` — all 21 steps success, native suite
+  110 passed / 0 failed / 0 skipped (run 30444729279).
+- `desktop-windows` — success (run 30444729217).
+
+The fixes were all defect corrections against the pre-existing spec —
+no assertion was weakened, no test was skipped, no retry was added to
+mask flakiness, and every safety invariant (DRY_RUN=true,
+ORDER_SUBMISSION_ENABLED=false, liveCapitalAuthorized=false,
+promotionEnabled=false, kellyEnabled=false, all three createOrder
+counters == 0) is verified from an authoritative server-side source.
+
+### Correction ledger (E.1.1 → E.1.37)
+
+Each entry is a single-commit, bounded correction. Full detail in
+`git log --grep 'Stage 3C-E.1'`.
+
+- E.1.6 costs.get schema drift (SELECT list realigned to real
+  forecast_vs_realized_attributions columns).
+- E.1.7 incidents.list schema drift + removed silent `.catch`.
+- E.1.8 Safety screen exposes `data-field` contract identifiers.
+- E.1.9 overview `anyDegraded` excludes probe-deferred `unknown`.
+- E.1.10 fingerprints.list schema drift.
+- E.1.11 25+ additional query realignments (global schema audit).
+- E.1.12 reports.get always healthy (catalog is a fixed literal).
+- E.1.13 useAuth pollMs 5s → 1s for reactive auth-loss.
+- E.1.14 AuthGate emits `data-state` marker for gate detection.
+- E.1.15/E.1.16 preload throws on auth-loss (both inner + outer paths).
+- E.1.17 spawnServer env carries HORIZON_NATIVE_DIAGNOSTICS +
+  HORIZON_SERVER_EXTERNAL so induction router mounts.
+- E.1.18 native-induction wired into tRPC query surface
+  (listReconciliation, listUniverse, getOverview).
+- E.1.19/E.1.20 useDesktopData default 1s poll + hashchange refetch.
+- E.1.22/E.1.23 scanner induction preserves payload; data-scanner-state
+  precedes state-frame so T40 regex captures the induced value.
+- E.1.24 desktopDataClient timeout 8s → 3s for T42 responsiveness.
+- E.1.25 error responses always update state (not superseded).
+- E.1.26 CI-visible T42 diagnostic (bisected SIGSTOP failure).
+- E.1.27 spawn server as `node <tsx-cli>` with `detached: true` so
+  SIGSTOP to the process group hits the actual HTTP server (T42
+  root cause: `npx tsx` built a `npx → sh → node → node` tree and
+  the signal targeted only the top wrapper).
+- E.1.28 CI-visible T39 diagnostic (probe induction + direct tRPC).
+- E.1.29 preload throws on unknown desktopData key (T45).
+- E.1.30 T39 forces remount via `#/` intermediate to defeat
+  same-hash race (T36's `#/ops/reconciliation` was still mounted so
+  T39's same-hash re-assignment didn't fire `hashchange`).
+- E.1.31 T46 targets a throwaway BrowserWindow so
+  `window-all-closed → app.quit()` doesn't kill the Electron main
+  mid-test and invalidate `launch.page`.
+- E.1.32 readCreateOrderCounters unwraps `body.values` envelope.
+- E.1.33 T53 uses `configuration.get` (real key) + correct envelope
+  path (`envelope.data.championConfigurationView`).
+- E.1.34/E.1.35 CI-visible T53 diagnostic bisected bridge failure.
+- E.1.36 T49 pins replacement server's port + bootstrap token so
+  DesktopDataClient's cached baseUrl / bootstrap env var still
+  resolve after the restart.
+- E.1.37 vitest.native.config.ts pins DRY_RUN=true +
+  ORDER_SUBMISSION_ENABLED=false on the harness process so T53's
+  defense-in-depth harnessAgrees check has authoritative values.
+
 ## Verdict (as of Stage 3C-ENV closure — commit pending)
 
 ```
