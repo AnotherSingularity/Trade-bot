@@ -20,9 +20,34 @@ for Stage 3C's scope:
   cycle. Every fix was a defect correction against the pre-existing
   spec, not a scope change.
 
-Stage 4 (Real report generation) is unblocked. Windows packaging
-(Stage 5) and native smoke (Stage 6) remain scheduled per
-`revised_roadmap.md`; nothing in the RESET cycle claimed either.
+Stage 4 (Real report generation) is CLOSED as of `de926c94`
+(native workflow 30463955631, windows workflow 30463955512, both
+green). Migration 0022 is shipped and additive; the four tRPC
+report procedures (enqueue/status/list/verify) execute end-to-end
+under real Electron + MariaDB + Redis in CI. See
+`docs/audit/stage4_report.md` for the closure record. Windows
+packaging smoke (Stage 5) and operational validation (Stage 5)
+remain scheduled per `revised_roadmap.md`; NOTHING in Stage 4
+claimed either.
+
+**Stage 4 slice-level status** (all green in CI on
+`de926c94`):
+
+- `stage4a_canonical_shared_contracts_ci_verified`
+- `stage4b_thirteen_generators_registry_ci_verified`
+- `stage4c_worker_db_enforced_idempotency_ci_verified`
+- `stage4d_trpc_procedures_ci_verified`
+- `stage4e_desktop_end_to_end_wire_up_ci_verified`
+- `stage4f_native_report_lifecycle_ci_verified`
+- `report_generation_complete`
+
+Remaining Stage-5-scoped pending verdicts:
+
+- `managed_docker_runtime_verification_pending`
+- `windows_operator_smoke_pending`
+- `operational_validation_not_started`
+- `live_capital_prohibited` (permanent — a shipping
+  characteristic, not a defect).
 
 ## Category A — Desktop production runner (blocks arrows 3-8)
 

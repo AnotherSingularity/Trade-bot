@@ -310,16 +310,21 @@ which `blocking_gaps.md` categories it consumes.
   + stage_4_unblocked`.
 - **Next**: Stage 4 may begin.
 
-## Stage 4 — Real report generation
+## Stage 4 — Real report generation (CLOSED on de926c94)
 
 - **Entry**: Stage 3 committed.
-- **Exit**:
-  - 13 per-kind report generators (Cat E 16)
-  - Redaction wrapper (Cat E 17)
-  - Reports screen binds to `exportReport` (Cat E 18)
-  - `desktop_export_jobs` + `desktop_export_artifacts` populated
+- **Exit** (all shipped + CI-verified on `de926c94`, native workflow
+  30463955631 + windows workflow 30463955512, both green):
+  - 13 per-kind report generators (Cat E 16) — `apps/server/src/reports/generators/generators.ts` + `REPORT_GENERATORS` registry (frozen), coverage + kind + specVersion + freeze verified by 5 unit tests
+  - Fail-closed redaction wrapper (Cat E 17) — 12 key suffixes + 5 value rules, 23 unit tests, planted-secret negative-space guardrail
+  - Reports screen binds to `desktop.reports.enqueue/status/list/verify` via `horizon.desktopData(...)` (Cat E 18) — 13 kinds × 3 formats × Generate + Verify buttons, every anchor carries `data-*` runtime attrs
+  - `desktop_export_jobs` + `desktop_export_artifacts` populated by the `enqueueAndRunExport` worker; idempotency enforced by the `UNIQUE(idempotencyKey)` constraint on migration 0022
+  - Fail-closed path validation (dual guard: main-process pre-check + server-side `validateOutputPath`) — 13 unit tests + native T59
+  - Native T56-T60 exercise the full stack end-to-end under real Electron + MariaDB + Redis in CI
 - **Consumes**: Category E.
-- **Verdict**: `desktop.reports: runtime_wired`.
+- **Verdict**: `report_generation_complete`; `desktop_reports_runtime_wired`; `all_13_report_generators_verified`; `deterministic_report_generation_verified`; `secure_report_export_verified`; `native_report_export_lifecycle_verified`.
+- **Closure record**: `docs/audit/stage4_report.md`.
+- **Next**: Stage 5 may begin under an explicit user-directed opening.
 
 ## Stage 5 — Windows packaging correction
 
