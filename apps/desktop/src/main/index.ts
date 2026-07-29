@@ -391,6 +391,16 @@ async function boot(): Promise<void> {
     api: apiClient,
     tokenStorage,
     clientVersion: 'stage2-desktop',
+    // Stage 4E — the operator session MUST carry an installationId so
+    // desktop.reports.enqueue can scope jobs by installation (Stage 4D
+    // security contract). HORIZON_INSTALLATION_ID lets a specific
+    // installation be pinned (native harness sets 1 to match the
+    // deterministic seed); production defaults to 1 for a fresh
+    // desktop install, which is the id of the installation row Stage 3
+    // provisioning creates. Without this the session's installationId
+    // is null and every reports.enqueue mutation gets rejected with
+    // installation_required by the operatorProcedure middleware.
+    installationId: Number(process.env.HORIZON_INSTALLATION_ID ?? 1),
   });
   // Fire-and-forget initialization; failures are captured in the
   // sanitized state and surfaced to the renderer via getState.
