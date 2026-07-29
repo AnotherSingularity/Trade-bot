@@ -518,10 +518,20 @@ export async function readCreateOrderCounters(server: ServerSpawn): Promise<{
     headers: { 'x-horizon-bootstrap-token': server.bootstrapToken },
   });
   if (!res.ok) throw new Error(`counters read failed: ${res.status}`);
+  // Stage 3C-E.1.32 — server response shape is
+  // `{known, source, values: {functionInvocations, attemptCount,
+  // networkCount}}` (routes/desktop.ts:37). Previously we typed the
+  // body as if the fields were at top-level, so every counter came
+  // back as `undefined` and T50-52 failed with
+  // `expected undefined to be +0`. This never surfaced before because
+  // bail=1 blocked the suite at T42 (E.1.27) / T45 (E.1.29) / T46
+  // (E.1.31) — T50-52 was the next latent defect once T46 unblocked.
   const body = await res.json() as {
-    functionInvocations: number; attemptCount: number; networkCount: number;
+    known: boolean;
+    source: string;
+    values: { functionInvocations: number; attemptCount: number; networkCount: number };
   };
-  return body;
+  return body.values;
 }
 
 // ---------------------------------------------------------------------------
