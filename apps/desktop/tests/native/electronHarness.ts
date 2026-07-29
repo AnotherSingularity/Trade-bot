@@ -168,7 +168,23 @@ export async function spawnServer(iso: NativeIsolation): Promise<ServerSpawn> {
   const port = await pickFreePort();
   const bootstrapToken = randomBytes(32).toString('hex');
   const logStream = { out: '' as string };
-  const proc = spawn('npx', ['tsx', 'src/index.ts'], {
+  // Stage 3C-E.1.27 — resolve tsx binary directly. Previously we
+  // spawned `npx tsx src/index.ts`, which builds a process tree of
+  // `npx → sh → node → node`. `process.kill(proc.pid, 'SIGSTOP')`
+  // stops only the top wrapper; the deepest node process (the
+  // actual server) keeps handling requests, so T42's suspension
+  // window fires while the socket is still fully responsive.
+  //
+  // Two-pronged fix:
+  //   1. `detached: true` gives the child its own process group so
+  //      signals can target the whole subtree via `-pgid`.
+  //   2. Resolve the tsx binary from node_modules/.bin so the
+  //      command is a single `node <tsx> src/index.ts` process
+  //      (tsx v4 exposes an ESM cli.mjs runnable by node directly).
+  //      There is no shell wrapper, no npm exec, and SIGSTOP to
+  //      the process group hits the actual HTTP server.
+  const tsxBin = join(REPO_ROOT, 'node_modules/tsx/dist/cli.mjs');
+  const proc = spawn(process.execPath, [tsxBin, 'src/index.ts'], {
     cwd: SERVER_CWD,
     env: {
       ...process.env,
@@ -195,6 +211,7 @@ export async function spawnServer(iso: NativeIsolation): Promise<ServerSpawn> {
       HORIZON_SERVER_EXTERNAL: 'true',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
   });
   // Always append to disk immediately so a crashing test can still be
   // diagnosed. The captured buffer is written on kill() as a
@@ -212,16 +229,29 @@ export async function spawnServer(iso: NativeIsolation): Promise<ServerSpawn> {
     if (debug) process.stderr.write('[srv-err] ' + String(d));
   });
 
+  // With `detached: true` the child leads its own process group whose
+  // PGID equals proc.pid. Sending signals to `-pid` targets every
+  // process in the group. We fall back to the direct proc.kill() if
+  // for some reason the group signal fails (permission, race with
+  // exit), so behaviour is at least as good as before.
+  const signalGroup = (signal: NodeJS.Signals): boolean => {
+    if (!proc.pid) return false;
+    try { process.kill(-proc.pid, signal); return true; } catch { return false; }
+  };
   const kill = async (): Promise<void> => {
     try {
       writeFileSync(join(iso.logsDir, 'server.log'), logStream.out);
     } catch { /* logs best-effort */ }
-    if (proc.exitCode == null) proc.kill('SIGTERM');
+    if (proc.exitCode == null) {
+      if (!signalGroup('SIGTERM')) { try { proc.kill('SIGTERM'); } catch { /* ignore */ } }
+    }
     const deadline = Date.now() + 8_000;
     while (Date.now() < deadline && proc.exitCode == null) {
       await new Promise((r) => setTimeout(r, 100));
     }
-    if (proc.exitCode == null) proc.kill('SIGKILL');
+    if (proc.exitCode == null) {
+      if (!signalGroup('SIGKILL')) { try { proc.kill('SIGKILL'); } catch { /* ignore */ } }
+    }
   };
 
   return {
@@ -231,8 +261,8 @@ export async function spawnServer(iso: NativeIsolation): Promise<ServerSpawn> {
     healthUrl: `http://127.0.0.1:${port}/api/system/readiness`,
     bootstrapToken,
     kill,
-    suspend: () => { if (proc.pid) try { process.kill(proc.pid, 'SIGSTOP'); } catch { /* ignore */ } },
-    resume: () => { if (proc.pid) try { process.kill(proc.pid, 'SIGCONT'); } catch { /* ignore */ } },
+    suspend: () => { if (!signalGroup('SIGSTOP')) { try { proc.kill('SIGSTOP'); } catch { /* ignore */ } } },
+    resume: () => { if (!signalGroup('SIGCONT')) { try { proc.kill('SIGCONT'); } catch { /* ignore */ } } },
   };
 }
 
