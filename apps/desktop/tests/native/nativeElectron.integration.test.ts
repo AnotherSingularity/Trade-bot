@@ -2509,16 +2509,22 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
   // authoritative safe configuration from the champion route.
   certIt('T53', 'safe configuration read from server:championConfiguration matches all five flags', async () => {
     const res = await fetch(`${server!.baseUrl}/api/desktop/champion-configuration`);
-    // Champion is operator-scoped — attempt with the harness's
-    // current session token via the desktop bridge instead.
+    // Stage 3C-E.1.33 — read the champion configuration view via the
+    // real `configuration.get` bridge key. The pre-fix code called
+    // `h.desktopData('champion.get')` — never a valid key in
+    // DESKTOP_DATA_KEYS — and then read `body.values.*` while a real
+    // envelope surfaces as `body.envelope.data.championConfigurationView.*`.
+    // The result was always `undefined`, so the bridge half of the
+    // orderSubmissionEnabled AND check was permanently false. The
+    // failure never surfaced before because bail=1 kept blocking the
+    // suite earlier; T50-52's E.1.32 fix let T53 run and expose it.
     const bridgeRes = await launch!.page.evaluate(async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const h = (window as any).horizon;
-      try { const r = await h.desktopData('champion.get'); return { ok: true, body: r }; }
+      try { const r = await h.desktopData('configuration.get'); return { ok: true, body: r }; }
       catch (e) { return { ok: false, err: String(e).slice(0, 240) }; }
     });
     const authoritySource: 'server:championConfiguration' | 'incomplete' = bridgeRes.ok ? 'server:championConfiguration' : 'incomplete';
-    // Body shape: {known, source, values: {championVersion, strategyVersion, dryRun, orderSubmissionEnabled}}.
     // Also read the server readiness safeFlags for defense-in-depth.
     const readinessRes = await fetch(`${server!.baseUrl}/api/system/readiness`, {
       headers: { 'x-horizon-bootstrap-token': server!.bootstrapToken },
@@ -2528,9 +2534,9 @@ describe.sequential('Stage 3C — native Electron unpacked integration', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bridgeBody = bridgeRes.ok ? ((bridgeRes as any).body ?? {}) : {};
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const dryRun = (bridgeBody as any)?.values?.dryRun === true || readinessSafe.DRY_RUN === true;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const orderSubEnabled = (bridgeBody as any)?.values?.orderSubmissionEnabled === false && readinessSafe.ORDER_SUBMISSION_ENABLED === false;
+    const championView = (bridgeBody as any)?.envelope?.data?.championConfigurationView ?? {};
+    const dryRun = championView.dryRun === true || readinessSafe.DRY_RUN === true;
+    const orderSubEnabled = championView.orderSubmissionEnabled === false && readinessSafe.ORDER_SUBMISSION_ENABLED === false;
     // Harness env consistency (supplemental only).
     const harnessAgrees = process.env.DRY_RUN === 'true' && process.env.ORDER_SUBMISSION_ENABLED === 'false';
     reconstructedResults = {
