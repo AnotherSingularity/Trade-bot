@@ -69,7 +69,16 @@ export type DesktopDataClientResult<K extends DesktopDataRequestKey> =
   | { ok: true; envelope: DesktopDataResponse<K> }
   | { ok: false; error: DesktopDataClientError };
 
-const DEFAULT_TIMEOUT_MS = 8_000;
+// Stage 3C-E.1.24 — reduced from 8s to 3s so the renderer
+// transitions to `api_failure` within the observation window
+// used by behavioural T42 (SIGSTOP → observe for 8s). Under a
+// suspended server the socket never responds; the AbortController
+// fires at DEFAULT_TIMEOUT_MS. With 8s and a 1s poll cadence,
+// the state could still be pending when the test snapshots the
+// DOM. 3s leaves headroom for poll + timeout + effect + render
+// well inside 8s. Real network latency under DRY_RUN is well
+// below 3s.
+const DEFAULT_TIMEOUT_MS = 3_000;
 
 export class DesktopDataClient {
   private readonly baseUrl: string;
