@@ -1,0 +1,125 @@
+name: operational-soak-daily
+
+# Stage 6 — Durable seven-day operational soak.
+#
+# Cron fires at 00:15 UTC every day. Each firing runs one day's
+# workload against the pinned anchor commit and appends a daily
+# result to `docs/soak/<runId>/day-<UTC>.json`. On day 7 (1-indexed)
+# the assembled manifest is validated by `validateSoakManifest`.
+#
+# The pinned commit is recorded in `SOAK_ANCHOR.json` at repo root.
+# `soak:launch` (via workflow_dispatch) creates the anchor. Any
+# subsequent commit that touches runtime code drifts the workflow's
+# checkout SHA from the anchor and INVALIDATES the soak — the daily
+# runner writes `finalVerdict='invalidated'` and exits non-zero.
+#
+# Safety: DRY_RUN, ORDER_SUBMISSION_ENABLED, liveCapitalAuthorized,
+# promotionEnabled, kellyEnabled are locked at literal(true|false)
+# in `SoakSafetyFlagsSchema`. Create Order counters are locked at
+# literal(0). No credential is loaded, no economic writer touched,
+# no real provider activated.
+#
+# The daily runner commits the per-day evidence and the running
+# manifest back to the branch so the seven-day trail is durable
+# without a persistent worker.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dateUtc:
+        description: 'UTC date to record (YYYY-MM-DD). Defaults to today.'
+        required: false
+        type: string
+  schedule:
+    # 00:15 UTC daily — 15-minute buffer avoids the top-of-hour cron
+    # spike so the runner picks up promptly.
+    - cron: '15 0 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  daily-cycle:
+    name: Soak day cycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: hashFiles('SOAK_ANCHOR.json') != ''
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Typecheck (shared)
+        working-directory: packages/shared
+        run: npx tsc --noEmit
+
+      - name: Typecheck (server)
+        working-directory: apps/server
+        run: npx tsc --noEmit
+
+      - name: Print anchor snapshot
+        run: cat SOAK_ANCHOR.json
+
+      - name: Run daily soak cycle
+        id: cycle
+        working-directory: apps/server
+        env:
+          HORIZON_BUILD_COMMIT: ${{ github.sha }}
+          HORIZON_SOAK_DATE: ${{ inputs.dateUtc }}
+        run: |
+          set -euo pipefail
+          npm run soak:daily-cycle 2>&1 | tee /tmp/soak-cycle.log
+          # Extract the GitHub-summary block from the runner's output
+          # into the workflow summary.
+          if grep -q '^---GITHUB_STEP_SUMMARY---' /tmp/soak-cycle.log; then
+            sed -n '/^---GITHUB_STEP_SUMMARY---/,$p' /tmp/soak-cycle.log \
+              | tail -n +2 >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Commit daily evidence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "Claude"
+          git config user.email "noreply@anthropic.com"
+          git add -A SOAK_ANCHOR.json docs/soak/ || true
+          if git diff --cached --quiet; then
+            echo "no evidence to commit"
+            exit 0
+          fi
+          DATE=$(date -u +%Y-%m-%d)
+          RUN_ID="${GITHUB_RUN_ID}"
+          git commit -m "Soak day cycle ${DATE} — run ${RUN_ID}" || true
+          # Retry-on-race for the branch push (another workflow could
+          # have pushed between our checkout and now).
+          for i in 1 2 3 4; do
+            if git push origin HEAD:"${GITHUB_REF_NAME}"; then
+              exit 0
+            fi
+            sleep $((2 ** i))
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+          done
+          echo "push failed after retries" >&2
+          exit 1
+
+      - name: Upload daily evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-day-${{ github.run_id }}
+          path: |
+            docs/soak/**
+            SOAK_ANCHOR.json
+          if-no-files-found: warn
+          retention-days: 90

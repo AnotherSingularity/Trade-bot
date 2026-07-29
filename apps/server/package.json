@@ -14,6 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "preflight:operational": "tsx scripts/run-operational-preflight.ts",
+    "soak:daily-cycle": "tsx scripts/soak-daily-cycle.ts",
+    "soak:launch": "tsx scripts/soak-launch.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:migrate": "tsx src/db/migrate.ts"

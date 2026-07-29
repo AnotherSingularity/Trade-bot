@@ -1,0 +1,105 @@
+name: operational-soak-launch
+
+# Stage 6 §launch — Create SOAK_ANCHOR.json for a new seven-day soak.
+#
+# Manual-only. Refuses to run if SOAK_ANCHOR.json already exists
+# with an in-progress verdict.
+#
+# After a successful launch the daily cron (`operational-soak-daily.yml`)
+# takes over at 00:15 UTC each day. Day-0 can also be forced via
+# workflow_dispatch on that daily workflow with `dateUtc` = today.
+
+on:
+  workflow_dispatch:
+    inputs:
+      startedAt:
+        description: 'UTC start timestamp (ISO-8601). Defaults to now.'
+        required: false
+        type: string
+      runtimeMode:
+        description: 'Runtime mode for the soak.'
+        required: false
+        default: 'managed_docker'
+        type: choice
+        options:
+          - managed_docker
+          - packaged_managed_docker
+          - external_test_server
+
+permissions:
+  contents: write
+
+jobs:
+  launch:
+    name: Launch operational soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Typecheck (server)
+        working-directory: apps/server
+        run: npx tsc --noEmit
+
+      - name: Refuse if a soak is already in progress
+        run: |
+          if [ -f SOAK_ANCHOR.json ]; then
+            verdict=$(node -e "console.log(JSON.parse(require('fs').readFileSync('SOAK_ANCHOR.json','utf8')).finalVerdict)")
+            if [ "$verdict" = "in_progress" ]; then
+              echo "SOAK_ANCHOR.json already tracks an in-progress soak (${verdict}); refusing to overwrite." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Create SOAK_ANCHOR.json
+        working-directory: apps/server
+        env:
+          HORIZON_BUILD_COMMIT: ${{ github.sha }}
+          HORIZON_SOAK_START_UTC: ${{ inputs.startedAt }}
+          HORIZON_SOAK_RUNTIME_MODE: ${{ inputs.runtimeMode }}
+        run: npm run soak:launch
+
+      - name: Commit anchor
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "Claude"
+          git config user.email "noreply@anthropic.com"
+          git add SOAK_ANCHOR.json
+          if git diff --cached --quiet; then
+            echo "no anchor changes to commit" >&2
+            exit 1
+          fi
+          soakId=$(node -e "console.log(JSON.parse(require('fs').readFileSync('SOAK_ANCHOR.json','utf8')).soakId)")
+          git commit -m "Soak launched: ${soakId}"
+          for i in 1 2 3 4; do
+            if git push origin HEAD:"${GITHUB_REF_NAME}"; then
+              exit 0
+            fi
+            sleep $((2 ** i))
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+          done
+          echo "push failed after retries" >&2
+          exit 1
+
+      - name: Upload anchor artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-anchor-${{ github.run_id }}
+          path: SOAK_ANCHOR.json
+          if-no-files-found: warn
+          retention-days: 90
