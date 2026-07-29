@@ -107,8 +107,17 @@ export function useDesktopData<K extends DesktopDataRequestKey>(
     try {
       try {
         const res = await api(key, input);
-        if (myReq !== activeReqRef.current) return; // superseded
+        // Stage 3C-E.1.25 — the supersede guard only drops SUCCESS
+        // responses (a newer request may already have replaced the
+        // payload). ERROR responses always update state so a poll
+        // whose successor is still in-flight can still transition
+        // the UI to `api_failure` / `unavailable` — otherwise, with
+        // 1s poll and 3s timeout, every request is superseded by
+        // its successor before it can complete, and a suspended
+        // server never causes the DOM to leave the last healthy
+        // snapshot (behavioural T42).
         if (res.ok) {
+          if (myReq !== activeReqRef.current) return; // stale success — a newer fetch may have already updated
           setEnvelope(res.envelope);
           setError(null);
           setState(envelopeStatusToScreenState(res.envelope));
@@ -120,13 +129,14 @@ export function useDesktopData<K extends DesktopDataRequestKey>(
       } catch (thrown) {
         // Stage 3C-E.1.15 — the preload rejects on auth-loss codes so
         // direct callers (behavioral tests) can distinguish a gate
-        // from a business error. Inside the hook the auth-loss effect
-        // has already superseded this request and set the correct
-        // screen state; a superseded request is a no-op. Surface any
-        // other throw as api_failure with a sanitized code.
-        if (myReq !== activeReqRef.current) return;
+        // from a business error. Auth-loss transitions are handled
+        // by the authPhase-loss effect above; other throws surface
+        // as api_failure so the operator sees a real failure marker.
         const message = thrown instanceof Error ? thrown.message : String(thrown);
         const code = message.split(':', 1)[0] || 'bridge_error';
+        // Skip auth-loss surfacing here — the authPhase-loss effect
+        // owns that state transition and will set it correctly.
+        if (code === 'unauthenticated' || code === 'session_expired' || code === 'session_revoked') return;
         setEnvelope(null);
         setError({ code, detail: message.slice(0, 200) });
         setState(errorCodeToScreenState(code));
