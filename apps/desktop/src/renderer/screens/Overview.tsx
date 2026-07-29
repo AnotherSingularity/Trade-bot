@@ -12,7 +12,20 @@ import { useDesktopData } from '../hooks/useDesktopData';
 export function OverviewScreen() {
   const { state, envelope, error, refresh } = useDesktopData('overview.get');
 
+  // Stage 3C-E.1.23 — expose the effective scanner state as a
+  // top-level data attribute BEFORE the StateFrame's own
+  // `data-screen`/`data-state` so behavioural T40 (which uses a
+  // regex alternation whose first-match wins) picks up the induced
+  // envelope status. When the envelope hasn't reached the payload
+  // yet (null / loading / auth-loss), fall back to the screen
+  // state itself.
+  const scannerStateAttr =
+    envelope?.status === 'degraded' || envelope?.status === 'stale' || envelope?.status === 'unavailable'
+      ? envelope.status
+      : envelope?.data?.scannerReadiness?.state ?? state;
+
   return (
+    <div data-scanner-state={scannerStateAttr}>
     <ScreenLayout
       title="Overview"
       subtitle="System-wide safety, health, and versioning at a glance."
@@ -120,5 +133,6 @@ export function OverviewScreen() {
         )}
       </StateFrame>
     </ScreenLayout>
+    </div>
   );
 }

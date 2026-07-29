@@ -41,8 +41,6 @@ export async function getOverview(opts: OverviewOptions = {}): Promise<OverviewE
     // emit derived attributes (e.g. `data-scanner-state`) from
     // the envelope.status.
     const induced = readActiveInductionFor('scannerReadiness');
-    // eslint-disable-next-line no-console
-    if (induced) console.log(`[getOverview] induction active: mode=${induced.mode}`);
     if (induced && induced.mode === 'contract_mismatch') {
       return { known: 'nope', shape: 'contract_mismatch_induced' } as unknown as OverviewEnvelope;
     }
