@@ -6,4 +6,6 @@ export * from './desktopContracts';
 export * from './operatorAuth';
 // Stage 3C-CI-RESET Part 2 §1: schema-aware desktop API route registry.
 export * from './desktopApiRoutes';
+// Stage 4 §S4.1: deterministic report contracts + canonical stringify.
+export * from './reports';
 export * from './nativeInduction';
