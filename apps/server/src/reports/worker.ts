@@ -86,15 +86,21 @@ export interface EnqueueResult {
   readonly sourceHighWaterMark: SourceHighWaterMark;
 }
 
-/** Sanitise an unknown error into a 200-char failure reason. */
+/**
+ * Sanitise an unknown error into a 200-char failure reason. Strips
+ * credential-shaped substrings before the string ever reaches
+ * `desktop_export_jobs.failureReason`. The `authorization` rule
+ * consumes an optional `Bearer` prefix + the following token as a
+ * single unit — otherwise the trailing token would survive because
+ * `\S+` matches only the FIRST non-space run.
+ */
 export function sanitizeError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err ?? 'unknown_error');
-  // Strip credential-shaped substrings before storing.
   const scrubbed = raw
+    .replace(/authorization[=:]\s*(?:Bearer\s+)?\S+/gi, 'authorization=<REDACTED>')
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]{16,}/gi, 'Bearer <REDACTED>')
     .replace(/password[=:]\s*\S+/gi, 'password=<REDACTED>')
-    .replace(/token[=:]\s*\S+/gi, 'token=<REDACTED>')
-    .replace(/authorization[=:]\s*\S+/gi, 'authorization=<REDACTED>');
+    .replace(/token[=:]\s*\S+/gi, 'token=<REDACTED>');
   return scrubbed.slice(0, 200);
 }
 
@@ -124,7 +130,15 @@ function extensionFor(format: ReportFormat): string {
  */
 export function makeFilename(kind: ReportKind, specVersion: string, contentDigest: string, format: ReportFormat): string {
   const short = contentDigest.slice(0, 16);
-  return `${kind}-${specVersion.replace(/[^a-z0-9._-]/gi, '_')}-${short}.${extensionFor(format)}`;
+  // Two-pass scrub: first collapse any run of dots to a single dot
+  // (kills `..` traversal even though `.` alone is a legal char in a
+  // filename), then swap anything outside `[a-z0-9._-]` for `_`.
+  // Defense-in-depth: specVersion comes from Object.freeze'd
+  // REPORT_SPEC_VERSIONS so a user cannot inject `..`, but the
+  // filename API is a real security boundary and must not rely on
+  // upstream honesty.
+  const cleanSpec = specVersion.replace(/\.{2,}/g, '.').replace(/[^a-z0-9._-]/gi, '_');
+  return `${kind}-${cleanSpec}-${short}.${extensionFor(format)}`;
 }
 
 /**
