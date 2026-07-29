@@ -1,0 +1,66 @@
+name: operational-validation-preflight
+
+# Stage 5 §preflight — operational-validation preflight.
+#
+# Establishes `operational_validation_preflight_verified` on a green
+# run. Runs the pure `runOperationalValidationPreflight()` harness
+# defined at apps/server/src/soak/operationalPreflight.ts and uploads
+# the machine-readable evidence JSON to a workflow artifact.
+#
+# The preflight verifies — before day 1 of the seven-day operational
+# soak can begin — that the harness, sanitizer, schema locks, and
+# manifest validator ALL still hold. Any regression causes an exit
+# code 1 from the runner and a red workflow.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/horizon-trade-bot-mcbcfo
+      - main
+
+jobs:
+  preflight:
+    name: Operational validation preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Typecheck (shared)
+        working-directory: packages/shared
+        run: npx tsc --noEmit
+
+      - name: Typecheck (server)
+        working-directory: apps/server
+        run: npx tsc --noEmit
+
+      - name: Run operational-validation preflight harness
+        working-directory: apps/server
+        env:
+          HORIZON_BUILD_COMMIT: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: npm run preflight:operational
+
+      - name: Run preflight unit tests
+        working-directory: apps/server
+        run: npx vitest run tests/stage5-operational-preflight.test.ts
+
+      - name: Upload preflight evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: operational-validation-preflight-${{ github.run_id }}
+          path: |
+            apps/server/reports/operational-preflight/*.json
+          if-no-files-found: warn
+          retention-days: 90

@@ -54,3 +54,4 @@ dump.rdb
 # per-run scratch directories (Electron userData, harness logs,
 # Chromium caches) — never committed.
 apps/desktop/tests/native/logs/
+apps/server/reports/operational-preflight/
