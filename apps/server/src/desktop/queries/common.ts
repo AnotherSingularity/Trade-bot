@@ -68,6 +68,10 @@ export function degraded<T>(data: T | null, reasonCode: string, extra?: Partial<
   return envelope<T>('degraded', data, { reasonCode, ...extra });
 }
 
+export function stale<T>(data: T | null, reasonCode: string, extra?: Partial<DesktopDataEnvelope<T>>): DesktopDataEnvelope<T> {
+  return envelope<T>('stale', data, { reasonCode, ...extra });
+}
+
 /**
  * Encode a numeric-only cursor. Stage 3 uses id-based cursors for lists
  * (positions, decisions, incidents, reconciliation). The renderer treats

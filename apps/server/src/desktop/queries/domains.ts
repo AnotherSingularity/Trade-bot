@@ -55,6 +55,7 @@ import {
 } from '@horizon/shared';
 import { db } from '../../db';
 import { httpCounters } from '../../lib/fetchBarrier';
+import { readActiveInductionFor } from '../../routes/nativeInduction';
 import {
   decodeCursor,
   degraded,
@@ -62,6 +63,7 @@ import {
   encodeCursor,
   healthy,
   nowIso,
+  stale,
   toDecimalStringNullable,
   toIsoNullable,
   unavailable,
@@ -107,6 +109,24 @@ const CHAMPION_UNIVERSE = new Set(['BTC-USD', 'ETH-USD', 'SOL-USD', 'AVAX-USD'])
 export async function listUniverse(input: UniverseListInput | undefined): Promise<UniverseListEnvelope> {
   const limit = Math.min(input?.limit ?? DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE);
   try {
+    // Stage 3C-E.1.18 — behavioural T41 induces the
+    // `observerPolicyVersions` route into unavailable/etc. The
+    // universe screen consumes universe.list; wire the induction
+    // check here so the induced state actually reaches the DOM.
+    const induced = readActiveInductionFor('observerPolicyVersions');
+    if (induced) {
+      const emptyPayload = { items: [] as UniverseRow[], nextCursor: null as string | null };
+      switch (induced.mode) {
+        case 'stale_response':
+          return stale(emptyPayload, 'authoritative_timestamp_expired_via_induction', { sourceVersion: 'universe.v1' });
+        case 'degraded_response':
+          return degraded(emptyPayload, 'observer_source_unavailable_via_induction', { sourceVersion: 'universe.v1' });
+        case 'unavailable_response':
+          return unavailable<{ items: UniverseRow[]; nextCursor: string | null }>('endpoint_unreachable_via_induction', { sourceVersion: 'universe.v1' });
+        case 'contract_mismatch':
+          return { known: 'nope', shape: 'contract_mismatch_induced' } as unknown as UniverseListEnvelope;
+      }
+    }
     return await withTimeout(async () => {
       const cursor = input?.cursor ? decodeCursor(input.cursor) : null;
       if (input?.cursor && cursor === null) {
@@ -1018,6 +1038,31 @@ export async function getProtection(): Promise<ProtectionEnvelope> {
 export async function listReconciliation(input: ReconciliationListInput | undefined): Promise<ReconciliationListEnvelope> {
   const limit = Math.min(input?.limit ?? DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE);
   try {
+    // Stage 3C-E.1.18 — behavioural T39-T41/T43 drive a native-only
+    // induction controller (nativeInduction.ts) that the operator
+    // uses to force stale/degraded/unavailable/contract-mismatch
+    // states on downstream screens without touching the underlying
+    // data. Existing REST endpoints already honour the induction
+    // (routes/desktop.ts); the tRPC queries the actual screens
+    // subscribe to did not. Wire the check here — active induction
+    // on `reconciliationStatus` shortcuts the tRPC surface with the
+    // equivalent envelope status.
+    const induced = readActiveInductionFor('reconciliationStatus');
+    if (induced) {
+      const emptyPayload = { items: [], nextCursor: null };
+      switch (induced.mode) {
+        case 'stale_response':
+          return stale(emptyPayload, 'authoritative_timestamp_expired_via_induction', { sourceVersion: 'reconciliation.v1' });
+        case 'degraded_response':
+          return degraded(emptyPayload, 'observer_source_unavailable_via_induction', { sourceVersion: 'reconciliation.v1' });
+        case 'unavailable_response':
+          return unavailable('endpoint_unreachable_via_induction', { sourceVersion: 'reconciliation.v1' });
+        case 'contract_mismatch':
+          // Intentionally schema-invalid so the client's typed
+          // contract-mismatch code path fires end-to-end.
+          return { known: 'nope', shape: 'contract_mismatch_induced' } as unknown as ReconciliationListEnvelope;
+      }
+    }
     return await withTimeout(async () => {
       const cursor = input?.cursor ? decodeCursor(input.cursor) : null;
       if (input?.cursor && cursor === null) {

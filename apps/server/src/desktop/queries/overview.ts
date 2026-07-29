@@ -10,7 +10,8 @@ import { STRATEGY_VERSION, type OverviewPayload, type OverviewEnvelope } from '@
 import { db } from '../../db';
 import { ENV } from '../../env';
 import { httpCounters } from '../../lib/fetchBarrier';
-import { degraded, healthy, nowIso, toDecimalStringNullable, toIsoNullable, unavailable, withTimeout } from './common';
+import { readActiveInductionFor } from '../../routes/nativeInduction';
+import { degraded, healthy, nowIso, stale, toDecimalStringNullable, toIsoNullable, unavailable, withTimeout } from './common';
 
 export const OVERVIEW_SOURCE_VERSION = 'overview.v1' as const;
 
@@ -31,6 +32,26 @@ export interface OverviewOptions {
 
 export async function getOverview(opts: OverviewOptions = {}): Promise<OverviewEnvelope> {
   try {
+    // Stage 3C-E.1.18 — behavioural T40 induces the
+    // `scannerReadiness` route into degraded/etc. Overview reads
+    // scannerReadiness internally rather than fetching /scanner-
+    // readiness, so the induction is honoured here so the induced
+    // state actually reaches the DOM. The overall envelope is
+    // downgraded to the induced status; the reader-visible payload
+    // may be null (unavailable) or the last-known snapshot.
+    const induced = readActiveInductionFor('scannerReadiness');
+    if (induced) {
+      switch (induced.mode) {
+        case 'stale_response':
+          return stale<OverviewPayload>(null, 'authoritative_timestamp_expired_via_induction', { sourceVersion: OVERVIEW_SOURCE_VERSION });
+        case 'degraded_response':
+          return degraded<OverviewPayload>(null, 'observer_source_unavailable_via_induction', { sourceVersion: OVERVIEW_SOURCE_VERSION });
+        case 'unavailable_response':
+          return unavailable<OverviewPayload>('endpoint_unreachable_via_induction', { sourceVersion: OVERVIEW_SOURCE_VERSION });
+        case 'contract_mismatch':
+          return { known: 'nope', shape: 'contract_mismatch_induced' } as unknown as OverviewEnvelope;
+      }
+    }
     return await withTimeout(async () => {
       const [openPositions, unresolvedActions, reconciliationStatus, lastReconRunAt, migrationCount] =
         await Promise.all([
