@@ -1,5 +1,18 @@
 # Revised roadmap
 
+> **2026-07-30 UPDATE — Full-scope correction order in effect.** The
+> Stage 5 and Stage 6 closure claims previously recorded in this
+> roadmap are withdrawn. Two prior soaks (`soak-795d01e2e307` and
+> `soak-eaf4429f6901`) are invalidated with preserved evidence. The
+> `soak-daily-cycle.ts` runner emitted synthetic OperationalValidationHarness
+> event labels rather than measuring executed operations; no real
+> managed Docker lifecycle, report worker, database/Redis fault, or
+> process/container cleanup was measured. Corrections 1-11 of the
+> full-scope order must complete under a real operational-cycle
+> runner before any genuine 7-day soak can start. See
+> `docs/audit/full_scope_correction_status.md` for the authoritative
+> current status block.
+
 Corrected sequence from the current scope-reconciliation baseline to
 genuine code freeze and (eventually) a certified live-capital
 canary. Each stage lists its entry criteria (what must already be

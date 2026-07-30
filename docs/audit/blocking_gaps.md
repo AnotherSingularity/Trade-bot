@@ -1,5 +1,22 @@
 # Blocking gaps
 
+> **2026-07-30 — Full-scope correction order gaps added.** In
+> addition to the historical gaps below, the following are open
+> per the full-scope correction order (see
+> `docs/audit/full_scope_correction_status.md`):
+>
+> - **CO1** — Wire `resolveRuntimeMode` + `ManagedDockerOrchestrator` into `apps/desktop/src/main/index.ts` as the real 23-step startup path.
+> - **CO2** — Secure managed Docker contract: generated per-installation DB secrets, pinned MariaDB 10.11.6 + Redis 7.4 image digests, session-owned resources with ownership labels, no literal `password` root credential.
+> - **CO3** — Package server bundle, migrations, fingerprint, compose file, runtime manifest, report-spec registry, per-file checksums into the installer via electron-builder `extraResources`.
+> - **CO4** — Secret scan must inspect `app.asar` contents, not skip it.
+> - **CO5** — Real managed-runtime end-to-end integration test in CI with real Docker daemon (36 mandatory assertions).
+> - **CO6** — Real Windows installed-package smoke on Windows CI. **External infra provisioning may be required** if hosted-windows cannot supply Docker Desktop/WSL2.
+> - **CO7** — Replace synthetic `soak-daily-cycle.ts` with a real operational-cycle runner.
+> - **CO8** — Append-only evidence architecture: separate branch or object storage, detached-HEAD checkout at certified SHA.
+> - **CO9** — Strengthen `SoakManifestSchema` to independently prove 168 real elapsed hours from 7 distinct workflow executions.
+> - **CO10** — Real operational-validation preflight covering the full lifecycle once.
+> - **CO11** — Full correction audit + roadmap closure.
+
 The minimum work to move the desktop/server system from its current
 state toward `runtime_wired`. Each gap identifies the smallest
 concrete action that changes maturity. This file is not a

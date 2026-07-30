@@ -1,6 +1,32 @@
 # Stages 6 through 14 — Repository closure report
 
-**Status.** Stages 6-14 REPOSITORY-SIDE work is complete. The only remaining gates are the genuine external boundaries the roadmap directive named:
+> **STATUS SUPERSEDED 2026-07-30T12:30:00Z.** The closure claims below
+> are withdrawn per the full-scope correction order. See
+> `docs/audit/full_scope_correction_status.md` for the authoritative
+> current status.
+>
+> Rejected claims:
+> - `managed_docker_runtime_verified`
+> - `windows_installer_ci_smoke_verified`
+> - `stage6_operational_soak_in_progress`
+> - `stage6_operational_soak_valid`
+> - `integrated_release_audit_verified`
+> - `release_candidate_frozen`
+> - `non_capital_roadmap_repository_complete`
+>
+> Two prior soaks are invalidated with preserved evidence:
+> `soak-795d01e2e307` (workflow structurally invalid at anchor);
+> `soak-eaf4429f6901` (synthetic harness, no real operations
+> measured). The `soak-daily-cycle.ts` runner emitted event labels,
+> not measurements. A genuine soak requires Corrections 1-11 of the
+> full-scope order to complete first.
+>
+> The historical claims below are RETAINED for audit lineage but
+> must be read against the withdrawal notice above.
+
+---
+
+**Historical closure claim (2026-07-29, superseded).** Stages 6-14 REPOSITORY-SIDE work is complete. The only remaining gates are the genuine external boundaries the roadmap directive named:
 - **Stage 6** — the seven-day wall clock (durable soak runner is shipped + launcher workflow is available; the operator must trigger `operational-soak-launch` via workflow_dispatch to start the seven UTC calendar days).
 - **Stages 9-11** — private Coinbase read-only credentials (preflight harness is shipped; credentials never enter the repository or CI).
 - **Stage 14** — explicit live-capital authorization + separate risk-owner sign-off (plan + abort matrix + evidence template are shipped; execution never happens automatically).

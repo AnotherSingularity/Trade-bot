@@ -5,7 +5,7 @@
   "startedAt": "2026-07-30T12:10:47.239Z",
   "expectedEndAt": "2026-08-06T12:10:47.239Z",
   "finalizationEligibleAt": "2026-08-06T12:10:47.239Z",
-  "finalVerdict": "in_progress",
+  "finalVerdict": "invalidated",
   "installationIdHash": "ci-soak-e10cf202",
   "migrationHead": "0022",
   "migrationChainDigest": "a8faa7e7b03c1c3c9176265b38cc0716bb8355407842a34a7d543027035bc8db",
@@ -24,5 +24,7 @@
     "daily_shadow": "daily_shadow.v1",
     "decision_chain": "decision_chain.v1"
   },
-  "runtimeMode": "managed_docker"
+  "runtimeMode": "managed_docker",
+  "invalidatedReason": "full_scope_correction_order_2026-07-30: synthetic_harness_calendar_run. The soak-daily-cycle runner emitted OperationalValidationHarness event labels rather than observing executed operations. No real managed Docker lifecycle, no real report generation, no real database/Redis fault/recovery, no real process/container cleanup was measured. See docs/soak/soak-eaf4429f6901/INVALIDATED.md for the eight-point mechanical finding. Successor soak, if any, launches only after Corrections 1-11 of the full-scope order complete under a real operational-cycle runner.",
+  "invalidatedAt": "2026-07-30T12:30:00Z"
 }

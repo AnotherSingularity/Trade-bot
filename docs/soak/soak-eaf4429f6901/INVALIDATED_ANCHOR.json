@@ -1,0 +1,42 @@
+{
+  "soakId": "soak-eaf4429f6901",
+  "commitSha": "2c1ea63f65294172c9bec6d3a436030aff17bcdc",
+  "runtimeContentDigest": "24f2da3e7788adda8306716f5f1ef17ce5b5bf5a6eb54006552f570d755b8756",
+  "startedAt": "2026-07-30T12:10:47.239Z",
+  "expectedEndAt": "2026-08-06T12:10:47.239Z",
+  "finalizationEligibleAt": "2026-08-06T12:10:47.239Z",
+  "finalVerdict": "invalidated",
+  "installationIdHash": "ci-soak-e10cf202",
+  "migrationHead": "0022",
+  "migrationChainDigest": "a8faa7e7b03c1c3c9176265b38cc0716bb8355407842a34a7d543027035bc8db",
+  "reportSpecVersions": {
+    "safety_status": "safety_status.v1",
+    "system_manifest": "system_manifest.v1",
+    "incidents": "incidents.v1",
+    "cost_attribution": "cost_attribution.v1",
+    "portfolio_risk": "portfolio_risk.v1",
+    "universe_and_hygiene": "universe_and_hygiene.v1",
+    "fingerprints": "fingerprints.v1",
+    "regimes": "regimes.v1",
+    "microstructure": "microstructure.v1",
+    "context": "context.v1",
+    "validation": "validation.v1",
+    "daily_shadow": "daily_shadow.v1",
+    "decision_chain": "decision_chain.v1"
+  },
+  "runtimeMode": "managed_docker",
+  "classification": "synthetic_harness_calendar_run",
+  "notOperationalValidation": true,
+  "notRuntimeSoak": true,
+  "notReleaseEvidence": true,
+  "invalidatedReason": "Full-scope correction order 2026-07-30: The soak-daily-cycle runner emitted synthetic OperationalValidationHarness event labels instead of observing executed operations. No real managed Docker lifecycle, no real report generation or artifact verification, no real database/Redis disconnect or recovery, no real process/container cleanup was measured. Evidence could be backfilled or overwritten in place. The manifest did not independently prove 168 elapsed hours. Exact anchored source-tree execution was not enforced. This is a certification-model defect, not a minor harness defect. See INVALIDATED.md for full detail. Successor soak (if any) will be launched only after Corrections 1-11 complete under the corrected implementation.",
+  "invalidatedAt": "2026-07-30T12:30:00Z",
+  "preservedWorkflowRunIds": {
+    "launch": 30541406133,
+    "day0": 30541610293
+  },
+  "preservedEvidenceCommits": {
+    "anchor": "45b8259b6af8ef4213d546da90e48c9cffb05b31",
+    "day0": "0d6501ff5f156b9bbfd71aa656e8a9cd66aeebeb"
+  }
+}
