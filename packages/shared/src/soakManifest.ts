@@ -251,7 +251,13 @@ export type SoakValidationErrorCode =
   | 'invalidator_present_but_verdict_not_invalidated'
   | 'no_invalidator_but_verdict_invalidated'
   | 'code_change_not_reflected_in_verdict'
-  | 'incident_count_and_verdict_inconsistent';
+  | 'incident_count_and_verdict_inconsistent'
+  // Correction 9 — 168-hour temporal integrity.
+  | 'interval_below_168_hours'
+  | 'actual_end_before_expected_end'
+  | 'observation_before_start'
+  | 'observation_out_of_date_bounds'
+  | 'observation_after_actual_end';
 
 export interface SoakValidationOk {
   readonly ok: true;
@@ -335,6 +341,108 @@ export function validateSoakManifest(
       code: 'incident_count_and_verdict_inconsistent',
       detail: `${invalidatedDays} invalidated days but finalVerdict=passed`,
     };
+  }
+
+  // Correction 9 — 168-hour temporal integrity checks.
+  //
+  // Each of these guards is independent. A passing manifest must
+  // clear all four; a still-in-progress manifest is expected to fail
+  // (2) and (4) whenever finalization has not occurred yet, so we
+  // only enforce those when finalVerdict !== 'in_progress'.
+  const HOUR_MS = 3_600_000;
+  const startMs = new Date(m.startedAt).getTime();
+  const expectedEndMs = new Date(m.expectedEndAt).getTime();
+
+  // (1) Contract: the anchor's expectedEndAt must be at least
+  //     DEFAULT_SOAK_DAY_COUNT * 24 hours after startedAt.
+  //     Wrong-shaped anchors (a 3-day interval written into a 7-day
+  //     manifest) fail immediately.
+  const requiredIntervalMs = minDays * 24 * HOUR_MS;
+  if (expectedEndMs - startMs < requiredIntervalMs) {
+    return {
+      ok: false,
+      code: 'interval_below_168_hours',
+      detail: `expectedEndAt - startedAt = ${(expectedEndMs - startMs) / HOUR_MS}h, minimum ${minDays * 24}h`,
+    };
+  }
+
+  // (2) Contract: when the manifest is finalized (passed/invalidated),
+  //     actualEndAt must be present and ≥ expectedEndAt. This is the
+  //     independent wall-clock proof — a synthetic clock cannot set
+  //     actualEndAt < expectedEndAt without being rejected.
+  if (m.finalVerdict === 'passed' || m.finalVerdict === 'invalidated') {
+    if (m.actualEndAt === null) {
+      return {
+        ok: false,
+        code: 'actual_end_before_expected_end',
+        detail: `finalVerdict=${m.finalVerdict} requires actualEndAt`,
+      };
+    }
+    const actualEndMs = new Date(m.actualEndAt).getTime();
+    if (actualEndMs < expectedEndMs) {
+      return {
+        ok: false,
+        code: 'actual_end_before_expected_end',
+        detail: `actualEndAt=${m.actualEndAt} < expectedEndAt=${m.expectedEndAt}`,
+      };
+    }
+  }
+
+  // (3) Contract: no daily observation may have occurred before
+  //     startedAt. A stale replay or a backdated event is rejected.
+  for (const d of m.dayResults) {
+    const firstMs = new Date(d.firstObservationAt).getTime();
+    if (firstMs < startMs) {
+      return {
+        ok: false,
+        code: 'observation_before_start',
+        detail: `day ${d.dateUtc}: firstObservationAt=${d.firstObservationAt} precedes startedAt=${m.startedAt}`,
+      };
+    }
+  }
+
+  // (4) Contract: each day's observations must fall within its
+  //     recorded UTC date. A day-2026-08-01.json with observations
+  //     stamped 2026-08-03 would be rejected.
+  for (const d of m.dayResults) {
+    const dayStartMs = new Date(d.dateUtc + 'T00:00:00Z').getTime();
+    const dayEndMs = dayStartMs + 86_400_000;
+    const firstMs = new Date(d.firstObservationAt).getTime();
+    const lastMs = new Date(d.lastObservationAt).getTime();
+    // Allow the observation to start on the anchored date OR one day
+    // earlier (day-0 typically launches mid-day and has observations
+    // in the first UTC calendar day). We only enforce the ceiling.
+    if (lastMs >= dayEndMs) {
+      return {
+        ok: false,
+        code: 'observation_out_of_date_bounds',
+        detail: `day ${d.dateUtc}: lastObservationAt=${d.lastObservationAt} beyond ${new Date(dayEndMs).toISOString()}`,
+      };
+    }
+    if (firstMs > lastMs) {
+      return {
+        ok: false,
+        code: 'observation_out_of_date_bounds',
+        detail: `day ${d.dateUtc}: firstObservationAt=${d.firstObservationAt} > lastObservationAt=${d.lastObservationAt}`,
+      };
+    }
+  }
+
+  // (5) Contract: no daily observation may occur AFTER actualEndAt
+  //     (when finalized). A post-finalization event on a finalized
+  //     manifest is rejected.
+  if (m.actualEndAt !== null) {
+    const actualEndMs = new Date(m.actualEndAt).getTime();
+    for (const d of m.dayResults) {
+      const lastMs = new Date(d.lastObservationAt).getTime();
+      if (lastMs > actualEndMs) {
+        return {
+          ok: false,
+          code: 'observation_after_actual_end',
+          detail: `day ${d.dateUtc}: lastObservationAt=${d.lastObservationAt} > actualEndAt=${m.actualEndAt}`,
+        };
+      }
+    }
   }
 
   return { ok: true, manifest: m, invalidatingIncidents: invalidators };
