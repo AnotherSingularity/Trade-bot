@@ -37,12 +37,21 @@ interface SoakAnchor {
   runtimeContentDigest: string;
   startedAt: string;
   expectedEndAt: string;
+  /**
+   * Earliest UTC instant at which finalization may occur. Mirrors
+   * expectedEndAt so an auditor can read the guard explicitly.
+   * The daily runner refuses to transition finalVerdict out of
+   * `in_progress` until Date.now() >= finalizationEligibleAt.
+   */
+  finalizationEligibleAt: string;
   finalVerdict: 'in_progress' | 'passed' | 'invalidated' | 'no_run';
   installationIdHash: string;
   migrationHead: string;
   migrationChainDigest: string;
   reportSpecVersions: Record<string, string>;
   runtimeMode: 'managed_docker' | 'packaged_managed_docker' | 'external_test_server';
+  invalidatedReason?: string;
+  invalidatedAt?: string;
 }
 
 
@@ -108,6 +117,7 @@ function main(): void {
     runtimeContentDigest,
     startedAt,
     expectedEndAt,
+    finalizationEligibleAt: expectedEndAt,
     finalVerdict: 'in_progress',
     installationIdHash,
     migrationHead: head,

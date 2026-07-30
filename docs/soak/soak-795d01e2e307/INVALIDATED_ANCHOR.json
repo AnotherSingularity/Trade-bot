@@ -4,7 +4,6 @@
   "runtimeContentDigest": "96c660a995a070f9b387b2c246e9f242d684aa2fb8d259578ab0929a8de3424a",
   "startedAt": "2026-07-29T22:20:25.707Z",
   "expectedEndAt": "2026-08-05T22:20:25.707Z",
-  "finalizationEligibleAt": "2026-08-05T22:20:25.707Z",
   "finalVerdict": "invalidated",
   "installationIdHash": "ci-soak-cc062d87",
   "migrationHead": "0022",
@@ -25,6 +24,6 @@
     "decision_chain": "decision_chain.v1"
   },
   "runtimeMode": "managed_docker",
-  "invalidatedReason": "soak_integrity_audit_2026-07-30: anchored workflow was structurally invalid (hashFiles() at job-level if:); workflow fix at 034008b was required just to make cron cycles run; runtimeContentDigest excluded workflow YAML so drift was not auto-detected; wall-clock finalization guard was absent. See docs/soak/soak-795d01e2e307/INVALIDATED.md for full mechanical detail. Successor soak launched under corrected implementation.",
+  "invalidatedReason": "soak_integrity_audit_2026-07-30: (1) the .github/workflows/operational-soak-daily.yml at the anchored commit da1a819 used `hashFiles()` at a job-level `if:`, which GitHub Actions rejects (422). The anchored workflow was structurally incapable of running any cron cycle. The fix at 034008b (post-anchor) was required just to make the workflow executable, so day-0 ran on a workflow that differs from the anchored implementation. (2) runtimeContentDigest excluded workflow YAML, so the drift was not detected automatically. Both gaps are closed in the successor soak: the digest is expanded to cover the two soak-critical workflow files plus the three soak orchestration TS files, and a wall-clock finalization guard (finalizationEligibleAt = expectedEndAt) refuses finalization until Date.now() >= expectedEndAt.",
   "invalidatedAt": "2026-07-30T00:00:00Z"
 }

@@ -6,13 +6,22 @@
  * Kept in a distinct file so importing either script doesn't
  * trigger the other's `main()` side-effect.
  *
- * The digest covers exactly the files whose content defines
- * runtime behaviour: shared library sources, server sources,
- * desktop sources (main + preload + renderer), migrations, and
- * the three workspace `package.json` files + the root lockfile.
- * Docs, audit scripts, workflow YAML, and evidence files are
- * intentionally NOT covered — a docs commit during an ongoing
- * soak MUST NOT invalidate the seven-day interval.
+ * The digest covers every file whose content can change the
+ * behaviour observed by the seven-day soak:
+ *   - shared / server / desktop sources
+ *   - Drizzle migrations
+ *   - three workspace `package.json` files + root lockfile
+ *   - the two soak-critical GitHub Actions workflows
+ *     (`operational-soak-launch.yml` + `operational-soak-daily.yml`)
+ *   - the three soak orchestration TS files
+ *     (`soak-launch.ts` + `soak-daily-cycle.ts` + this file)
+ *
+ * Docs, audit scripts, evidence files, non-soak workflows,
+ * and any other file NOT in these patterns are intentionally
+ * excluded — a docs commit or an unrelated CI edit during an
+ * ongoing soak MUST NOT invalidate the seven-day interval.
+ * Anything that CAN change how the soak is observed or
+ * finalized WILL invalidate it via runtime-content-drift.
  */
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -28,6 +37,14 @@ export const RUNTIME_PATH_PATTERNS: readonly RegExp[] = [
   /^apps\/server\/package\.json$/,
   /^apps\/desktop\/package\.json$/,
   /^package-lock\.json$/,
+  // Soak-critical workflow + orchestration surface. A change to
+  // any of these files changes how the soak is observed or
+  // finalized, so must invalidate an in-flight anchor.
+  /^\.github\/workflows\/operational-soak-launch\.yml$/,
+  /^\.github\/workflows\/operational-soak-daily\.yml$/,
+  /^apps\/server\/scripts\/soak-launch\.ts$/,
+  /^apps\/server\/scripts\/soak-daily-cycle\.ts$/,
+  /^apps\/server\/scripts\/lib\/runtime-content-digest\.ts$/,
 ];
 
 function walkRepo(dir: string, base: string, acc: string[]): void {

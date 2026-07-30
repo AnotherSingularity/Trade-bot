@@ -86,6 +86,15 @@ interface SoakAnchor {
   runtimeContentDigest: string;
   startedAt: string;
   expectedEndAt: string;
+  /**
+   * Earliest UTC instant at which finalization may occur. Must
+   * equal expectedEndAt — a separate field is written so an
+   * external auditor can see the guard explicitly rather than
+   * inferring it. A cron cycle firing before this instant with
+   * all seven day-results in hand keeps `finalVerdict='in_progress'`
+   * and logs `awaiting_wall_clock`.
+   */
+  finalizationEligibleAt: string;
   finalVerdict: 'in_progress' | 'passed' | 'invalidated' | 'no_run';
   installationIdHash: string;
   migrationHead: string;
@@ -93,6 +102,7 @@ interface SoakAnchor {
   reportSpecVersions: Record<string, string>;
   runtimeMode: 'managed_docker' | 'packaged_managed_docker' | 'external_test_server';
   invalidatedReason?: string;
+  invalidatedAt?: string;
 }
 
 function log(msg: string): void {
@@ -211,14 +221,25 @@ function writeDayResult(runDir: string, dateUtc: string, result: SoakDailyResult
 function assembleAndValidateManifest(anchor: SoakAnchor, days: SoakDailyResult[]): {
   manifest: SoakManifest;
   result: ReturnType<typeof validateSoakManifest>;
+  wallClockElapsed: boolean;
 } {
   const anyInvalidator = days.some((d) => d.dayVerdict === 'invalidated');
+  const finalizationInstant = new Date(anchor.finalizationEligibleAt ?? anchor.expectedEndAt).getTime();
+  const wallClockElapsed = Date.now() >= finalizationInstant;
+  // Two independent conditions are required to leave `in_progress`:
+  //   (a) all DEFAULT_SOAK_DAY_COUNT day records present, AND
+  //   (b) the finalization instant has passed on the real UTC wall clock.
+  // Missing either → stay in_progress. A cron that fires with all seven
+  // days present but before finalizationEligibleAt records the daily
+  // observation (or a post-window no-op) and defers finalization.
   const verdict: SoakManifest['finalVerdict'] =
     days.length < DEFAULT_SOAK_DAY_COUNT
       ? 'in_progress'
-      : anyInvalidator
-        ? 'invalidated'
-        : 'passed';
+      : !wallClockElapsed
+        ? 'in_progress'
+        : anyInvalidator
+          ? 'invalidated'
+          : 'passed';
   const manifest: SoakManifest = {
     soakId: anchor.soakId,
     commitSha: anchor.commitSha,
@@ -240,7 +261,7 @@ function assembleAndValidateManifest(anchor: SoakAnchor, days: SoakDailyResult[]
   const shape = SoakManifestSchema.safeParse(manifest);
   if (!shape.success) fail('manifest_schema_invalid', shape.error.issues[0]?.message ?? '?');
   const validation = validateSoakManifest(manifest);
-  return { manifest, result: validation };
+  return { manifest, result: validation, wallClockElapsed };
 }
 
 function main(): void {
@@ -256,6 +277,7 @@ function main(): void {
     warn(`runtime_content_drift: anchor=${anchor.runtimeContentDigest.slice(0, 12)}... current=${currentDigest.slice(0, 12)}...`);
     anchor.finalVerdict = 'invalidated';
     anchor.invalidatedReason = `runtime_content_drift: ${anchor.runtimeContentDigest.slice(0, 12)} → ${currentDigest.slice(0, 12)}`;
+    anchor.invalidatedAt = new Date().toISOString();
     writeFileSync(anchorPath, JSON.stringify(anchor, null, 2), 'utf8');
     fail('runtime_content_drift', `soak invalidated. Runtime files changed since anchor was pinned.`);
   }
@@ -269,36 +291,50 @@ function main(): void {
   const dateUtc = process.env.HORIZON_SOAK_DATE ?? todayUtcDate();
   const dayIdx = dayIndexFrom(anchor, dateUtc);
   if (dayIdx < 0) fail('date_before_anchor', `dateUtc=${dateUtc} anchor.startedAt=${anchor.startedAt}`);
-  if (dayIdx >= DEFAULT_SOAK_DAY_COUNT) fail('date_after_expected_end', `dayIdx=${dayIdx} >= ${DEFAULT_SOAK_DAY_COUNT}`);
+  // Post-window cycles (dayIdx >= DEFAULT_SOAK_DAY_COUNT) do NOT
+  // record a new day-*.json. They exist solely so that the first
+  // cron firing after `finalizationEligibleAt` can transition the
+  // anchor from `in_progress` to `passed` or `invalidated`. This
+  // preserves the invariant that dayResults.length ≤ 7.
+  const inWindow = dayIdx < DEFAULT_SOAK_DAY_COUNT;
+  let day: SoakDailyResult | null = null;
+  if (inWindow) {
+    const existingPath = resolve(runDir, `day-${dateUtc}.json`);
+    if (existsSync(existingPath)) {
+      log(`day_already_recorded dateUtc=${dateUtc} path=${existingPath}`);
+      // Still fall through to manifest assembly in case a rerun is needed
+      // — reassembly is deterministic on the same day-*.json inputs.
+    }
 
-  const existingPath = resolve(runDir, `day-${dateUtc}.json`);
-  if (existsSync(existingPath)) {
-    log(`day_already_recorded dateUtc=${dateUtc} path=${existingPath}`);
-    // Still fall through to manifest assembly in case a rerun is needed
-    // — reassembly is deterministic on the same day-*.json inputs.
+    const harness = runDailyWorkload(anchor, dateUtc);
+    day = harness.buildDailyResult({
+      dateUtc,
+      safetyFlags: SAFE_FLAGS,
+      createOrderCounters: ZERO_COUNTERS,
+      providerState: FIXTURE_PROVIDERS,
+      credentialState: NO_CREDENTIALS,
+    });
+    const shape = SoakDailyResultSchema.safeParse(day);
+    if (!shape.success) fail('daily_schema_invalid', shape.error.issues[0]?.message ?? '?');
+
+    const dayPath = writeDayResult(runDir, dateUtc, day);
+    log(`day_written dateUtc=${dateUtc} verdict=${day.dayVerdict} path=${dayPath}`);
+  } else {
+    log(`post_window_cycle dateUtc=${dateUtc} dayIdx=${dayIdx} — no new day recorded, attempting finalization only`);
   }
-
-  const harness = runDailyWorkload(anchor, dateUtc);
-  const day = harness.buildDailyResult({
-    dateUtc,
-    safetyFlags: SAFE_FLAGS,
-    createOrderCounters: ZERO_COUNTERS,
-    providerState: FIXTURE_PROVIDERS,
-    credentialState: NO_CREDENTIALS,
-  });
-  const shape = SoakDailyResultSchema.safeParse(day);
-  if (!shape.success) fail('daily_schema_invalid', shape.error.issues[0]?.message ?? '?');
-
-  const dayPath = writeDayResult(runDir, dateUtc, day);
-  log(`day_written dateUtc=${dateUtc} verdict=${day.dayVerdict} path=${dayPath}`);
 
   // Assemble and validate the running manifest.
   const priorDays = loadPriorDayResults(runDir);
-  const { manifest, result } = assembleAndValidateManifest(anchor, priorDays);
+  const { manifest, result, wallClockElapsed } = assembleAndValidateManifest(anchor, priorDays);
   const manifestName = manifest.finalVerdict === 'in_progress' ? 'manifest.in-progress.json' : 'manifest.final.json';
   const manifestPath = resolve(runDir, manifestName);
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
   log(`manifest_written verdict=${manifest.finalVerdict} days=${manifest.dayResults.length}/${DEFAULT_SOAK_DAY_COUNT} path=${manifestPath}`);
+
+  const daysComplete = manifest.dayResults.length >= DEFAULT_SOAK_DAY_COUNT;
+  if (daysComplete && !wallClockElapsed) {
+    log(`awaiting_wall_clock finalizationEligibleAt=${anchor.finalizationEligibleAt ?? anchor.expectedEndAt} now=${new Date().toISOString()} — soak stays in_progress until wall clock elapses`);
+  }
 
   if (!result.ok) {
     if (manifest.finalVerdict === 'in_progress' && result.code === 'day_count_wrong') {
@@ -319,12 +355,18 @@ function main(): void {
 
   // GitHub Actions step-summary hint (workflow captures this to $GITHUB_STEP_SUMMARY).
   log('---GITHUB_STEP_SUMMARY---');
-  log(`### Soak day ${dayIdx + 1} of ${DEFAULT_SOAK_DAY_COUNT}`);
+  if (inWindow) {
+    log(`### Soak day ${dayIdx + 1} of ${DEFAULT_SOAK_DAY_COUNT}`);
+  } else {
+    log(`### Soak post-window cycle (dayIdx=${dayIdx})`);
+  }
   log(`- Soak: \`${anchor.soakId}\` @ ${anchor.commitSha.slice(0, 8)}`);
   log(`- Date: ${dateUtc}`);
-  log(`- Verdict this day: ${day.dayVerdict}`);
+  if (day) log(`- Verdict this day: ${day.dayVerdict}`);
   log(`- Running verdict: ${manifest.finalVerdict}`);
   log(`- Days recorded: ${manifest.dayResults.length}/${DEFAULT_SOAK_DAY_COUNT}`);
+  log(`- Finalization eligible at: ${anchor.finalizationEligibleAt ?? anchor.expectedEndAt}`);
+  log(`- Wall clock elapsed: ${wallClockElapsed}`);
 }
 
 main();
