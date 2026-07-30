@@ -71,6 +71,7 @@
       "tests/main/renderer_url_policy.test.ts",
       "tests/main/sandbox_policy.test.ts",
       "tests/main/runtime_mode_policy.test.ts",
+      "tests/main/runtime_mode_wiring.test.ts",
       "tests/main/managed_docker_orchestrator.test.ts",
       "tests/main/managed_docker_evidence.test.ts",
       "tests/main/suite_topology.test.ts",

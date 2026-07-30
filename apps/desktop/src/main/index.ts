@@ -23,6 +23,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { handleIpcCall, type IpcHostContext } from './ipc';
 import { ConsoleSink, Logger } from './logging';
 import { resolveDesktopEnvironment, resolveSandboxPolicy, validateDesktopEnvironment } from './localEnvironment';
+import { resolveRuntimeMode, type RuntimeModeDecision } from './runtimeModePolicy';
 import { resolveDesktopRuntimeLayout, sanitizePreloadPath } from './runtimeLayout';
 import { resolveRendererUrl } from './rendererUrlPolicy';
 import { resolveExternalServerMode } from './externalServerPolicy';
@@ -217,6 +218,42 @@ async function boot(): Promise<void> {
     app.exit(1);
     return;
   }
+
+  // Correction 1 — typed managed-runtime decision. This is the FIRST
+  // authoritative gate. Every downstream branch (adapter selection,
+  // supervisor construction, BrowserWindow creation) must be
+  // consistent with `runtimeDecision`. A rejection here refuses to
+  // open any window, disable any sandbox, or start any container —
+  // the caller must resolve the input combination before retrying.
+  const runtimeDecisionResult = resolveRuntimeMode({
+    packaged: app.isPackaged,
+    serverModeEnv: process.env.HORIZON_SERVER_MODE,
+    serverExternalEnv: process.env.HORIZON_SERVER_EXTERNAL,
+    developmentFakeEnv: process.env.HORIZON_DEVELOPMENT_FAKE,
+    nodeEnv: process.env.NODE_ENV,
+  });
+  if (!runtimeDecisionResult.ok) {
+    logger.error('runtime_mode_rejected', {
+      failureCode: runtimeDecisionResult.failureCode,
+      reason: runtimeDecisionResult.reason,
+      isPackaged: app.isPackaged,
+    });
+    dialog.showErrorBox(
+      'Horizon Trade cannot start',
+      `Runtime configuration rejected: ${runtimeDecisionResult.failureCode}\n\n${runtimeDecisionResult.reason}\n\nLive order submission is disabled by design.`,
+    );
+    app.exit(1);
+    return;
+  }
+  const runtimeDecision: RuntimeModeDecision = runtimeDecisionResult.decision;
+  logger.info('runtime_mode_resolved', {
+    mode: runtimeDecision.mode,
+    packaged: runtimeDecision.packaged,
+    ownsContainers: runtimeDecision.ownsContainers,
+    requiresDockerDaemon: runtimeDecision.requiresDockerDaemon,
+    certifiable: runtimeDecision.certifiable,
+    reason: runtimeDecision.reason,
+  });
 
   // Stage 1 §13: environment MUST be explicit. NODE_ENV drives it.
   const environment: Environment = (process.env.HORIZON_ENVIRONMENT as Environment | undefined)
