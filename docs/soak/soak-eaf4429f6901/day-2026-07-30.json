@@ -1,0 +1,53 @@
+{
+  "dateUtc": "2026-07-30",
+  "firstObservationAt": "2026-07-30T00:00:00.000Z",
+  "lastObservationAt": "2026-07-30T00:03:31.000Z",
+  "uptimeSeconds": 211,
+  "runtimeStarts": 1,
+  "runtimeStops": 1,
+  "serverRestarts": 1,
+  "containerRestarts": 1,
+  "databaseDisconnects": 1,
+  "databaseReconnects": 1,
+  "redisDisconnects": 1,
+  "redisReconnects": 1,
+  "reportJobsQueued": 39,
+  "reportJobsCompleted": 39,
+  "reportJobsFailed": 0,
+  "idempotencyHits": 1,
+  "duplicatePreventions": 1,
+  "artifactVerificationPasses": 39,
+  "artifactVerificationFailures": 0,
+  "redactionsApplied": 39,
+  "redactionFailures": 0,
+  "secretScanFailures": 0,
+  "pathRejections": 0,
+  "temporaryCleanupFailures": 0,
+  "orphanReconciliations": 0,
+  "processLeaks": 0,
+  "containerLeaks": 0,
+  "createOrderCounters": {
+    "functionInvocations": 0,
+    "attemptCount": 0,
+    "networkCount": 0
+  },
+  "safetyFlags": {
+    "DRY_RUN": true,
+    "ORDER_SUBMISSION_ENABLED": false,
+    "liveCapitalAuthorized": false,
+    "promotionEnabled": false,
+    "kellyEnabled": false
+  },
+  "providerState": {
+    "marketDataProvider": "fixture",
+    "exchangeProvider": "fixture",
+    "productionLevel2Active": false,
+    "orderCapableProviderActive": false
+  },
+  "credentialState": {
+    "coinbaseCredentialsLoaded": false,
+    "anthropicCredentialsLoaded": false,
+    "productionCredentialsDetected": false
+  },
+  "dayVerdict": "passed"
+}
