@@ -1,12 +1,12 @@
 {
-  "soakId": "soak-795d01e2e307",
-  "commitSha": "da1a81908a4c797cf117fb25f2f8d6a410ff9209",
-  "runtimeContentDigest": "96c660a995a070f9b387b2c246e9f242d684aa2fb8d259578ab0929a8de3424a",
-  "startedAt": "2026-07-29T22:20:25.707Z",
-  "expectedEndAt": "2026-08-05T22:20:25.707Z",
-  "finalizationEligibleAt": "2026-08-05T22:20:25.707Z",
-  "finalVerdict": "invalidated",
-  "installationIdHash": "ci-soak-cc062d87",
+  "soakId": "soak-eaf4429f6901",
+  "commitSha": "2c1ea63f65294172c9bec6d3a436030aff17bcdc",
+  "runtimeContentDigest": "24f2da3e7788adda8306716f5f1ef17ce5b5bf5a6eb54006552f570d755b8756",
+  "startedAt": "2026-07-30T12:10:47.239Z",
+  "expectedEndAt": "2026-08-06T12:10:47.239Z",
+  "finalizationEligibleAt": "2026-08-06T12:10:47.239Z",
+  "finalVerdict": "in_progress",
+  "installationIdHash": "ci-soak-e10cf202",
   "migrationHead": "0022",
   "migrationChainDigest": "a8faa7e7b03c1c3c9176265b38cc0716bb8355407842a34a7d543027035bc8db",
   "reportSpecVersions": {
@@ -24,7 +24,5 @@
     "daily_shadow": "daily_shadow.v1",
     "decision_chain": "decision_chain.v1"
   },
-  "runtimeMode": "managed_docker",
-  "invalidatedReason": "soak_integrity_audit_2026-07-30: anchored workflow was structurally invalid (hashFiles() at job-level if:); workflow fix at 034008b was required just to make cron cycles run; runtimeContentDigest excluded workflow YAML so drift was not auto-detected; wall-clock finalization guard was absent. See docs/soak/soak-795d01e2e307/INVALIDATED.md for full mechanical detail. Successor soak launched under corrected implementation.",
-  "invalidatedAt": "2026-07-30T00:00:00Z"
+  "runtimeMode": "managed_docker"
 }
